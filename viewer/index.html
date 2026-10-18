@@ -83,9 +83,12 @@ main{display:grid;grid-template-columns:56px 1fr 320px;min-height:0}
 .node.fade,.edge.fade{opacity:.18}
 .node:focus-visible .box{stroke:var(--accent);stroke-width:2}
 #stage>svg.old{pointer-events:none}
-#stage>svg.zin .node:not(.tgt),#stage>svg.zin .edge,#stage>svg.zin .scope{opacity:0;transition-duration:.3s}
+#stage.anim .node,#stage.anim .edge{transition:none}
+#stage>svg.mframe{pointer-events:none}
+#stage>svg.mframe rect{fill:var(--card)}
 .node.issue .box{stroke:var(--err);fill:color-mix(in srgb,var(--err) 14%,var(--card))}
 .node.issue.sel .box{stroke:var(--accent)}
+.node.hot .box{stroke:var(--hot);stroke-width:2.4}
 .node .bdg circle{fill:var(--err)}.node .bdg text{fill:#fff;font-weight:700;font-size:11px;text-anchor:middle}
 #q{width:150px;background:var(--bar);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font:inherit}
 #smsg{color:var(--warn);font-size:12px}
@@ -108,12 +111,14 @@ aside{background:var(--panel);border-left:1px solid var(--line);display:flex;fle
 .ptabs a{padding:10px 0;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
 .ptabs a.on{color:var(--ink);border-color:var(--accent)}
 .pbody{padding:14px 16px;overflow:auto;flex:1}
+.step{scroll-margin-top:140px}
+.fhead{position:sticky;top:-14px;z-index:2;margin:-14px -16px 8px;padding:14px 16px 2px;background:var(--panel);border-bottom:1px solid var(--line)}
 .lbl{color:var(--muted);font-size:11px;margin:12px 0 4px}
 .field{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 10px}
 .pbody h2{margin:0;font-size:16px}
 .chip{display:inline-block;font-size:11px;padding:1px 8px;border-radius:10px;background:var(--card2);color:var(--muted);margin:6px 4px 0 0}
 .pbody a{color:var(--accent)}.pbody code{font-size:12px;word-break:break-all}
-.stepnav{display:flex;align-items:center;justify-content:space-between;margin:12px 0}
+.stepnav{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:space-between;margin:12px 0}
 .stepnav button{border:0;background:none;color:var(--accent);font-weight:600}
 .stepnav button.nx{background:var(--accent);color:var(--bg);border-radius:6px}
 .stepnav span{color:var(--muted);font-size:12px}
@@ -123,10 +128,30 @@ aside{background:var(--panel);border-left:1px solid var(--line);display:flex;fle
 .step .n{grid-row:span 3;color:var(--muted);font-size:10px;line-height:1.1}.step .n b{display:block;font-size:16px;color:var(--ink)}
 .step .ft{display:grid;grid-template-columns:1fr 18px 1fr;gap:4px;font-weight:600}.step .ft i{color:var(--accent);font-style:normal}
 .step .via{color:var(--muted);font-size:12px}
+.step>*:not(.n){grid-column:2;min-width:0}.step .ft span{min-width:0;overflow-wrap:anywhere}
+.step .path{color:var(--faint);font-size:11px}.step .rv{color:var(--hot);font-size:11px;font-weight:600;margin-left:4px}
+.step pre{margin:2px 0 0;padding:4px 6px;background:var(--card2);border-radius:4px;white-space:pre-wrap;word-break:break-word;font:11px/1.4 ui-monospace,"Cascadia Code",Consolas,monospace}
+.step .sig{font:11px/1.4 ui-monospace,"Cascadia Code",Consolas,monospace;color:var(--muted);word-break:break-word}
+.stepnav label{display:flex;align-items:center;gap:4px;color:var(--muted);font-size:12px;cursor:pointer}
+.edge.hot.rev path:not(.hit){stroke-dasharray:7 5;animation:revdash 1s linear infinite}
+@keyframes revdash{to{stroke-dashoffset:24}}
+@media (prefers-reduced-motion:reduce){.edge.hot.rev path{animation:none}}
 .empty{color:var(--muted)}
-.embed{grid-template-rows:auto 1fr}
-.embed #top,.embed #tools,.embed aside,.embed #bottom,.embed #legend{display:none}
-.embed main{grid-template-columns:1fr}
+/* code-level nodes (file / function) and contract panel */
+.node.code .t{font:600 12px ui-monospace,"Cascadia Code",Consolas,monospace}
+.node.code .s{font:10.5px ui-monospace,"Cascadia Code",Consolas,monospace}
+.edge.pick{color:var(--accent)}.edge.pick path:not(.hit){stroke-width:2.4}.edge.pick text{fill:var(--ink)}
+.pbody pre,.mono{font:12px/1.45 ui-monospace,"Cascadia Code",Consolas,monospace}
+.pbody pre{margin:0;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 10px;white-space:pre-wrap;word-break:break-word}
+.chip.k{color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--card2))}
+.ifc{border:1px solid var(--line);border-radius:6px;padding:6px 10px;margin-bottom:6px;background:var(--bg)}
+.ifc .mono{color:var(--ink);word-break:break-word}.ifc div{margin-top:3px}.ifc .m{color:var(--muted);font-size:12px}
+.ifc .er{color:var(--err);font-size:12px}
+.clist div{padding:3px 0;cursor:pointer}.clist div:hover{color:var(--accent)}.clist .m{color:var(--muted);font-size:12px}
+.pbody ol,.pbody ul.r{margin:4px 0;padding-left:18px}
+.embed{grid-template-rows:1fr}
+.embed #top,.embed #sub,.embed #tools{display:none}
+.embed main{grid-template-columns:1fr 320px}
 .shell{grid-template-rows:auto 1fr}.shell #top{display:none}
 @media (max-width:760px){main{grid-template-columns:1fr;grid-template-rows:1fr 42vh}#tools{display:none}aside{border-left:0;border-top:1px solid var(--line)}}
 </style>
@@ -169,13 +194,16 @@ aside{background:var(--panel);border-left:1px solid var(--line);display:flex;fle
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const P=new URLSearchParams(location.search);
-let M=null, byId={}, focus=null, selected=null, flow=null, step=0, codeBase="/code/";
+let M=null, hotNode=null, byId={}, focus=null, selected=null, flow=null, step=0, codeBase="/code/";
 const codeQ=P.get("project")?"?project="+encodeURIComponent(P.get("project")):"";
 let cam={x:0,y:0,k:1}, graphBox=null, pos={};
 const ISSUE={dead_link:"Link chết",no_link:"Không có link",no_desc:"Thiếu mô tả"};
 const NW=240, NH=108;
-const TYPE_LABEL={actor:"Người dùng",system:"Hệ thống",app:"Ứng dụng",store:"Kho dữ liệu",component:"Thành phần",group:"Nhóm"};
-let scopeRect=null, curEdges=new Map(), tok=0, busy=false;
+const TYPE_LABEL={actor:"Người dùng",system:"Hệ thống",app:"Ứng dụng",store:"Kho dữ liệu",component:"Thành phần",group:"Nhóm",file:"File",function:"Hàm"};
+const CODE=new Set(["file","function"]), CW=210, CH=50;
+const isCode=o=>CODE.has(o?.type);
+const KIND={network:"network",call:"function call",queue:"queue"};
+let scopeRect=null, curEdges=new Map(), tok=0, busy=false, pickConn=null;
 const EMPTY='<p class="empty">Bấm một ô để xem chi tiết và làm nổi các kết nối của nó. Bấm đúp, Enter hoặc “… bên trong ›” để đi vào bên trong; bấm nền để bỏ chọn.</p>';
 // Small line icons per C4 type, drawn in a 20x20 box.
 const ICON={
@@ -184,7 +212,9 @@ const ICON={
   app:'<rect x="2" y="2" width="7" height="7" rx="1"/><rect x="11" y="2" width="7" height="7" rx="1"/><rect x="2" y="11" width="7" height="7" rx="1"/><rect x="11" y="11" width="7" height="7" rx="1"/>',
   store:'<ellipse cx="10" cy="4.5" rx="7" ry="2.5"/><path d="M3 4.5v11c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-11M3 10c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/>',
   component:'<path d="M10 2l7 4v8l-7 4-7-4V6z"/><path d="M3 6l7 4 7-4M10 10v8"/>',
-  group:'<rect x="2" y="2" width="16" height="16" rx="2" stroke-dasharray="3 2"/>'
+  group:'<rect x="2" y="2" width="16" height="16" rx="2" stroke-dasharray="3 2"/>',
+  file:'<path d="M5 2h7l4 4v12H5z"/><path d="M12 2v4h4"/>',
+  function:'<path d="M8 4c-3 0-2 6-5 6 3 0 2 6 5 6M12 4c3 0 2 6 5 6-3 0-2 6-5 6"/>'
 };
 
 function load(m){
@@ -232,13 +262,19 @@ function render(keepCam,keepOld){
   const g=new dagre.graphlib.Graph({compound:true});
   g.setGraph({rankdir:M.layout||"LR",nodesep:36,ranksep:90,marginx:40,marginy:40}); g.setDefaultEdgeLabel(()=>({}));
   if(focus) g.setNode("__scope",{});
-  nodes.forEach((n,id)=>{g.setNode(id,{width:NW,height:NH}); if(focus&&!n.ext) g.setParent(id,"__scope")});
+  nodes.forEach((n,id)=>{g.setNode(id,isCode(n.o)?{width:CW,height:CH}:{width:NW,height:NH}); if(focus&&!n.ext) g.setParent(id,"__scope")});
   edges.forEach(e=>g.setEdge(e.from,e.to,{width:Math.min(200,Math.max(label(e).length,tech(e).length)*6),height:30,labelpos:"c"}));
   dagre.layout(g);
   graphBox={w:g.graph().width,h:g.graph().height};
   curEdges=edges; scopeRect=null;
   pos={}; nodes.forEach((n,id)=>pos[id]=g.node(id));
   const tag=$("#tag").value, hot=flowHot();
+  // A step internal to one visible node (both ends lift to it) highlights that node instead of an edge.
+  hotNode=null; const cur=curStep(), rev=!!cur?.reverse;
+  if(cur?.at){const a=lift(cur.at,focus); if(a) hotNode=a.id}
+  for(const cid of hot.keys()){const c=M.connections.find(x=>x.id===cid); if(!c) continue;
+    const a=lift(c.from,focus), b=lift(c.to,focus); if(a&&b&&a.id===b.id) hotNode=a.id;
+    else if(a&&!b) hotNode=a.id; else if(b&&!a) hotNode=b.id;}
   let s=`<svg><defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 1L9 5L0 9z" fill="context-stroke"/></marker></defs><g id="cam">`;
   if(focus){
     const sc=g.node("__scope"), o=byId[focus];
@@ -252,30 +288,31 @@ function render(keepCam,keepOld){
     const dim=(tag&&!e.list.some(c=>(c.tags||[]).includes(tag)))||(flow&&!isHot);
     const lw=Math.max(label(e).length+(isHot?3:0),tech(e).length)*6; // ước lượng độ rộng chữ
     const dir=c0.direction||"outgoing", d=curve(ge.points);
-    const mk=(dir!=="none"?'marker-end="url(#ar)"':"")+(dir==="bidirectional"?' marker-start="url(#ar)"':"");
-    s+=`<g class="edge ${st} ${isHot?"hot":""} ${dim?"dim":""}" data-e="${esc(e.from+"→"+e.to)}"><path class="hit" d="${d}"/><path d="${d}" ${mk}/>
+    const r=isHot&&rev, mk=r?'marker-start="url(#ar)"':(dir!=="none"?'marker-end="url(#ar)"':"")+(dir==="bidirectional"?' marker-start="url(#ar)"':"");
+    s+=`<g class="edge ${st} ${isHot?"hot":""} ${r?"rev":""} ${dim?"dim":""}" data-e="${esc(e.from+"→"+e.to)}"><path class="hit" d="${d}"/><path d="${d}" ${mk}/>
       <rect class="lbg" x="${ge.x-lw/2-3}" y="${ge.y-(tech(e)?19:5)}" width="${lw+6}" height="${tech(e)?31:17}" rx="3"/>
       ${tech(e)?`<text x="${ge.x}" y="${ge.y-5}" text-anchor="middle">${esc(tech(e))}</text>`:""}
       <text x="${ge.x}" y="${ge.y+9}" text-anchor="middle">${isHot?`<tspan class="num">${hn+1}. </tspan>`:""}${esc(label(e))}</text></g>`;
   });
   nodes.forEach((n,id)=>{
+    if(isCode(n.o)){s+=codeNode(n,id,g.node(id),tag);return}
     const p=g.node(id), o=n.o, x=p.x-NW/2, y=p.y-NH/2, t=o.type||"component", rx=10, fy=y+NH-24;
     const col=(o.tags||[]).map(t=>M.tags?.[t]?.color).find(Boolean);
     const dim=tag&&!(o.tags||[]).includes(tag), nk=kids(id).length, deep=nk>0&&!n.ext, st=o.status&&o.status!=="live";
     const dl=wrap(o.description,34,2);
     const tl=TYPE_LABEL[t]||t, sub=[(o.name||"").trim().toLowerCase()!==tl.toLowerCase()&&tl,o.technology&&clip(o.technology,18)].filter(Boolean).join(" · ");
-    s+=`<g class="node ${n.ext?"ext":""} ${dim?"dim":""} ${M.open_issues.includes(id)?"issue":""}" data-id="${esc(id)}">
+    s+=`<g class="node ${n.ext?"ext":""} ${dim?"dim":""} ${M.open_issues.includes(id)?"issue":""} ${hotNode===id?"hot":""}" data-id="${esc(id)}">
       ${deep?`<rect class="stk" x="${x+8}" y="${y+8}" width="${NW}" height="${NH}" rx="${rx}"/><rect class="stk" x="${x+4}" y="${y+4}" width="${NW}" height="${NH}" rx="${rx}"/>`:""}
       <rect class="box" x="${x}" y="${y}" width="${NW}" height="${NH}" rx="${rx}"/>
       ${col?`<rect x="${x+rx}" y="${y}" width="${NW-2*rx}" height="3" rx="1.5" fill="${esc(col)}"/>`:""}
-      <g class="ico" transform="translate(${x+14},${y+12})" stroke="var(--${t})">${ICON[t]||ICON.component}</g>
+      <g class="ico" transform="translate(${x+14},${y+12})" stroke="var(--${CODE.has(t)?"component":t})">${ICON[t]||ICON.component}</g>
       ${M.issues[id]?`<g class="bdg"><circle cx="${x+NW}" cy="${y}" r="9"/><text x="${x+NW}" y="${y+4}">!</text></g>`:""}
       <text class="t" x="${x+44}" y="${y+26}">${esc(clip(o.name||o.id,24))}</text>
       <text class="s" x="${x+44}" y="${y+42}">${esc(sub)}</text>
       ${dl.length?dl.map((l,i)=>`<text class="d" x="${x+14}" y="${y+62+i*14}">${esc(l)}</text>`).join(""):`<text class="d none" x="${x+14}" y="${y+62}">Chưa có mô tả</text>`}
       ${n.ext||deep||st?`<line class="fl" x1="${x+1}" x2="${x+NW-1}" y1="${fy}" y2="${fy}"/>`:""}
       ${n.ext?`<text class="ft" x="${x+14}" y="${y+NH-9}">Bên ngoài tầng này</text>`:""}
-      ${deep?`<g class="zbtn" data-z="${esc(id)}"><path class="zhit" d="M${x+1} ${fy}H${x+NW-1}V${y+NH-rx}a${rx-1} ${rx-1} 0 0 1 -${rx-1} ${rx-1}H${x+rx}a${rx-1} ${rx-1} 0 0 1 -${rx-1} -${rx-1}z"/><text class="zt" x="${x+14}" y="${y+NH-9}">${nk} thành phần bên trong ›</text></g>`:""}
+      ${deep?`<g class="zbtn" data-z="${esc(id)}"><path class="zhit" d="M${x+1} ${fy}H${x+NW-1}V${y+NH-rx}a${rx-1} ${rx-1} 0 0 1 -${rx-1} ${rx-1}H${x+rx}a${rx-1} ${rx-1} 0 0 1 -${rx-1} -${rx-1}z"/><text class="zt" x="${x+14}" y="${y+NH-9}">${kids(id).every(isCode)?`Mở chi tiết · ${nk} ›`:`${nk} thành phần bên trong ›`}</text></g>`:""}
       ${st?`<text class="ft" x="${x+NW-12}" y="${y+NH-9}" text-anchor="end">${esc(o.status)}</text>`:""}</g>`;
   });
   const olds=[...$("#stage").querySelectorAll(":scope>svg")];
@@ -293,6 +330,18 @@ function render(keepCam,keepOld){
   $("#lvl").textContent=focus?`Tầng ${chain(focus).length+1} · Bên trong ${nm(focus)}`:"Tầng 1 · Toàn cảnh hệ thống (Context)";
   $("#mpath").textContent=focus?`Sơ đồ ${TYPE_LABEL[byId[focus].type]||""}`:"Sơ đồ Context";
 }
+// Compact code-like card for file/function nodes; drills like any other node when it has children.
+function codeNode(n,id,p,tag){
+  const o=n.o, x=p.x-CW/2, y=p.y-CH/2, nk=kids(id).length, deep=nk>0&&!n.ext, dim=tag&&!(o.tags||[]).includes(tag);
+  const sub=[TYPE_LABEL[o.type],o.technology,n.ext&&"bên ngoài",deep&&`${nk} bên trong`].filter(Boolean).join(" · ");
+  return `<g class="node code ${n.ext?"ext":""} ${dim?"dim":""} ${M.open_issues.includes(id)?"issue":""} ${hotNode===id?"hot":""}" data-id="${esc(id)}">
+    ${deep?`<rect class="stk" x="${x+4}" y="${y+4}" width="${CW}" height="${CH}" rx="6"/>`:""}
+    <rect class="box" x="${x}" y="${y}" width="${CW}" height="${CH}" rx="6"/>
+    <g class="ico" transform="translate(${x+10},${y+15}) scale(.8)" stroke="var(--component)">${ICON[o.type]}</g>
+    ${M.issues[id]?`<g class="bdg"><circle cx="${x+CW}" cy="${y}" r="9"/><text x="${x+CW}" y="${y+4}">!</text></g>`:""}
+    <text class="t" x="${x+32}" y="${y+21}">${esc(clip(o.name||o.id,24))}</text>
+    <text class="s" x="${x+32}" y="${y+37}">${esc(clip(sub,30))}</text></g>`;
+}
 const clip=(s,n)=>(s=String(s)).length>n?s.slice(0,n-1)+"…":s;
 const wrap=(s,n,max)=>{const w=String(s||"").split(/\s+/).filter(Boolean),L=[];let cur="";
   for(const x of w){if(cur&&(cur+" "+x).length>n){L.push(cur);cur=x}else cur=cur?cur+" "+x:x}
@@ -302,37 +351,32 @@ function paint(){
   const rel=new Set(), relE=new Set();
   if(selected){rel.add(selected);curEdges.forEach((e,k)=>{if(e.from===selected||e.to===selected){relE.add(k);rel.add(e.from);rel.add(e.to)}})}
   document.querySelectorAll("#stage>svg:not(.old) .node").forEach(el=>{el.classList.toggle("sel",el.dataset.id===selected);el.classList.toggle("fade",!!selected&&!rel.has(el.dataset.id))});
-  document.querySelectorAll("#stage>svg:not(.old) .edge").forEach(el=>{el.classList.toggle("rel",relE.has(el.dataset.e));el.classList.toggle("fade",!!selected&&!relE.has(el.dataset.e))});
+  document.querySelectorAll("#stage>svg:not(.old) .edge").forEach(el=>{el.classList.toggle("rel",relE.has(el.dataset.e));el.classList.toggle("pick",!!pickConn&&!!curEdges.get(el.dataset.e)?.list.some(c=>c.id===pickConn));el.classList.toggle("fade",!!selected&&!relE.has(el.dataset.e))});
 }
-function deselect(){if(!selected)return false;selected=null;$("#pinfo").innerHTML=EMPTY;paint();return true}
+function deselect(){const open=selected||$("#pinfo").dataset.open;selected=null;pickConn=null;delete $("#pinfo").dataset.open;$("#pinfo").innerHTML=EMPTY;paint();return !!open}
 function go(F,replace){
   const ch=F!==focus; history[ch&&!replace?"pushState":"replaceState"](null,"",location.search+"#"+(F||"")); return nav(F);
 }
 // Back/forward between levels: the hash is the source of truth.
 window.onpopstate=()=>{if(!M)return; const h=location.hash.slice(1); nav(h&&byId[h]&&kids(h).length?h:null)};
 
-/* zoom animation: camera flies into the box, the child level unfolds out of it (and the reverse going up) */
+/* zoom animation between levels (semantic zoom, see morph) */
 const par=id=>byId[id]?.parent||null;
 const isAnc=(a,id)=>{for(let o=byId[par(id)];o;o=byId[o.parent]) if(o.id===a) return true; return false};
 const ease=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
 const reduceMotion=()=>matchMedia("(prefers-reduced-motion: reduce)").matches;
 function tween(ms,my,fn){return new Promise(res=>{const t0=performance.now();(function f(now){
   if(my!==tok) return res(false); const t=Math.min(1,(now-t0)/ms); fn(ease(t)); t<1?requestAnimationFrame(f):res(true)})(t0)})}
-// Interpolate the viewport centre linearly and the scale geometrically, so zooms feel even.
-function mix(a,b,e){const r=$("#stage").getBoundingClientRect(),W=r.width/2,H=r.height/2,k=a.k*Math.pow(b.k/a.k,e);
-  const ax=(W-a.x)/a.k,ay=(H-a.y)/a.k,bx=(W-b.x)/b.k,by=(H-b.y)/b.k,cx=ax+(bx-ax)*e,cy=ay+(by-ay)*e; return {k,x:W-cx*k,y:H-cy*k}}
-function rectCam(q,f){const r=$("#stage").getBoundingClientRect(),k=Math.min(5,r.width*f/q.w,r.height*f/q.h);
-  return {k,x:r.width/2-(q.x+q.w/2)*k,y:r.height/2-(q.y+q.h/2)*k}}
 function mapRect(q,R){const k=Math.min(R.w/q.w,R.h/q.h);return {k,x:R.x+R.w/2-(q.x+q.w/2)*k,y:R.y+R.h/2-(q.y+q.h/2)*k}}
-const toScreen=q=>({x:cam.x+q.x*cam.k,y:cam.y+q.y*cam.k,w:q.w*cam.k,h:q.h*cam.k});
 const setT=(el,c)=>el.setAttribute("transform",`translate(${c.x},${c.y}) scale(${c.k})`);
-const nodeRect=id=>({x:pos[id].x-NW/2,y:pos[id].y-NH/2,w:NW,h:NH});
+const nodeRect=id=>({x:pos[id].x-pos[id].width/2,y:pos[id].y-pos[id].height/2,w:pos[id].width,h:pos[id].height});
 function cancelAnim(){
-  if(!busy) return; tok++; busy=false;
+  if(!busy) return; tok++; busy=false; $("#stage").classList.remove("anim");
+  $("#stage").querySelectorAll(".node,.edge,.node>*,.scope>*").forEach(n=>{n.style.opacity="";n.style.transform=""}); $("#stage").querySelectorAll("svg.mframe").forEach(x=>x.remove());
   document.querySelectorAll("#stage>svg.old").forEach(x=>x.remove());
-  const v=$("#stage>svg"); if(v){v.style.opacity="";v.classList.remove("zin")} fit();
+  const v=$("#stage>svg"); if(v){v.style.opacity=""} fit();
 }
-function endAnim(nv){document.querySelectorAll("#stage>svg.old").forEach(x=>x.remove()); nv.style.opacity=""; nv.classList.remove("zin")}
+function endAnim(nv){document.querySelectorAll("#stage>svg.old").forEach(x=>x.remove()); nv.style.opacity=""}
 async function nav(F){
   cancelAnim(); const my=++tok, from=focus; selected=null;
   if(F===from||reduceMotion()||!$("#stage>svg")){focus=F;render();return}
@@ -343,26 +387,64 @@ async function nav(F){
     else await fadeTo(F,my);
   }finally{if(my===tok)busy=false}
 }
-async function zoomIn(B,my){
-  const rect=nodeRect(B), svg=$("#stage>svg"), c0={...cam}, c1=rectCam(rect,.6);
-  svg.classList.add("zin"); svg.querySelectorAll(".node").forEach(n=>n.classList.toggle("tgt",n.dataset.id===B));
-  if(!await tween(380,my,e=>{cam=mix(c0,c1,e);applyCam()})) return;
-  const R=toScreen(rect); focus=B; render(true,true);
-  const nv=$("#stage>svg"), ov=$("#stage>svg.old");
-  cam=scopeRect?mapRect(scopeRect,R):cam; applyCam(); nv.style.opacity=0;
-  const c2={...cam}, c3=fitCam();
-  if(await tween(420,my,e=>{cam=mix(c2,c3,e);applyCam();nv.style.opacity=e;ov.style.opacity=1-Math.min(1,e*1.8)})) endAnim(nv);
+// Semantic zoom. A screen-space "frame" travels from the clicked box to the child level's scope (or back).
+// Both levels' cameras are derived from that frame every tick, so they move as one space; the frame itself
+// is drawn as an overlay that morphs from a solid filled card into the dashed, transparent scope boundary.
+const clamp=(t,a,b)=>Math.max(0,Math.min(1,(t-a)/(b-a)));
+const scr=(q,c)=>({x:c.x+q.x*c.k,y:c.y+q.y*c.k,w:q.w*c.k,h:q.h*c.k});
+const lerpR=(a,b,e)=>{const w=a.w*Math.pow(b.w/a.w,e),h=a.h*Math.pow(b.h/a.h,e),cx=a.x+a.w/2+(b.x+b.w/2-a.x-a.w/2)*e,cy=a.y+a.h/2+(b.y+b.h/2-a.y-a.h/2)*e;return {x:cx-w/2,y:cy-h/2,w,h}};
+const easeOut=t=>1-Math.pow(1-t,3);
+let wheelOut=false, armed=true, lastWheel=-1e9, outAcc=0;
+const op=(els,v)=>els.forEach(n=>n.style.opacity=v);
+function grow(els,v){els.forEach(n=>{n.style.transformBox="fill-box";n.style.transformOrigin="center";n.style.transform=`scale(${.9+.1*v})`})}
+function parts(svg,id){
+  const all=[...svg.querySelectorAll("#cam>.node,#cam>.edge,#camold>.node,#camold>.edge")], me=all.filter(n=>n.dataset.id===id);
+  return {me, meBox:me.flatMap(n=>[...n.querySelectorAll(":scope>.box,:scope>.stk")]),
+    meInk:me.flatMap(n=>[...n.children].filter(c=>!c.matches(".box,.stk"))),
+    rest:all.filter(n=>n.dataset.id!==id), sRect:[...svg.querySelectorAll(".scope>rect")], sText:[...svg.querySelectorAll(".scope>text")]};
 }
-async function zoomOut(my){
-  const B=focus, ov=$("#stage>svg"), cs=scopeRect, c0={...cam};
-  focus=par(B); render(true,true);
-  const nv=$("#stage>svg"), rect=nodeRect(B), z=rectCam(rect,.6);
-  cam=z; applyCam(); nv.classList.add("zin"); nv.querySelectorAll(".node").forEach(n=>n.classList.toggle("tgt",n.dataset.id===B)); nv.style.opacity=0;
-  const o1=mapRect(cs,toScreen(rect)), oc=ov.querySelector("#camold");
-  if(!await tween(380,my,e=>{setT(oc,mix(c0,o1,e));nv.style.opacity=e;ov.style.opacity=1-e})) return;
-  endAnim(nv); nv.classList.add("zin"); nv.offsetWidth; nv.classList.remove("zin");
-  await tween(380,my,e=>{cam=mix(z,fitCam(),e);applyCam()});
+// p: 0 = solid filled card, 1 = dashed transparent scope boundary.
+function drawFrame(el,f,k,p){
+  const q=clamp(p,0,.6), d=clamp(p,.35,1);
+  el.setAttribute("x",f.x);el.setAttribute("y",f.y);el.setAttribute("width",Math.max(0,f.w));el.setAttribute("height",Math.max(0,f.h));el.setAttribute("rx",10*k);
+  el.style.fillOpacity=String(1-q*.985);
+  el.style.stroke=`color-mix(in srgb,var(--faint) ${Math.round(p*100)}%,var(--line))`;
+  el.style.strokeWidth=String(Math.max(1,k));
+  el.style.strokeDasharray=d<=0?"none":`${(5+(1-d)*400)*k} ${4*d*k}`;
 }
+async function morph(my,inward,B){
+  const st=$("#stage"), ov=$("#stage>svg"), c0={...cam}, prevScope=scopeRect, smooth=inward?ease:(wheelOut?easeOut:ease); wheelOut=false;
+  focus=inward?B:par(B); render(true,true);
+  const nv=$("#stage>svg"), oc=ov.querySelector("#camold");
+  const parentRect=inward?ovRect:nodeRect(B), sc=inward?scopeRect:prevScope;
+  if(!sc||!parentRect){endAnim(nv);fit();return}
+  const P=inward?parts(ov,B):parts(nv,B), C=inward?parts(nv,null):parts(ov,null);
+  const cCam1=inward?fitCam():null;
+  // Frame endpoints in screen space.
+  const fA=inward?scr(parentRect,c0):scr(sc,c0), fB=inward?scr(sc,cCam1):scr(parentRect,fitCam());
+  const pc=inward?oc:$("#cam"), cc=inward?$("#cam"):oc;
+  const fr=document.createElementNS("http://www.w3.org/2000/svg","svg"); fr.classList.add("mframe");
+  const fe=document.createElementNS("http://www.w3.org/2000/svg","rect"); fe.classList.add("box"); fr.append(fe); st.append(fr);
+  ov.style.zIndex=inward?2:3; nv.style.zIndex=inward?3:2; fr.style.zIndex=1;
+  op([...P.meBox,...C.sRect],0); st.classList.add("anim");
+  const step=t=>{
+    const e=smooth(t), p=inward?clamp(e,.15,.8):1-clamp(e,.15,.8), f=lerpR(fA,fB,e), pcam=mapRect(parentRect,f), ccam=mapRect(sc,f);
+    setT(pc,pcam); setT(cc,ccam); cam=inward?ccam:pcam; $("#zoomlbl").textContent=Math.round(cam.k*100)+"%";
+    drawFrame(fe,lerpR(scr(parentRect,pcam),scr(sc,ccam),p),ccam.k,p); // both sit centred in f
+    op([...P.rest,...P.sRect,...P.sText],1-clamp(p,0,.45)); op(P.meInk,1-clamp(p,0,.3));
+    const kid=inward?clamp(e,.6,1):1-clamp(e,0,.35); op(C.rest,kid); grow(C.rest,kid); op(C.sText,kid);
+  };
+  step(0);
+  const ok=await tweenRaw(inward?620:560,my,step);
+  st.classList.remove("anim"); fr.remove(); ov.style.zIndex=nv.style.zIndex="";
+  if(ok){endAnim(nv); applyCam();
+    for(const n of nv.querySelectorAll(".node,.edge,.box,.stk,.scope>rect,.scope>text,.node>*")){n.style.opacity="";n.style.transform=""}}
+}
+let ovRect=null;
+function tweenRaw(ms,my,fn){return new Promise(res=>{const t0=performance.now();(function f(now){
+  if(my!==tok) return res(false); const t=Math.min(1,(now-t0)/ms); fn(t); t<1?requestAnimationFrame(f):res(true)})(t0)})}
+const zoomIn=(B,my)=>{ovRect=nodeRect(B);return morph(my,true,B)};
+const zoomOut=my=>morph(my,false,focus);
 async function fadeTo(F,my){
   const ov=$("#stage>svg"); focus=F; render(false,true); const nv=$("#stage>svg"); nv.style.opacity=0;
   if(await tween(260,my,e=>{nv.style.opacity=e;ov.style.opacity=1-e})) endAnim(nv);
@@ -377,8 +459,21 @@ function fitCam(){
 }
 function fit(){if(graphBox){cam=fitCam();applyCam()}}
 function zoomAt(f,px,py){const r=$("#stage").getBoundingClientRect();px??=r.width/2;py??=r.height/2;
-  const k=Math.max(.2,Math.min(3,cam.k*f)); cam.x=px-(px-cam.x)*k/cam.k; cam.y=py-(py-cam.y)*k/cam.k; cam.k=k; applyCam()}
-$("#stage").addEventListener("wheel",e=>{e.preventDefault();const r=e.currentTarget.getBoundingClientRect();zoomAt(Math.exp(-e.deltaY*.0015),e.clientX-r.left,e.clientY-r.top)},{passive:false});
+  const lo=graphBox?Math.min(.2,fitCam().k*.5):.2, k=Math.max(lo,Math.min(3,cam.k*f)); cam.x=px-(px-cam.x)*k/cam.k; cam.y=py-(py-cam.y)*k/cam.k; cam.k=k; applyCam()}
+// Wheel past the fit view inside a level carries on into the parent level. Once the view is below 75% of
+// fit (or pinned at the zoom floor), further wheel-out delta accumulates; ~100px of it goes up one level.
+// One level per gesture: after a trigger the wheel must pause 250ms before it can trigger again.
+$("#stage").addEventListener("wheel",e=>{e.preventDefault();
+  const now=e.timeStamp, gap=now-lastWheel; lastWheel=now;
+  if(!armed&&!busy&&gap>250){armed=true;outAcc=0}
+  if(busy) return;
+  const dy=e.deltaY*(e.deltaMode===1?16:e.deltaMode===2?400:1);
+  const r=e.currentTarget.getBoundingClientRect(), k0=cam.k; zoomAt(Math.exp(-dy*.0015),e.clientX-r.left,e.clientY-r.top);
+  if(!M||!focus||!graphBox) return; const fk=fitCam().k;
+  if(dy<=0||cam.k>fk*.75&&cam.k<k0){outAcc=0;return}
+  if(cam.k>fk*.75) return;
+  outAcc+=dy; if(armed&&outAcc>=100){armed=false;outAcc=0;wheelOut=true;go(byId[focus].parent||null)}
+},{passive:false});
 let drag=null;
 $("#stage").onpointerdown=e=>{if(e.target.closest(".node,.edge,#bottom,#legend"))return;drag={x:e.clientX-cam.x,y:e.clientY-cam.y,sx:e.clientX,sy:e.clientY};e.currentTarget.classList.add("pan");e.currentTarget.setPointerCapture(e.pointerId)};
 $("#stage").onpointermove=e=>{if(!drag)return;cam.x=e.clientX-drag.x;cam.y=e.clientY-drag.y;applyCam()};
@@ -394,50 +489,129 @@ function related(id){
   const l=M.links[id]; if(!l||!(l.items.length+l.decisions.length)) return "";
   return `<div class="lbl">Liên quan</div><ul>${l.items.map(i=>`<li>${esc(i.kind)} #${i.id} [${esc(i.status)}] ${esc(i.title)}</li>`).join("")}${l.decisions.map(d=>`<li>decision #${d.id} [${esc(d.status)}] ${esc(d.title)}</li>`).join("")}</ul>`;
 }
+const has=v=>v!=null&&v!==""&&!(Array.isArray(v)&&!v.length);
+const fld=(l,v)=>has(v)?`<div class="lbl">${l}</div><div class="field">${esc(v)}</div>`:"";
+const pre=(l,v)=>has(v)?`<div class="lbl">${l}</div><pre>${esc(typeof v==="string"?v:JSON.stringify(v,null,2))}</pre>`:"";
+const conns=()=>M.connections||[];
+const ifcById=(oid,iid)=>(byId[oid]?.interfaces||[]).find(i=>i.id===iid)||(M.objects||[]).flatMap(o=>o.interfaces||[]).find(i=>i.id===iid);
+function ifcCard(i){
+  return `<div class="ifc">${i.kind?`<span class="chip k" style="margin:0 6px 0 0">${esc(i.kind)}</span>`:""}<span class="mono">${esc(i.signature||i.name||i.id)}</span>
+  ${has(i.purpose)?`<div>${esc(i.purpose)}</div>`:""}
+  ${has(i.input)||has(i.output)?`<div class="m mono">${esc(i.input||"—")} → ${esc(i.output||"—")}</div>`:""}
+  ${has(i.errors)?`<div class="er mono">${(i.errors||[]).map(esc).join(", ")}</div>`:""}</div>`;
+}
+const cRow=c=>`<div data-c="${esc(c.id)}">${esc(nm(c.from))} → ${esc(nm(c.to))}${c.name?` <span class="m">· ${esc(c.name)}</span>`:""}</div>`;
+function bindRows(){$("#pinfo").querySelectorAll("[data-c]").forEach(el=>el.onclick=()=>{const c=conns().find(x=>x.id===el.dataset.c);if(c)showConn(c)})}
 function showObj(o){
-  tabTo("info");
-  $("#pinfo").innerHTML=`<div class="lbl">Tên</div><h2>${esc(o.name||o.id)}</h2>
-  <span class="chip">${esc(TYPE_LABEL[o.type]||o.type)}</span>${o.status?`<span class="chip">${esc(o.status)}</span>`:""}${(o.tags||[]).map(t=>`<span class="chip">#${esc(t)}</span>`).join("")}
-  ${o.technology?`<div class="lbl">Technology</div><div class="field">${esc(o.technology)}</div>`:""}
-  ${o.description?`<div class="lbl">Mô tả</div><div class="field">${esc(o.description)}</div>`:""}
-  ${o.links?.length?`<div class="lbl">Code</div>${links(o)}`:""}
+  tabTo("info"); $("#pinfo").dataset.open="1"; pickConn=null;
+  const inc=conns().filter(c=>c.to===o.id), out=conns().filter(c=>c.from===o.id), resp=(o.responsibilities||[]).filter(has);
+  $("#pinfo").innerHTML=`<div class="lbl">Tên</div><h2 class="${isCode(o)?"mono":""}">${esc(o.name||o.id)}</h2>
+  <span class="chip">${esc(TYPE_LABEL[o.type]||o.type||"")}</span>${o.status?`<span class="chip">${esc(o.status)}</span>`:""}${has(o.state)?`<span class="chip k">${esc(o.state)}</span>`:""}${(o.tags||[]).map(t=>`<span class="chip">#${esc(t)}</span>`).join("")}
+  ${fld("Technology",o.technology)}
+  ${fld("Mô tả",o.description)}
+  <div class="lbl">Code</div>${o.links?.length?links(o):'<div class="empty">chỉ thiết kế, chưa có code</div>'}
+  ${resp.length?`<div class="lbl">Trách nhiệm</div><ul class="r">${resp.map(r=>`<li>${esc(r)}</li>`).join("")}</ul>`:""}
+  ${has(o.interfaces)?`<div class="lbl">Interfaces</div>${o.interfaces.map(ifcCard).join("")}`:""}
+  ${inc.length?`<div class="lbl">Được gọi bởi</div><div class="clist">${inc.map(cRow).join("")}</div>`:""}
+  ${out.length?`<div class="lbl">Gọi tới</div><div class="clist">${out.map(cRow).join("")}</div>`:""}
   ${M.issues[o.id]?`<div class="lbl">Vấn đề</div><ul>${M.issues[o.id].map(c=>`<li>${esc(ISSUE[c]||c)}</li>`).join("")}</ul>`:""}
   ${related(o.id)}
-  ${kids(o.id).length?`<p><button id="zoomto" data-id="${esc(o.id)}">Zoom vào (${kids(o.id).length}) →</button></p>`:""}`;
+  ${kids(o.id).length?`<p><button id="zoomto" data-id="${esc(o.id)}">${kids(o.id).every(isCode)?"Mở chi tiết":"Zoom vào"} (${kids(o.id).length}) →</button></p>`:""}`;
   const zb=$("#zoomto"); if(zb) zb.onclick=()=>go(zb.dataset.id);
+  bindRows();
+}
+// Contract of one connection: kind, feature, target interface, payloads, flows using it.
+function showConn(c){
+  tabTo("info"); $("#pinfo").dataset.open="1"; pickConn=c.id; selected=null;
+  const i=has(c.interface)?ifcById(c.to,c.interface):null;
+  const fl=(M.flows||[]).map(f=>({f,n:(f.steps||[]).map((st,k)=>stepConn(st)===c.id?k+1:0).filter(Boolean)})).filter(x=>x.n.length);
+  $("#pinfo").innerHTML=`<div class="lbl">Kết nối</div><h2>${esc(c.name||"Kết nối")}</h2>
+  <div class="field" style="margin-top:8px">${esc(nm(c.from))} → ${esc(nm(c.to))}</div>
+  ${KIND[c.kind]||has(c.kind)?`<span class="chip k">${esc(KIND[c.kind]||c.kind)}</span>`:""}${c.status&&c.status!=="live"?`<span class="chip">${esc(c.status)}</span>`:""}${(c.tags||[]).map(t=>`<span class="chip">#${esc(t)}</span>`).join("")}
+  ${fld("Technology",c.technology)}
+  ${fld("Tính năng",c.feature)}
+  ${i?`<div class="lbl">Interface</div>${ifcCard(i)}`:has(c.interface)?fld("Interface",c.interface):""}
+  ${pre("Request",c.payload?.request)}
+  ${pre("Response",c.payload?.response)}
+  ${fld("Mô tả",c.description)}
+  ${fl.length?`<div class="lbl">Flow dùng kết nối này</div><div class="clist">${fl.map(x=>`<div data-f="${esc(x.f.id)}" data-s="${x.n[0]-1}">${esc(x.f.name||x.f.id)} <span class="m">· bước ${x.n.join(", ")}</span></div>`).join("")}</div>`:""}`;
+  $("#pinfo").querySelectorAll("[data-f]").forEach(el=>el.onclick=()=>{flow=el.dataset.f;step=+el.dataset.s;renderFlows();tabTo("flows");showStep()});
+  paint();
 }
 function showEdge(e){
-  tabTo("info");
-  $("#pinfo").innerHTML=`<div class="lbl">Kết nối</div><h2>${esc(nm(e.from))} → ${esc(nm(e.to))}</h2>`+e.list.map(c=>`<div class="lbl">${esc(nm(c.from))} → ${esc(nm(c.to))}</div>
-  <div class="field"><b>${esc(c.name||"")}</b><br><span class="chip">${esc(c.technology||"?")}</span><span class="chip">${esc(c.status||"live")}</span>${c.description?`<div>${esc(c.description)}</div>`:""}</div>`).join("");
+  if(e.list.length===1) return showConn(e.list[0]);
+  tabTo("info"); $("#pinfo").dataset.open="1"; pickConn=null; selected=null;
+  $("#pinfo").innerHTML=`<div class="lbl">Kết nối</div><h2>${esc(nm(e.from))} → ${esc(nm(e.to))}</h2><div class="lbl">${e.list.length} kết nối, bấm để xem hợp đồng</div><div class="clist">${e.list.map(cRow).join("")}</div>`;
+  bindRows(); paint();
 }
-const stepConn=st=>st.connection||(M.connections.find(c=>c.from===st.from&&c.to===st.to)||{}).id;
+const stepConn=st=>st.at?undefined:st.connection||(M.connections.find(c=>c.from===st.from&&c.to===st.to)||{}).id;
 // Map connection id -> step index for the current step (IcePanel highlights one step at a time).
 function flowHot(){
-  const f=flow&&(M.flows||[]).find(x=>x.id===flow); if(!f) return new Map();
-  return new Map([[stepConn(f.steps[step]),step]]);
+  const st=curStep(), c=st&&stepConn(st); return c?new Map([[c,step]]):new Map();
 }
+const curStep=()=>{const f=flow&&(M.flows||[]).find(x=>x.id===flow); return f?.steps?.[step]||null};
+// Lowest common ancestor of two objects (null = landscape root).
+function lca(a,b){const A=chain(a),B=chain(b);let r=null;for(let i=0;i<A.length&&A[i]===B[i];i++)r=A[i];return r}
+// Ends of a step, already oriented as traversed (reverse swaps them).
+function stepEnds(st){
+  if(st.at) return {at:st.at};
+  const c=M.connections.find(x=>x.id===stepConn(st))||st; if(!c.from||!c.to) return {c};
+  return st.reverse?{c,from:c.to,to:c.from}:{c,from:c.from,to:c.to};
+}
+// Focus level where a step is best seen: parent of an `at` object, else LCA of both ends.
+function stepScope(st){
+  const e=stepEnds(st); if(e.at) return byId[e.at]?par(e.at):undefined;
+  if(!byId[e.from]||!byId[e.to]) return undefined;
+  let F=e.from===e.to?par(e.from):lca(e.from,e.to);
+  while(F&&!kids(F).length) F=par(F); return F;
+}
+const scopePath=F=>[M.name||"Landscape",...(F?chain(F).map(nm):[])].join(" › ");
+// Steps never move the camera: a step inside a closed module lights that module;
+// the user drills in when they want, and the highlight follows to that level.
+function showStep(){render(true)}
 function renderFlows(){
   const fl=M?.flows||[];
   if(!fl.length){$("#pflows").innerHTML='<p class="empty">Model này chưa có flow.</p>';return}
   const f=fl.find(x=>x.id===flow);
-  let h=`<div class="lbl">Flow name</div><select id="flow" style="width:100%"><option value="">— chọn flow —</option>${fl.map(x=>`<option value="${esc(x.id)}" ${x.id===flow?"selected":""}>${esc(x.name)}</option>`).join("")}</select>`;
+  let h=`<div class="fhead"><div class="lbl">Flow name</div><select id="flow" style="width:100%"><option value="">— chọn flow —</option>${fl.map(x=>`<option value="${esc(x.id)}" ${x.id===flow?"selected":""}>${esc(x.name)}</option>`).join("")}</select>`;
+  if(!f) h+="</div>";
   if(f){
-    h+=`<div class="stepnav"><button id="prev">« Previous</button><span>Step ${step+1} of ${f.steps.length}</span><button id="next" class="nx">Next »</button></div>`;
-    h+=f.steps.map((st,i)=>{const c=M.connections.find(x=>x.id===stepConn(st))||st;
+    h+=`<div class="stepnav"><button id="prev">« Previous</button><span>Step ${step+1} of ${f.steps.length}</span><button id="next" class="nx">Next »</button></div></div>`;
+    h+=f.steps.map((st,i)=>{const e=stepEnds(st), c=e.c||{}, F=stepScope(st);
+      const iid=st.interface||c.interface, ifc=has(iid)?ifcById(e.at||c.to,iid):null;
+      const via=[c.technology,KIND[c.kind]||c.kind].filter(has).join(" · ");
+      const head=e.at?`<div class="ft" style="display:block"><i>⟳</i> at <span>${esc(nm(e.at))}</span></div>`
+        :`<div class="ft"><span>${esc(nm(e.from))}</span><i>${st.reverse?"←":"→"}</i><span>${esc(nm(e.to))}</span></div>`;
       return `<div class="step ${i===step?"on":""}" data-i="${i}"><div class="n">Step<b>${i+1}.</b></div>
-      <div class="ft"><span>${esc(nm(c.from))}</span><i>→</i><span>${esc(nm(c.to))}</span></div>
-      ${c.technology?`<div class="via">via ${esc(c.technology)}</div>`:""}<div>${esc(st.text||c.name||"")}</div></div>`}).join("");
+      ${head}<div class="path">${F!==undefined?esc(scopePath(F)):""}${st.reverse?'<span class="rv">← reverse</span>':""}</div>
+      ${via?`<div class="via">via ${esc(via)}</div>`:""}<div>${esc(st.text||c.name||"")}</div>
+      ${has(st.payload)?`<pre>${esc(typeof st.payload==="string"?st.payload:JSON.stringify(st.payload))}</pre>`:""}
+      ${ifc?`<div class="sig">${esc(ifc.signature||ifc.name||ifc.id)}</div>`:has(st.interface)?`<div class="sig">${esc(st.interface)}</div>`:""}</div>`}).join("");
   }
   $("#pflows").innerHTML=h;
-  $("#flow").onchange=e=>{flow=e.target.value||null;step=0;renderFlows();render(true)};
+  $("#flow").onchange=e=>{flow=e.target.value||null;step=0;renderFlows();showStep()};
   if(f){
     $("#prev").onclick=()=>setStep(step-1); $("#next").onclick=()=>setStep(step+1);
-    $("#pflows").querySelectorAll(".step").forEach(el=>el.onclick=()=>setStep(+el.dataset.i));
+    $("#pflows").querySelectorAll(".step").forEach(el=>el.onclick=()=>{if(+el.dataset.i!==step)setStep(+el.dataset.i)});
     $("#pflows .step.on")?.scrollIntoView({block:"nearest"});
   }
 }
-function setStep(i){const f=M.flows.find(x=>x.id===flow);if(!f)return;step=Math.max(0,Math.min(f.steps.length-1,i));renderFlows();render(true)}
+// Double-click a step card: move ONE level (smooth drill) toward the level where the step is drawn.
+// Repeat to keep going; at that level it only re-highlights. Off-path or too deep: go up first.
+$("#pflows").addEventListener("mousedown",e=>{if(e.detail>1&&e.target.closest(".step"))e.preventDefault()}); // no text selection on dblclick
+$("#pflows").addEventListener("dblclick",e=>{const el=e.target.closest(".step"); if(!el||!M||busy) return; e.preventDefault(); goStep(+el.dataset.i)});
+async function goStep(i){
+  const f=M.flows.find(x=>x.id===flow), st=f?.steps?.[i]; if(!st) return; if(i!==step) setStep(i);
+  const F=stepScope(st);
+  if(F!==undefined&&focus!==F){
+    const down=!focus||isAnc(focus,F), next=down?chain(F)[focus?chain(focus).length:0]:par(focus);
+    await go(next??null);
+  }
+  if(step!==i) return; selected=null; pickConn=stepConn(st)||null;
+  const e=stepEnds(st); if(e.at) selected=lift(e.at,focus)?.id||null;
+  paint();
+}
+function setStep(i){const f=M.flows.find(x=>x.id===flow);if(!f)return;step=Math.max(0,Math.min(f.steps.length-1,i));renderFlows();showStep()}
 
 $("#tag").onchange=()=>render(true);
 function centerOn(id){
@@ -487,7 +661,9 @@ $("#stage").addEventListener("mouseleave",()=>{tip.hidden=true;tipId=null});
  const lg=$("#legend"); try{const v=localStorage.getItem("strata-legend"); if(v==="0"||(v===null&&innerWidth<900)) lg.open=false}catch{}
  lg.ontoggle=()=>{try{localStorage.setItem("strata-legend",lg.open?"1":"0")}catch{}}}
 $("#home").href="/#/p/"+encodeURIComponent(P.get("project")||"")+"/c4";
-if(P.get("embed")) document.body.classList.add("embed");
+// Map chỉ sống trong tab Kiến trúc của app shell; mở /c4 trực tiếp thì chuyển về đó.
+if(window.top===window){location.replace("/#/p/"+encodeURIComponent(P.get("project")||"")+"/c4"+location.hash.replace(/^#(.+)/,"/$1"))}
+document.body.classList.add("embed");
 if(P.get("shell")) document.body.classList.add("shell");
 fetch("/api/c4"+location.search).then(r=>r.ok?r.json():Promise.reject(r.status))
   .then(d=>load({...d.meta,objects:d.objects,connections:d.connections,flows:d.flows,issues:d.issues,links:d.links,open_issues:d.open_issues}))
