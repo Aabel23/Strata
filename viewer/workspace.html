@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Strata</title>
+<style>
+:root{
+  --bg:#1b1c20;--bar:#17181b;--panel:#1f2024;--card:#2b2d33;--card2:#33363d;
+  --ink:#e8e9ec;--muted:#8b8f99;--faint:#5c606a;--line:#3a3d45;
+  --accent:#3dd6c6;--warn:#f5a524;--err:#f0524a;--ok:#5bd17a;--info:#6ea8ff;--violet:#b49cff;
+}
+:root[data-theme="light"]{
+  --bg:#eef0f3;--bar:#ffffff;--panel:#ffffff;--card:#ffffff;--card2:#f1f3f6;
+  --ink:#1c2230;--muted:#667085;--faint:#98a2b3;--line:#d0d5dd;--accent:#0e9384;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.45 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;height:100vh;display:grid;grid-template-rows:44px 1fr;overflow:hidden}
+button,select,input{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:4px 10px}
+button{cursor:pointer}button:hover{border-color:var(--faint)}
+a{color:var(--accent)}
+/* top bar */
+#top{display:flex;align-items:center;gap:12px;padding:0 12px;background:var(--bar);border-bottom:1px solid var(--line)}
+.logo{width:26px;height:26px;border-radius:6px;background:var(--accent);color:#0b2a27;display:grid;place-items:center;font-weight:800}
+#crumb{flex:1;display:flex;gap:8px;align-items:center;min-width:0}#crumb b{font-size:14px}#crumb span{color:var(--muted)}
+#q{width:220px}
+/* layout */
+#wrap{display:grid;grid-template-columns:240px 1fr;min-height:0}
+nav{background:var(--bar);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.sec{padding:12px 10px 4px;color:var(--faint);font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+#projects{overflow:auto;max-height:40vh}
+.pj,.md{display:flex;align-items:center;gap:8px;padding:6px 10px;margin:1px 6px;border-radius:6px;cursor:pointer;color:var(--muted)}
+.pj:hover,.md:hover{background:var(--card);color:var(--ink)}
+.pj.on{background:var(--card);color:var(--ink);box-shadow:inset 2px 0 var(--accent)}
+.md.on{background:var(--card);color:var(--accent)}
+.av{width:22px;height:22px;border-radius:5px;display:grid;place-items:center;font-size:11px;font-weight:700;color:#111;flex:none}
+.pj .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.md svg{width:16px;height:16px;flex:none}.md .cnt{margin-left:auto;font-size:11px;color:var(--faint)}
+#view{min-height:0;overflow:auto;position:relative}
+#view.full{overflow:hidden}
+#view iframe{border:0;width:100%;height:100%;display:block;background:var(--bg)}
+.pad{padding:22px 28px;max-width:1280px}
+h1{font-size:20px;margin:0 0 4px}.sub{color:var(--muted);margin-bottom:18px}
+/* overview */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;cursor:pointer}
+.tile:hover{border-color:var(--faint)}
+.tile .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+.tile .v{font-size:26px;font-weight:700;margin-top:4px}.tile .h{color:var(--muted);font-size:12px}
+.bar{height:6px;background:var(--card2);border-radius:3px;overflow:hidden;margin-top:10px;display:flex}
+.bar i{display:block;height:100%}
+.list{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-top:18px}
+.list h3{margin:0;padding:12px 14px;font-size:13px;border-bottom:1px solid var(--line)}
+.row{display:flex;gap:10px;align-items:center;padding:9px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+.row:last-child{border-bottom:0}.row:hover{background:var(--card)}
+.row .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .m{color:var(--muted);font-size:12px;white-space:nowrap}
+/* chips */
+.chip{display:inline-block;font-size:11px;padding:1px 8px;border-radius:10px;background:var(--card2);color:var(--muted);white-space:nowrap}
+.s-done,.s-accepted{color:var(--ok)}.s-doing{color:var(--info)}.s-open{color:var(--accent)}
+.s-proposed{color:var(--violet)}.s-approved{color:var(--warn)}.s-rejected,.s-superseded{color:var(--faint);text-decoration:line-through}
+.p-high,.p-p0,.p-p1{color:var(--err)}
+/* board */
+.toolbar{display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+.board{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(230px,1fr);gap:12px;overflow-x:auto;padding-bottom:8px}
+.col{background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;min-height:120px}
+.col h4{margin:0;padding:10px 12px;font-size:12px;display:flex;gap:6px;align-items:center;border-bottom:1px solid var(--line)}
+.col h4 .n{margin-left:auto;color:var(--faint);font-weight:400}
+.cards{padding:8px;display:flex;flex-direction:column;gap:8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:9px 10px}
+.card .id{color:var(--faint);font-size:11px}.card .ti{margin:2px 0 6px;font-weight:500}
+.card .meta{display:flex;gap:6px;flex-wrap:wrap}
+.empty{color:var(--muted);padding:14px}
+.doc-wrap{display:grid;grid-template-columns:260px 1fr;height:100%}
+.doc-list{border-right:1px solid var(--line);overflow:auto;background:var(--panel)}
+.doc-list .row{padding:8px 12px}.doc-list .row.on{background:var(--card);box-shadow:inset 2px 0 var(--accent)}
+@media (max-width:760px){#wrap{grid-template-columns:1fr;grid-template-rows:auto 1fr}nav{max-height:34vh;border-right:0;border-bottom:1px solid var(--line)}#q{display:none}.doc-wrap{grid-template-columns:1fr;grid-template-rows:30vh 1fr}.pad{padding:16px}}
+</style>
+</head>
+<body>
+<header id="top">
+  <div class="logo">S</div>
+  <div id="crumb"><b id="cp">Strata</b><span>›</span><span id="cm"></span></div>
+  <input id="q" placeholder="Lọc theo tiêu đề…" aria-label="Lọc">
+  <button id="theme" title="Đổi sáng/tối">◐</button>
+</header>
+<div id="wrap">
+  <nav>
+    <div class="sec">Projects</div>
+    <div id="projects"></div>
+    <div class="sec">Module</div>
+    <div id="modules"></div>
+  </nav>
+  <section id="view"></section>
+</div>
+<script>
+"use strict";
+// Frontend only: built on the existing APIs (/api/pages, /api/query, /api/c4, /page/P/S, /?project=P).
+// All data text goes through textContent.
+const $=s=>document.querySelector(s), enc=encodeURIComponent;
+function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
+const get=u=>fetch(u).then(r=>r.ok?r.json():Promise.reject(new Error(u+" → "+r.status)));
+try{const t=localStorage.getItem("strata-theme");if(t)document.documentElement.dataset.theme=t}catch{}
+
+const ICON={
+  overview:'<rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/>',
+  tasks:'<rect x="2" y="2" width="12" height="12" rx="2"/><path d="M5 8l2 2 4-4"/>',
+  issues:'<circle cx="8" cy="8" r="6"/><path d="M8 5v3.5M8 11h0"/>',
+  docs:'<path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3M6 8h4M6 11h4"/>',
+  decisions:'<path d="M8 2v12M3 5h10M3 5l-1.5 4h3zM13 5l-1.5 4h3z"/>',
+  c4:'<rect x="5.5" y="1.5" width="5" height="4" rx="1"/><rect x="1.5" y="10.5" width="5" height="4" rx="1"/><rect x="9.5" y="10.5" width="5" height="4" rx="1"/><path d="M8 5.5V8M4 10.5V8h8v2.5"/>',
+  notes:'<path d="M3 2h10v12H3z"/><path d="M6 5h4M6 8h4"/>'
+};
+const MODULES=[["overview","Tổng quan"],["tasks","Task"],["issues","Issue"],["docs","Tài liệu"],["decisions","Quyết định"],["notes","Ghi chú & tri thức"],["c4","Kiến trúc C4"]];
+const TASK_COLS=["proposed","approved","open","doing","done","rejected"];
+const NOTE_KINDS=["rule","knowledge","draft","note"];
+const PALETTE=["#3dd6c6","#6ea8ff","#b49cff","#ffb15c","#5bd17a","#f07aa8","#e8d36a"];
+
+let D={pages:[],items:[],decisions:[],c4:new Set()}, P=null, MOD="overview", SUB=null, filter="";
+
+async function boot(){
+  const [pages,items,decisions]=await Promise.all([
+    get("/api/pages").catch(()=>[]),
+    get("/api/query?src=item&limit=200").catch(()=>[]),
+    get("/api/query?src=decision&limit=200").catch(()=>[])]);
+  D={pages,items,decisions,c4:new Set()};
+  // /api/c4 has no project list (and meta.name is not the project id): probe the projects we know, plus the one in the URL.
+  const hp=decodeURIComponent(location.hash.slice(2).split("/")[0]||"");
+  const names=[...new Set([...projects(),hp].filter(Boolean))];
+  const ok=await Promise.all(names.map(p=>get("/api/c4?project="+enc(p)).then(()=>p).catch(()=>null)));
+  ok.filter(Boolean).forEach(p=>D.c4.add(p));
+  route();
+}
+const projects=()=>[...new Set([...D.pages,...D.items,...D.decisions].map(x=>x.project).concat([...D.c4]))].filter(Boolean).sort();
+const of=(arr,p)=>arr.filter(x=>x.project===p);
+const match=t=>!filter||String(t||"").toLowerCase().includes(filter);
+
+/* routing: #/<project>/<module>[/<sub>] */
+function route(){
+  const [p,m,...s]=location.hash.slice(2).split("/").map(decodeURIComponent);
+  const ps=projects();
+  P=ps.includes(p)?p:(ps[0]||null); MOD=MODULES.some(x=>x[0]===m)?m:"overview"; SUB=s.join("/")||null;
+  render();
+}
+const nav=(p,m,s)=>{location.hash="#/"+[p,m,s].filter(Boolean).map(enc).join("/")};
+window.onhashchange=route;
+
+function render(){
+  // sidebar: projects
+  const pj=$("#projects"); pj.replaceChildren();
+  projects().forEach((p,i)=>{
+    const r=el("div","pj"+(p===P?" on":"")), av=el("span","av",p[0].toUpperCase());
+    av.style.background=PALETTE[[...p].reduce((a,c)=>a+c.charCodeAt(0),0)%PALETTE.length];
+    const open=of(D.items,p).filter(x=>x.kind==="task"&&!["done","rejected"].includes(x.status)).length;
+    r.append(av,el("span","nm",p)); if(open) r.append(el("span","chip",open));
+    r.onclick=()=>nav(p,MOD); pj.append(r);
+  });
+  if(!projects().length) pj.append(el("div","empty","Chưa có dữ liệu. Dùng strata.py import-yaml / page put."));
+  // sidebar: modules with counts
+  const md=$("#modules"); md.replaceChildren();
+  const cnt={tasks:kind("task").length,issues:kind("issue").length,docs:of(D.pages,P).length,decisions:of(D.decisions,P).length,notes:of(D.items,P).filter(x=>NOTE_KINDS.includes(x.kind)).length,c4:D.c4.has(P)?"●":""};
+  MODULES.forEach(([k,label])=>{
+    const r=el("div","md"+(k===MOD?" on":""));
+    r.insertAdjacentHTML("afterbegin",`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">${ICON[k]}</svg>`);
+    r.append(el("span","",label)); if(cnt[k]) r.append(el("span","cnt",cnt[k]));
+    r.onclick=()=>nav(P,k); md.append(r);
+  });
+  $("#cp").textContent=P||"Strata"; $("#cm").textContent=MODULES.find(x=>x[0]===MOD)[1];
+  document.title=(P?P+" · ":"")+"Strata";
+  const v=$("#view"); v.replaceChildren(); v.className="";
+  if(!P) return;
+  ({overview,tasks:board("task"),issues:board("issue"),docs,decisions,notes,c4})[MOD](v);
+}
+const kind=k=>of(D.items,P).filter(x=>x.kind===k);
+
+/* modules */
+function overview(v){
+  const w=el("div","pad"); v.append(w);
+  w.append(el("h1","",P),el("div","sub","Tổng quan dự án"));
+  const g=el("div","grid"); w.append(g);
+  const t=kind("task"), done=t.filter(x=>x.status==="done").length, live=t.filter(x=>x.status!=="rejected").length;
+  const pct=live?Math.round(done*100/live):0;
+  tile(g,"Tiến độ task",pct+"%",`${done}/${live} xong`,()=>nav(P,"tasks"),barOf(t));
+  tile(g,"Đang làm",t.filter(x=>x.status==="doing").length,"task ở trạng thái doing",()=>nav(P,"tasks"));
+  tile(g,"Issue mở",kind("issue").filter(x=>!["done","rejected"].includes(x.status)).length,`/${kind("issue").length} issue`,()=>nav(P,"issues"));
+  tile(g,"Tài liệu",of(D.pages,P).length,"trang",()=>nav(P,"docs"));
+  tile(g,"Quyết định",of(D.decisions,P).length,`${of(D.decisions,P).filter(x=>x.status==="accepted").length} đã chấp nhận`,()=>nav(P,"decisions"));
+  tile(g,"Kiến trúc C4",D.c4.has(P)?"Có":"—",D.c4.has(P)?"mở sơ đồ":"chưa import model",()=>nav(P,"c4"));
+  const doing=t.filter(x=>x.status==="doing"||x.status==="open").slice(0,8);
+  list(w,"Task đang mở",doing,x=>[x.title,x.status,"#"+x.id],()=>nav(P,"tasks"));
+  const pg=[...of(D.pages,P)].sort((a,b)=>String(b.updated_at).localeCompare(a.updated_at)).slice(0,6);
+  list(w,"Tài liệu mới cập nhật",pg,x=>[x.title,x.kind,(x.updated_at||"").slice(0,10)],x=>nav(P,"docs",x.slug));
+}
+function tile(g,k,v,h,on,extra){const t=el("div","tile");t.append(el("div","k",k),el("div","v",v),el("div","h",h));if(extra)t.append(extra);t.onclick=on;g.append(t)}
+function barOf(items){
+  const b=el("div","bar"), n=items.length||1;
+  [["done","var(--ok)"],["doing","var(--info)"],["open","var(--accent)"],["approved","var(--warn)"],["proposed","var(--violet)"]].forEach(([s,c])=>{
+    const i=el("i");i.style.width=items.filter(x=>x.status===s).length*100/n+"%";i.style.background=c;i.title=s;b.append(i)});
+  return b;
+}
+function list(w,title,rows,cols,on){
+  const l=el("div","list");l.append(el("h3","",title));w.append(l);
+  if(!rows.length) return l.append(el("div","empty","Không có."));
+  rows.forEach(x=>{const [t,s,m]=cols(x), r=el("div","row");r.append(el("span","t",t),el("span","chip s-"+s,s),el("span","m",m));r.onclick=()=>on(x);l.append(r)});
+}
+function board(k){
+  return v=>{
+    const w=el("div","pad");w.style.maxWidth="none";v.append(w);
+    const all=kind(k).filter(x=>match(x.title));
+    w.append(el("h1","",k==="task"?"Task":"Issue"),el("div","sub",`${all.length} mục · kéo ngang để xem các cột`));
+    const tb=el("div","toolbar"), own=el("select");
+    own.append(new Option("Mọi owner",""),...[...new Set(all.map(x=>x.owner).filter(Boolean))].map(o=>new Option(o,o)));
+    own.value=SUB||""; own.onchange=()=>nav(P,MOD,own.value); tb.append(own,barOf(all));tb.lastChild.style.cssText="flex:1;margin:0";w.append(tb);
+    const items=all.filter(x=>!SUB||x.owner===SUB);
+    const b=el("div","board");w.append(b);
+    TASK_COLS.forEach(s=>{
+      const xs=items.filter(x=>x.status===s); if(s==="rejected"&&!xs.length) return;
+      const c=el("div","col"), h=el("h4");h.append(el("span","s-"+s,"●"),el("span","",s),el("span","n",xs.length));c.append(h);
+      const cs=el("div","cards");c.append(cs);
+      xs.forEach(x=>{const d=el("div","card");d.append(el("div","id","#"+x.id),el("div","ti",x.title));
+        const m=el("div","meta");if(x.priority)m.append(el("span","chip p-"+String(x.priority).toLowerCase(),x.priority));if(x.owner)m.append(el("span","chip","@"+x.owner));d.append(m);cs.append(d)});
+      if(!xs.length) cs.append(el("div","empty","—"));
+      b.append(c);
+    });
+  };
+}
+function docs(v){
+  const pages=of(D.pages,P).filter(x=>match(x.title));
+  v.className="full";
+  const w=el("div","doc-wrap"), l=el("div","doc-list"), body=el("div");w.append(l,body);v.append(w);
+  const groups={};pages.forEach(x=>(groups[x.kind]=groups[x.kind]||[]).push(x));
+  Object.keys(groups).sort().forEach(k=>{l.append(el("div","sec",k));groups[k].forEach(x=>{
+    const r=el("div","row"+(x.slug===SUB?" on":""));r.append(el("span","t",x.title));r.onclick=()=>nav(P,"docs",x.slug);l.append(r)})});
+  if(!pages.length) l.append(el("div","empty","Chưa có trang nào."));
+  const cur=pages.find(x=>x.slug===SUB)||pages[0];
+  if(cur){const f=el("iframe");f.title=cur.title;f.src=`/page/${enc(P)}/${enc(cur.slug)}`;body.append(f);body.style.minHeight="0"}
+  else body.append(el("div","empty","Chọn một tài liệu."));
+}
+function decisions(v){
+  const w=el("div","pad");v.append(w);
+  const xs=of(D.decisions,P).filter(x=>match(x.title));
+  w.append(el("h1","","Quyết định (ADR)"),el("div","sub","Nhật ký chỉ ghi thêm; chỉ trạng thái được đổi."));
+  list(w,`${xs.length} quyết định`,xs,x=>[x.title,x.status,"ADR-"+x.id],()=>{});
+}
+function notes(v){
+  const w=el("div","pad");v.append(w);
+  w.append(el("h1","","Ghi chú & tri thức"),el("div","sub","rule · knowledge · draft · note"));
+  NOTE_KINDS.forEach(k=>{const xs=kind(k).filter(x=>match(x.title));if(xs.length)list(w,k,xs,x=>[x.title,x.status,"#"+x.id],()=>{})});
+  if(!NOTE_KINDS.some(k=>kind(k).length)) w.append(el("div","empty","Chưa có ghi chú."));
+}
+function c4(v){
+  if(!D.c4.has(P)){const w=el("div","pad");w.append(el("h1","","Kiến trúc C4"),el("div","sub","Project này chưa có model C4."));
+    const c=el("code","",`python3 strata.py import-yaml model.strata.yaml --project ${P}`);w.append(c);return v.append(w)}
+  v.className="full"; const f=el("iframe");f.title="C4";f.src=`/?project=${enc(P)}&shell=1`;v.append(f);
+}
+
+$("#q").oninput=e=>{filter=e.target.value.trim().toLowerCase();render()};
+$("#theme").onclick=()=>{const r=document.documentElement;r.dataset.theme=r.dataset.theme==="light"?"dark":"light";try{localStorage.setItem("strata-theme",r.dataset.theme)}catch{}};
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,179 @@
+{
+ "project": "strata",
+ "slug": "design",
+ "title": "Strata — thiết kế hiện tại",
+ "kind": "note",
+ "blocks": [
+  {
+   "type": "md",
+   "text": "Nguồn làm việc chính thay tài liệu project và RAM/OPEN. Bản chính là SQLite tại `~/.secondbrain/strata.db`. Trạng thái tính đến 18/10/2026: xong T1 (schema), T2 (import C4), T3 (viewer đọc DB), T3b (page)."
+  },
+  {
+   "type": "legend",
+   "items": [
+    {
+     "label": "đã có",
+     "status": "done"
+    },
+    {
+     "label": "đã chốt, chưa làm",
+     "status": "plan"
+    }
+   ]
+  },
+  {
+   "type": "md",
+   "text": "## Các tầng"
+  },
+  {
+   "type": "layers",
+   "rows": [
+    {
+     "title": "Người dùng",
+     "cells": [
+      {
+       "name": "Agent chính",
+       "note": "role=main · được ghi",
+       "status": "plan"
+      },
+      {
+       "name": "Subagent",
+       "note": "role=sub · chỉ đọc",
+       "status": "plan"
+      },
+      {
+       "name": "Người",
+       "note": "role=human · duyệt proposed",
+       "status": "plan"
+      }
+     ]
+    },
+    {
+     "title": "Giao tiếp",
+     "cells": [
+      {
+       "name": "MCP server (stdio)",
+       "note": "T9 · vai cố định lúc khởi động",
+       "status": "plan"
+      },
+      {
+       "name": "CLI strata.py",
+       "note": "init · import-yaml · validate · serve · page",
+       "status": "done"
+      },
+      {
+       "name": "Viewer C4",
+       "note": "đọc /api/c4 từ DB",
+       "status": "done"
+      },
+      {
+       "name": "Page renderer",
+       "note": "8 loại block · /pages",
+       "status": "done"
+      }
+     ]
+    },
+    {
+     "title": "Lõi",
+     "cells": [
+      {
+       "name": "service.py",
+       "note": "T4 quyền + audit · T5 claim · T6 decision",
+       "status": "plan"
+      },
+      {
+       "name": "search",
+       "note": "T7 lọc cột + FTS5/bm25",
+       "status": "plan"
+      },
+      {
+       "name": "context(role, task)",
+       "note": "T8 giới hạn token, rule nạp đủ",
+       "status": "plan"
+      },
+      {
+       "name": "export",
+       "note": "T10–T11 Markdown/HTML ra git, CORE_RULES.md",
+       "status": "plan"
+      }
+     ]
+    },
+    {
+     "title": "Lưu trữ",
+     "cells": [
+      {
+       "name": "strata.db (SQLite, WAL)",
+       "note": "db.py · schema.sql · test đạt",
+       "status": "done"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "type": "md",
+   "text": "## Luồng đọc và ghi"
+  },
+  {
+   "type": "mermaid",
+   "code": "flowchart LR\n  M[Agent chính] -->|ghi| MCP\n  S[Subagent] -->|chỉ đọc| MCP\n  H[Người] -->|approve / reject| MCP\n  MCP[MCP server] --> SV[service.py<br/>kiểm quyền]\n  SV -->|1 transaction| DB[(strata.db)]\n  SV -->|cùng transaction| AU[audit]\n  AU --- DB\n  DB --> CX[context role,task]\n  CX -->|rule always_load + phần liên quan| M\n  DB --> EX[export] --> GIT[git: RULES.md, TASKS.md,<br/>decisions/, CORE_RULES.md]"
+  },
+  {
+   "type": "md",
+   "text": "## Schema (đã có)"
+  },
+  {
+   "type": "mermaid",
+   "code": "erDiagram\n  item {\n    int id PK\n    text project\n    text kind \"rule task issue knowledge draft note\"\n    text status \"proposed approved open doing done rejected\"\n    int always_load\n    int core\n    text owner\n    int version\n  }\n  decision {\n    int id PK\n    text project\n    text status \"proposed accepted superseded\"\n    text context\n    text decision\n    text consequences\n    text rejected_options \"bắt buộc\"\n    int supersedes FK\n  }\n  page {\n    text project PK\n    text slug PK\n    text title\n    text kind \"research discussion note\"\n    json blocks\n    text text \"cho FTS\"\n  }\n  c4_meta {\n    text project PK\n    text name\n    text root\n    text layout\n    json tags\n  }\n  c4_object {\n    text project PK\n    text id PK\n    text type \"actor system app store component group\"\n    text parent\n  }\n  c4_connection {\n    text project PK\n    text id PK\n    text from_id\n    text to_id\n  }\n  c4_flow {\n    text project PK\n    text id PK\n    json steps\n  }\n  audit {\n    int id PK\n    text ts\n    text actor_role\n    text tool\n    json before\n    json after\n  }\n  search {\n    text title \"FTS5, bỏ dấu, đ thành d\"\n    text body\n    text src\n    int ref\n  }\n  decision ||--o| decision : supersedes\n  c4_meta ||--o{ c4_object : project\n  c4_object ||--o{ c4_object : parent\n  c4_object ||--o{ c4_connection : \"from / to\"\n  item ||--|| search : \"trigger\"\n  decision ||--|| search : \"trigger lúc insert\"\n  page ||--|| search : \"trigger\""
+  },
+  {
+   "type": "md",
+   "text": "## Ràng buộc trong DB"
+  },
+  {
+   "type": "table",
+   "head": [
+    "Ràng buộc",
+    "Cách ép",
+    "Trạng thái"
+   ],
+   "rows": [
+    [
+     "Decision không sửa, không xóa",
+     "Trigger chặn DELETE và UPDATE mọi cột trừ status",
+     "có"
+    ],
+    [
+     "Phải ghi phương án đã loại",
+     "CHECK rejected_options khác rỗng và khác []",
+     "có"
+    ],
+    [
+     "Tìm tiếng Việt không dấu",
+     "FTS5 remove_diacritics 2 + đổi đ→d; truy vấn qua db.fold()",
+     "có"
+    ],
+    [
+     "Một DB cho mọi project",
+     "Cột project trên mọi bảng",
+     "có"
+    ],
+    [
+     "Quyền theo vai, audit mọi lần ghi",
+     "service.py + MCP",
+     "T4, T9"
+    ],
+    [
+     "Nhận task nguyên tử",
+     "UPDATE … WHERE status='open' rồi kiểm rowcount",
+     "T5"
+    ],
+    [
+     "Mục agent ghi phải chờ duyệt",
+     "Ép status=proposed ở service",
+     "T4"
+    ]
+   ]
+  }
+ ]
+}

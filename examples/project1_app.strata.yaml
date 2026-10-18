@@ -1,0 +1,68 @@
+# Strata model cho project1_app (máy pha + app + server)
+name: project1_app
+root: ../../../internproj/project1_app   # gốc để kiểm tra link code
+layout: LR
+
+tags:
+  security: {color: "#f04438"}
+  ram-only: {color: "#f79009"}
+
+objects:
+  - {id: user, type: actor, name: Người dùng, description: Chủ máy hoặc người được chia sẻ máy}
+  - {id: machine, type: system, name: Máy pha, description: Máy pha chế; long-poll server để nhận lệnh}
+  - {id: gmail, type: system, name: Gmail SMTP, description: Dịch vụ gửi thư bên ngoài}
+
+  - {id: platform, type: system, name: Nền tảng project1, description: App di động và server cloud}
+  - id: flutter
+    type: app
+    parent: platform
+    name: Flutter app
+    technology: Flutter/Dart
+    description: App điều khiển máy, đăng nhập, quản lý menu và chia sẻ
+    links: [flutter_app/lib/main.dart]
+  - id: server
+    type: app
+    parent: platform
+    name: Cloud server
+    technology: Python http.server
+    description: Điểm vào HTTP/HTTPS, mọi body nằm trong phong bì HPKE
+    links: [server/main.py]
+  - {id: mysql, type: store, parent: platform, name: MySQL, technology: MySQL, description: Tài khoản, phiên, danh bạ máy}
+
+  - {id: transport, type: component, parent: server, name: transport, technology: http, links: [server/src/transport/http.py], description: Cổng HTTP và định tuyến; ghép các khối khác}
+  - {id: security, type: component, parent: server, name: security, technology: HPKE, tags: [security], links: [server/src/security/cloud_protection.py], description: Mở/đóng phong bì HPKE (X25519/HKDF-SHA256/AES-128-GCM)}
+  - {id: account, type: component, parent: server, name: account, links: [server/src/account/account.py], description: Đăng ký, OTP, đăng nhập, phiên}
+  - {id: device, type: component, parent: server, name: device, links: [server/src/device/devices.py], description: Danh bạ máy và quy trình claim}
+  - {id: relay, type: component, parent: server, name: relay, tags: [ram-only], links: [server/src/relay/relay.py], description: Chuyển lệnh app → máy → app; trạng thái chỉ trong RAM}
+  - {id: storage, type: component, parent: server, name: storage, technology: MySQL driver, links: [server/src/storage/database.py], description: Mỗi giao dịch một kết nối riêng}
+  - {id: mail, type: component, parent: server, name: mail, links: [server/src/mail/smtp_mail.py], description: Gửi OTP qua Gmail SMTP}
+
+connections:
+  - {id: use, from: user, to: flutter, name: Dùng app, technology: UI}
+  - {id: app_req, from: flutter, to: transport, name: Gọi API, technology: HTTPS + HPKE}
+  - {id: m_poll, from: machine, to: transport, name: Long-poll lệnh, technology: HTTPS + HPKE}
+  - {id: open, from: transport, to: security, name: Mở/đóng phong bì, technology: in-process}
+  - {id: r_acc, from: transport, to: account, name: Route auth, technology: in-process}
+  - {id: r_dev, from: transport, to: device, name: Route máy, technology: in-process}
+  - {id: r_rel, from: transport, to: relay, name: Route lệnh, technology: in-process}
+  - {id: acc_db, from: account, to: storage, name: Đọc/ghi tài khoản, technology: in-process}
+  - {id: dev_db, from: device, to: storage, name: Đọc/ghi máy, technology: in-process}
+  - {id: acc_mail, from: account, to: mail, name: Gửi OTP, technology: in-process}
+  - {id: sql, from: storage, to: mysql, name: SQL, technology: MySQL protocol}
+  - {id: smtp, from: mail, to: gmail, name: Gửi thư, technology: SMTP/TLS}
+
+flows:
+  - id: login
+    name: Đăng nhập bằng OTP
+    steps:
+      - {connection: app_req, text: App gửi email trong phong bì HPKE}
+      - {connection: open, text: security mở phong bì}
+      - {connection: r_acc, text: Định tuyến tới account}
+      - {connection: acc_mail, text: account tạo OTP và nhờ mail gửi}
+      - {connection: smtp, text: Thư OTP đi qua Gmail}
+  - id: command
+    name: Gửi lệnh pha chế
+    steps:
+      - {connection: app_req, text: App gửi lệnh}
+      - {connection: r_rel, text: transport đưa lệnh vào RelayHub}
+      - {connection: m_poll, text: Máy long-poll lấy lệnh, rồi gửi kết quả về}

@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Strata</title>
+<script src="/vendor/dagre.min.js"></script>
+<style>
+/* Strata tokens (same values as page.css): night + champagne gold by default, HSK ivory in light */
+:root{
+  color-scheme:dark;
+  --bg:#09080c;--canvas:#100e14;--dot:#221f29;--bar:#0c0b0f;--panel:#121016;--card:#1b1922;--card2:#241f2b;
+  --ink:#ebe5db;--muted:#a59d93;--faint:#7a7480;--line:#2a2630;--edge:#8a8290;
+  --accent:#d3a67c;--accent2:#a87b4f;--hot:#f0d6b4;--warn:#d9a24e;--err:#c06464;
+  --actor:#b49cff;--system:#8aa8e6;--app:#6fa595;--store:#d9a24e;--component:#a59d93;--group:#7a7480;
+}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#f6f2e8;--canvas:#fbfaf5;--dot:#e6dec9;--bar:#ffffff;--panel:#ffffff;--card:#ffffff;--card2:#f6f2e8;--ink:#294342;--muted:#55625f;--faint:#8f9894;--line:#e6dec9;--edge:#8f9894;--accent:#07807d;--accent2:#05615f;--hot:#07807d;--warn:#a8701c;--err:#cd3c35;color-scheme:light;}}
+:root[data-theme="light"]{--bg:#f6f2e8;--canvas:#fbfaf5;--dot:#e6dec9;--bar:#ffffff;--panel:#ffffff;--card:#ffffff;--card2:#f6f2e8;--ink:#294342;--muted:#55625f;--faint:#8f9894;--line:#e6dec9;--edge:#8f9894;--accent:#07807d;--accent2:#05615f;--hot:#07807d;--warn:#a8701c;--err:#cd3c35;color-scheme:light;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.45 "Segoe UI Variable Text","Segoe UI",Inter,system-ui,-apple-system,sans-serif;height:100vh;display:grid;grid-template-rows:auto auto 1fr;overflow:hidden}
+button,select{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:4px 10px;cursor:pointer}
+button:hover{border-color:var(--faint)}
+/* top bar */
+#top{display:flex;align-items:center;gap:14px;padding:0 12px;height:44px;background:var(--bar);border-bottom:1px solid var(--line)}
+#top button{border:0;background:none;color:var(--muted)}
+.logo{width:26px;height:26px;border-radius:50%;border:1px solid var(--accent);color:var(--accent);display:grid;place-items:center;font-family:"Cormorant Garamond","Palatino Linotype",Georgia,serif;font-weight:600}
+.tab{font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--muted);padding:13px 2px;border-bottom:2px solid transparent}
+.tab.on{color:var(--accent);border-color:var(--accent)}
+#title{flex:1;text-align:center;line-height:1.2}#title b{display:block;font-size:14px}#title small{color:var(--muted)}
+/* sub bar: breadcrumbs */
+#sub{display:flex;align-items:center;gap:10px;padding:0 12px;height:36px;background:var(--bar);border-bottom:1px solid var(--line);overflow-x:auto;white-space:nowrap}
+#crumbs a{cursor:pointer;color:var(--muted);padding:4px 8px;border-radius:5px}#crumbs a:last-child{color:var(--ink);background:var(--card);border-bottom:2px solid var(--accent)}
+#crumbs .sep{color:var(--faint)}
+main{display:grid;grid-template-columns:56px 1fr 320px;min-height:0}
+/* left toolbar */
+#tools{background:var(--bar);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 0}
+#tools button{width:44px;border:0;background:none;color:var(--muted);font-size:10px;padding:6px 0;display:flex;flex-direction:column;align-items:center;gap:3px;border-radius:6px}
+#tools button:hover,#tools button.on{background:var(--card);color:var(--ink)}
+#tools svg{width:20px;height:20px}
+#tools hr{width:30px;border:0;border-top:1px solid var(--line)}
+/* canvas */
+#stage{position:relative;overflow:hidden;background-color:var(--canvas);background-image:radial-gradient(var(--dot) 1px,transparent 1px);background-size:18px 18px;cursor:grab}
+#stage.pan{cursor:grabbing}
+#stage>svg{position:absolute;inset:0;width:100%;height:100%}
+#drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);text-align:center;padding:16px}
+#bottom{position:absolute;left:12px;bottom:12px;display:flex;gap:8px;align-items:center}
+#bottom select,#bottom button{background:var(--bar)}
+#zoomlbl{color:var(--muted);font-size:12px;min-width:40px;text-align:center}
+/* nodes */
+.node{cursor:pointer}
+.node .box{fill:var(--card);stroke:var(--line);stroke-width:1}
+.node:hover .box{stroke:var(--faint)}
+.node.sel .box{stroke:var(--accent);stroke-width:2}
+.node .t{fill:var(--ink);font-weight:600;font-size:13px}
+.node .s{fill:var(--muted);font-size:11px}
+.node .ico{stroke-width:1.6;fill:none}
+.node .zoom{fill:var(--card2);stroke:var(--line)}.node .zoom+path{stroke:var(--accent);fill:none;stroke-width:1.5}
+.node.ext .box{fill:transparent;stroke-dasharray:4 3}
+.node.ext .t{fill:var(--muted)}
+.node.dim,.edge.dim{opacity:.15}
+.scope rect{fill:rgba(255,255,255,.015);stroke:var(--faint);stroke-dasharray:5 4}
+.scope text{fill:var(--muted);font-size:11px}
+/* edges */
+.edge{cursor:pointer;color:var(--edge)}
+.edge path{fill:none;stroke:currentColor;stroke-width:1.3}
+.edge .hit{stroke:transparent;stroke-width:12}
+.edge text{fill:var(--muted);font-size:10.5px;paint-order:stroke;stroke:var(--canvas);stroke-width:4px}
+.edge .num{fill:var(--accent);font-weight:700}
+.edge.future path{stroke-dasharray:6 4}.edge.deprecated{color:var(--warn)}.edge.removed{color:var(--err)}.edge.removed path{stroke-dasharray:2 3}
+.edge.hot{color:var(--hot)}.edge.hot path{stroke-width:2.4}.edge.hot text{fill:var(--hot);font-weight:600}
+/* right panel */
+aside{background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.ptabs{display:flex;gap:18px;padding:0 16px;border-bottom:1px solid var(--line)}
+.ptabs a{padding:10px 0;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
+.ptabs a.on{color:var(--ink);border-color:var(--accent)}
+.pbody{padding:14px 16px;overflow:auto;flex:1}
+.lbl{color:var(--muted);font-size:11px;margin:12px 0 4px}
+.field{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 10px}
+.pbody h2{margin:0;font-size:16px}
+.chip{display:inline-block;font-size:11px;padding:1px 8px;border-radius:10px;background:var(--card2);color:var(--muted);margin:6px 4px 0 0}
+.pbody a{color:var(--accent)}.pbody code{font-size:12px;word-break:break-all}
+.stepnav{display:flex;align-items:center;justify-content:space-between;margin:12px 0}
+.stepnav button{border:0;background:none;color:var(--accent);font-weight:600}
+.stepnav button.nx{background:var(--accent);color:var(--bg);border-radius:6px}
+.stepnav span{color:var(--muted);font-size:12px}
+.step{display:grid;grid-template-columns:28px 1fr;gap:4px 8px;padding:10px;border-radius:8px;border:1px solid transparent;cursor:pointer;margin-bottom:6px}
+.step:hover{background:var(--card)}
+.step.on{background:var(--card);border-color:var(--accent)}
+.step .n{grid-row:span 3;color:var(--muted);font-size:10px;line-height:1.1}.step .n b{display:block;font-size:16px;color:var(--ink)}
+.step .ft{display:grid;grid-template-columns:1fr 18px 1fr;gap:4px;font-weight:600}.step .ft i{color:var(--accent);font-style:normal}
+.step .via{color:var(--muted);font-size:12px}
+.empty{color:var(--muted)}
+.embed{grid-template-rows:1fr}
+.embed #top,.embed #sub,.embed #tools,.embed aside,.embed #bottom{display:none}
+.embed main{grid-template-columns:1fr}
+.shell{grid-template-rows:auto 1fr}.shell #top{display:none}
+@media (max-width:760px){main{grid-template-columns:1fr;grid-template-rows:1fr 42vh}#tools{display:none}aside{border-left:0;border-top:1px solid var(--line)}}
+</style>
+</head>
+<body>
+<header id="top">
+  <div class="logo">S</div>
+  <span class="tab">MODEL</span><span class="tab on">DIAGRAMS</span>
+  <div id="title"><b id="mname">Strata</b><small id="mpath">Chưa mở model</small></div>
+  <button id="theme" title="Đổi giao diện sáng/tối">◐</button>
+</header>
+<nav id="sub"><span id="crumbs"></span></nav>
+<main>
+  <div id="tools">
+    <button class="on" title="Kéo để di chuyển"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 3l14 8-6 2-2 6z"/></svg>Move</button>
+    <button id="fit" title="Vừa khung (F)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>Fit</button>
+    <button id="zin" title="Phóng to (+)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5M8 11h6M11 8v6"/></svg>Zoom in</button>
+    <button id="zout" title="Thu nhỏ (-)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5M8 11h6"/></svg>Zoom out</button>
+    <hr>
+    <button id="up" title="Lên một tầng (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 19V5M6 11l6-6 6 6"/></svg>Up</button>
+  </div>
+  <div id="stage">
+    <div id="drop">Đang tải model…</div>
+    <div id="bottom">
+      <select id="tag"><option value="">Tags: tất cả</option></select>
+      <span id="zoomlbl">100%</span>
+    </div>
+  </div>
+  <aside>
+    <div class="ptabs"><a data-p="info" class="on">Chi tiết</a><a data-p="flows">Diagram flows</a></div>
+    <div class="pbody" id="pinfo"><p class="empty">Bấm một object để xem chi tiết. Bấm đúp hoặc bấm 🔍 để zoom vào.</p></div>
+    <div class="pbody" id="pflows" hidden></div>
+  </aside>
+</main>
+<script>
+"use strict";
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const P=new URLSearchParams(location.search);
+let M=null, byId={}, focus=null, selected=null, flow=null, step=0, codeBase="/code/";
+const codeQ=P.get("project")?"?project="+encodeURIComponent(P.get("project")):"";
+let cam={x:0,y:0,k:1}, graphBox=null;
+const NW=200, NH=78;
+const TYPE_LABEL={actor:"Actor",system:"System",app:"App",store:"Store",component:"Component",group:"Group"};
+// Small line icons per C4 type, drawn in a 20x20 box.
+const ICON={
+  actor:'<circle cx="10" cy="6" r="3.5"/><path d="M3 18c1-4 4-6 7-6s6 2 7 6"/>',
+  system:'<rect x="2" y="3" width="16" height="14" rx="2"/><path d="M2 7h16"/>',
+  app:'<rect x="2" y="2" width="7" height="7" rx="1"/><rect x="11" y="2" width="7" height="7" rx="1"/><rect x="2" y="11" width="7" height="7" rx="1"/><rect x="11" y="11" width="7" height="7" rx="1"/>',
+  store:'<ellipse cx="10" cy="4.5" rx="7" ry="2.5"/><path d="M3 4.5v11c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-11M3 10c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/>',
+  component:'<path d="M10 2l7 4v8l-7 4-7-4V6z"/><path d="M3 6l7 4 7-4M10 10v8"/>',
+  group:'<rect x="2" y="2" width="16" height="16" rx="2" stroke-dasharray="3 2"/>'
+};
+
+function load(m){
+  M=m; byId={};
+  (m.objects||[]).forEach(o=>byId[o.id]=o);
+  (m.connections||[]).forEach((c,i)=>c.id=c.id||`c${i}`);
+  $("#tag").innerHTML='<option value="">Tags: tất cả</option>'+Object.keys(m.tags||{}).map(t=>`<option>${esc(t)}</option>`).join("");
+  $("#drop").style.display="none"; document.title=`${m.name||"Model"} · Strata`; $("#mname").textContent=m.name||"Model";
+  flow=null; step=0; renderFlows();
+  const h=P.get("focus")||location.hash.slice(1);
+  if(h&&byId[h]){if(kids(h).length) go(h); else {go(byId[h].parent||null); selected=h; render(true)}} else go(null);
+}
+const kids=id=>(M.objects||[]).filter(o=>(o.parent||null)===id);
+const chain=id=>{const r=[];for(let o=byId[id];o;o=byId[o.parent])r.unshift(o.id);return r};
+const nm=id=>byId[id]?.name||id;
+// Map an endpoint to the object visible in the view focused on F.
+function lift(id,F){
+  const fc=new Set(F?chain(F):[]); let o=byId[id];
+  while(o){const p=o.parent||null; if(p===F) return {id:o.id,ext:false}; if(p===null||fc.has(p)) return {id:o.id,ext:true}; o=byId[p];}
+  return null;
+}
+function view(F){
+  const nodes=new Map(), edges=new Map();
+  kids(F).forEach(o=>nodes.set(o.id,{o,ext:false}));
+  for(const c of M.connections||[]){
+    const a=lift(c.from,F), b=lift(c.to,F); if(!a||!b||a.id===b.id||(a.ext&&b.ext)) continue;
+    [a,b].forEach(x=>{if(!nodes.has(x.id))nodes.set(x.id,{o:byId[x.id],ext:x.ext})});
+    const k=a.id+"→"+b.id; const e=edges.get(k)||{from:a.id,to:b.id,list:[]}; e.list.push(c); edges.set(k,e);
+  }
+  return {nodes,edges};
+}
+const label=e=>e.list.length>1?`${e.list.length} kết nối`:(e.list[0].name||"");
+const tech=e=>e.list.length>1?"":(e.list[0].technology||"");
+// Smooth a dagre polyline into a curve through the midpoints.
+function curve(p){
+  if(p.length<3) return `M${p[0].x},${p[0].y}L${p[p.length-1].x},${p[p.length-1].y}`;
+  let d=`M${p[0].x},${p[0].y}`;
+  for(let i=1;i<p.length-1;i++){const mx=(p[i].x+p[i+1].x)/2,my=(p[i].y+p[i+1].y)/2;d+=`Q${p[i].x},${p[i].y} ${i===p.length-2?p[i+1].x:mx},${i===p.length-2?p[i+1].y:my}`}
+  return d;
+}
+
+function render(keepCam){
+  const {nodes,edges}=view(focus);
+  const g=new dagre.graphlib.Graph({compound:true});
+  g.setGraph({rankdir:M.layout||"LR",nodesep:50,ranksep:110,marginx:40,marginy:40}); g.setDefaultEdgeLabel(()=>({}));
+  if(focus) g.setNode("__scope",{});
+  nodes.forEach((n,id)=>{g.setNode(id,{width:NW,height:NH}); if(focus&&!n.ext) g.setParent(id,"__scope")});
+  edges.forEach(e=>g.setEdge(e.from,e.to,{width:Math.min(200,Math.max(label(e).length,tech(e).length)*6),height:30,labelpos:"c"}));
+  dagre.layout(g);
+  graphBox={w:g.graph().width,h:g.graph().height};
+  const tag=$("#tag").value, hot=flowHot();
+  let s=`<svg><defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 1L9 5L0 9z" fill="context-stroke"/></marker></defs><g id="cam">`;
+  if(focus){
+    const sc=g.node("__scope"), o=byId[focus];
+    s+=`<g class="scope"><rect x="${sc.x-sc.width/2}" y="${sc.y-sc.height/2-14}" width="${sc.width}" height="${sc.height+14}" rx="10"/><text x="${sc.x-sc.width/2+12}" y="${sc.y-sc.height/2+2}">${esc(o.name||o.id)} · ${esc(TYPE_LABEL[o.type]||o.type)}</text></g>`;
+  }
+  edges.forEach(e=>{
+    const ge=g.edge(e.from,e.to), c0=e.list[0];
+    const hn=e.list.map(c=>hot.get(c.id)).find(v=>v!==undefined);
+    const isHot=hn!==undefined, st=e.list.length===1?(c0.status||"live"):"live";
+    const dim=(tag&&!e.list.some(c=>(c.tags||[]).includes(tag)))||(flow&&!isHot);
+    const dir=c0.direction||"outgoing", d=curve(ge.points);
+    const mk=(dir!=="none"?'marker-end="url(#ar)"':"")+(dir==="bidirectional"?' marker-start="url(#ar)"':"");
+    s+=`<g class="edge ${st} ${isHot?"hot":""} ${dim?"dim":""}" data-e="${esc(e.from+"→"+e.to)}"><path class="hit" d="${d}"/><path d="${d}" ${mk}/>
+      ${tech(e)?`<text x="${ge.x}" y="${ge.y-5}" text-anchor="middle">${esc(tech(e))}</text>`:""}
+      <text x="${ge.x}" y="${ge.y+9}" text-anchor="middle">${isHot?`<tspan class="num">${hn+1}. </tspan>`:""}${esc(label(e))}</text></g>`;
+  });
+  nodes.forEach((n,id)=>{
+    const p=g.node(id), o=n.o, x=p.x-NW/2, y=p.y-NH/2, t=o.type||"component";
+    const col=(o.tags||[]).map(t=>M.tags?.[t]?.color).find(Boolean);
+    const dim=tag&&!(o.tags||[]).includes(tag), deep=kids(id).length>0;
+    const rx=t==="actor"?NH/2:t==="store"?18:8;
+    s+=`<g class="node ${n.ext?"ext":""} ${selected===id?"sel":""} ${dim?"dim":""}" data-id="${esc(id)}">
+      <rect class="box" x="${x}" y="${y}" width="${NW}" height="${NH}" rx="${rx}"/>
+      ${col?`<rect x="${x+rx}" y="${y}" width="${NW-2*rx}" height="3" rx="1.5" fill="${esc(col)}"/>`:""}
+      <g class="ico" transform="translate(${x+14},${y+14})" stroke="var(--${t})">${ICON[t]||ICON.component}</g>
+      ${deep?`<g class="zbtn" data-z="${esc(id)}"><rect class="zoom" x="${x+NW-30}" y="${y+10}" width="20" height="20" rx="5"/><path d="M${x+NW-24} ${y+20}h8M${x+NW-20} ${y+16}v8"/></g>`:""}
+      <text class="t" x="${x+42}" y="${y+28}">${esc(clip(o.name||o.id,20))}</text>
+      <text class="s" x="${x+14}" y="${y+56}">[${esc(TYPE_LABEL[t]||t)}]${o.technology?" · "+esc(clip(o.technology,20)):""}</text>
+      ${o.status&&o.status!=="live"?`<text class="s" x="${x+NW-12}" y="${y+56}" text-anchor="end">${esc(o.status)}</text>`:""}</g>`;
+  });
+  $("#stage>svg")?.remove(); $("#stage").insertAdjacentHTML("afterbegin",s+"</g></svg>");
+  if(!keepCam) fit(); else applyCam();
+  $("#stage").querySelectorAll(".node").forEach(el=>{
+    el.onclick=ev=>{if(ev.target.closest(".zbtn")) return go(el.dataset.id); selected=el.dataset.id;showObj(byId[selected]);render(true)};
+    el.ondblclick=()=>{if(kids(el.dataset.id).length)go(el.dataset.id)};
+  });
+  $("#stage").querySelectorAll(".edge").forEach(el=>el.onclick=()=>showEdge(edges.get(el.dataset.e)));
+  $("#crumbs").innerHTML=[`<a data-go="">${esc(M.name||"Landscape")}</a>`,...(focus?chain(focus):[]).map(i=>`<a data-go="${esc(i)}">${esc(nm(i))}</a>`)].join('<span class="sep">›</span>');
+  $("#crumbs").querySelectorAll("a").forEach(a=>a.onclick=()=>go(a.dataset.go||null));
+  $("#mpath").textContent=focus?`${TYPE_LABEL[byId[focus].type]||""} diagram`:"Context diagram";
+}
+const clip=(s,n)=>(s=String(s)).length>n?s.slice(0,n-1)+"…":s;
+function go(F){focus=F;selected=null;history.replaceState(null,"",location.search+"#"+(F||""));render()}
+
+/* camera: pan with drag, zoom with wheel */
+function applyCam(){const c=$("#cam"); if(c) c.setAttribute("transform",`translate(${cam.x},${cam.y}) scale(${cam.k})`); $("#zoomlbl").textContent=Math.round(cam.k*100)+"%"}
+function fit(){
+  if(!graphBox) return; const r=$("#stage").getBoundingClientRect();
+  cam.k=Math.min(1.2,Math.min(r.width/graphBox.w,r.height/graphBox.h)*.92);
+  cam.x=(r.width-graphBox.w*cam.k)/2; cam.y=(r.height-graphBox.h*cam.k)/2; applyCam();
+}
+function zoomAt(f,px,py){const r=$("#stage").getBoundingClientRect();px??=r.width/2;py??=r.height/2;
+  const k=Math.max(.2,Math.min(3,cam.k*f)); cam.x=px-(px-cam.x)*k/cam.k; cam.y=py-(py-cam.y)*k/cam.k; cam.k=k; applyCam()}
+$("#stage").addEventListener("wheel",e=>{e.preventDefault();const r=e.currentTarget.getBoundingClientRect();zoomAt(Math.exp(-e.deltaY*.0015),e.clientX-r.left,e.clientY-r.top)},{passive:false});
+let drag=null;
+$("#stage").onpointerdown=e=>{if(e.target.closest(".node,.edge,#bottom"))return;drag={x:e.clientX-cam.x,y:e.clientY-cam.y};e.currentTarget.classList.add("pan");e.currentTarget.setPointerCapture(e.pointerId)};
+$("#stage").onpointermove=e=>{if(!drag)return;cam.x=e.clientX-drag.x;cam.y=e.clientY-drag.y;applyCam()};
+$("#stage").onpointerup=e=>{drag=null;e.currentTarget.classList.remove("pan")};
+$("#fit").onclick=fit; $("#zin").onclick=()=>zoomAt(1.2); $("#zout").onclick=()=>zoomAt(1/1.2);
+$("#up").onclick=()=>{if(M&&focus)go(byId[focus].parent||null)};
+
+/* right panel */
+function tabTo(p){document.querySelectorAll(".ptabs a").forEach(a=>a.classList.toggle("on",a.dataset.p===p));$("#pinfo").hidden=p!=="info";$("#pflows").hidden=p!=="flows"}
+document.querySelectorAll(".ptabs a").forEach(a=>a.onclick=()=>tabTo(a.dataset.p));
+function links(o){return (o.links||[]).map(l=>/^https?:/.test(l)?`<div><a href="${esc(l)}" target="_blank">${esc(l)}</a></div>`:`<div><a href="${codeBase}${esc(l)}${codeQ}" target="_blank"><code>${esc(l)}</code></a></div>`).join("")}
+function showObj(o){
+  tabTo("info");
+  $("#pinfo").innerHTML=`<div class="lbl">Tên</div><h2>${esc(o.name||o.id)}</h2>
+  <span class="chip">${esc(TYPE_LABEL[o.type]||o.type)}</span>${o.status?`<span class="chip">${esc(o.status)}</span>`:""}${(o.tags||[]).map(t=>`<span class="chip">#${esc(t)}</span>`).join("")}
+  ${o.technology?`<div class="lbl">Technology</div><div class="field">${esc(o.technology)}</div>`:""}
+  ${o.description?`<div class="lbl">Mô tả</div><div class="field">${esc(o.description)}</div>`:""}
+  ${o.links?.length?`<div class="lbl">Code</div>${links(o)}`:""}
+  ${kids(o.id).length?`<p><button onclick="go('${esc(o.id)}')">Zoom vào (${kids(o.id).length}) →</button></p>`:""}`;
+}
+function showEdge(e){
+  tabTo("info");
+  $("#pinfo").innerHTML=`<div class="lbl">Kết nối</div><h2>${esc(nm(e.from))} → ${esc(nm(e.to))}</h2>`+e.list.map(c=>`<div class="lbl">${esc(nm(c.from))} → ${esc(nm(c.to))}</div>
+  <div class="field"><b>${esc(c.name||"")}</b><br><span class="chip">${esc(c.technology||"?")}</span><span class="chip">${esc(c.status||"live")}</span>${c.description?`<div>${esc(c.description)}</div>`:""}</div>`).join("");
+}
+const stepConn=st=>st.connection||(M.connections.find(c=>c.from===st.from&&c.to===st.to)||{}).id;
+// Map connection id -> step index for the current step (IcePanel highlights one step at a time).
+function flowHot(){
+  const f=flow&&(M.flows||[]).find(x=>x.id===flow); if(!f) return new Map();
+  return new Map([[stepConn(f.steps[step]),step]]);
+}
+function renderFlows(){
+  const fl=M?.flows||[];
+  if(!fl.length){$("#pflows").innerHTML='<p class="empty">Model này chưa có flow.</p>';return}
+  const f=fl.find(x=>x.id===flow);
+  let h=`<div class="lbl">Flow name</div><select id="flow" style="width:100%"><option value="">— chọn flow —</option>${fl.map(x=>`<option value="${esc(x.id)}" ${x.id===flow?"selected":""}>${esc(x.name)}</option>`).join("")}</select>`;
+  if(f){
+    h+=`<div class="stepnav"><button id="prev">« Previous</button><span>Step ${step+1} of ${f.steps.length}</span><button id="next" class="nx">Next »</button></div>`;
+    h+=f.steps.map((st,i)=>{const c=M.connections.find(x=>x.id===stepConn(st))||st;
+      return `<div class="step ${i===step?"on":""}" data-i="${i}"><div class="n">Step<b>${i+1}.</b></div>
+      <div class="ft"><span>${esc(nm(c.from))}</span><i>→</i><span>${esc(nm(c.to))}</span></div>
+      ${c.technology?`<div class="via">via ${esc(c.technology)}</div>`:""}<div>${esc(st.text||c.name||"")}</div></div>`}).join("");
+  }
+  $("#pflows").innerHTML=h;
+  $("#flow").onchange=e=>{flow=e.target.value||null;step=0;renderFlows();render(true)};
+  if(f){
+    $("#prev").onclick=()=>setStep(step-1); $("#next").onclick=()=>setStep(step+1);
+    $("#pflows").querySelectorAll(".step").forEach(el=>el.onclick=()=>setStep(+el.dataset.i));
+    $("#pflows .step.on")?.scrollIntoView({block:"nearest"});
+  }
+}
+function setStep(i){const f=M.flows.find(x=>x.id===flow);if(!f)return;step=Math.max(0,Math.min(f.steps.length-1,i));renderFlows();render(true)}
+
+$("#tag").onchange=()=>render(true);
+$("#theme").onclick=()=>{const r=document.documentElement;r.dataset.theme=r.dataset.theme==="light"?"dark":"light";try{localStorage.setItem("strata-theme",r.dataset.theme)}catch{}};
+try{const t=localStorage.getItem("strata-theme");if(t)document.documentElement.dataset.theme=t}catch{}
+document.onkeydown=e=>{if(!M||e.target.tagName==="SELECT")return;
+  if(e.key==="Escape"&&focus)go(byId[focus].parent||null);
+  if(flow&&e.key==="ArrowRight")setStep(step+1); if(flow&&e.key==="ArrowLeft")setStep(step-1);
+  if(e.key==="f")fit(); if(e.key==="+"||e.key==="=")zoomAt(1.2); if(e.key==="-")zoomAt(1/1.2)};
+window.onresize=()=>M&&fit();
+if(P.get("embed")) document.body.classList.add("embed");
+if(P.get("shell")) document.body.classList.add("shell");
+fetch("/api/c4"+location.search).then(r=>r.ok?r.json():Promise.reject(r.status))
+  .then(d=>load({...d.meta,objects:d.objects,connections:d.connections,flows:d.flows}))
+  .catch(e=>{$("#drop").textContent=`Không tải được model (${e}). Chạy strata.py import-yaml rồi strata.py serve.`});
+</script>
+</body>
+</html>

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Strata</title>
+<link rel="stylesheet" href="/page.css">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div id="shell">
+  <aside id="side" aria-label="Điều hướng">
+    <a id="brand" href="#/"><span id="moon" aria-hidden="true"></span><span class="foil">Strata</span><span id="band" aria-hidden="true"></span></a>
+    <div class="slabel">Dự án</div>
+    <div id="tree"></div>
+    <div class="slabel" id="tablabel">Mục</div>
+    <nav id="tabs"></nav>
+    <div id="sidefoot"><button id="theme" class="ib" aria-label="Đổi sáng/tối" title="Đổi sáng/tối"></button><button id="help" class="ib" aria-label="Phím tắt" title="Phím tắt (?)">?</button></div>
+  </aside>
+  <div id="scrim"></div>
+  <div id="main">
+    <header id="top">
+      <button id="menu" class="ib" aria-label="Menu">☰</button>
+      <nav id="crumbs" aria-label="Breadcrumb"></nav>
+      <button id="searchbtn" aria-label="Tìm kiếm"><span>Tìm kiếm…</span><kbd>Ctrl K</kbd></button>
+    </header>
+    <div id="content"></div>
+  </div>
+</div>
+<div id="pal" hidden>
+  <div id="palbox" class="edge" role="dialog" aria-label="Tìm kiếm">
+    <input id="q" type="search" placeholder="Gõ lệnh hoặc tìm task, issue, decision, thảo luận, tài liệu…" autocomplete="off" role="combobox" aria-controls="hits" aria-expanded="true">
+    <ul id="hits" role="listbox"></ul>
+    <div id="palfoot"><span><kbd>↑</kbd><kbd>↓</kbd> chọn</span><span><kbd>Enter</kbd> mở</span><span><kbd>Esc</kbd> đóng</span></div>
+  </div>
+</div>
+<div id="keys" hidden>
+  <div id="keysbox" class="edge" role="dialog" aria-label="Phím tắt">
+    <h2>Phím tắt</h2>
+    <dl>
+      <dt><kbd>Ctrl K</kbd> <kbd>/</kbd></dt><dd>Tìm kiếm, lệnh</dd>
+      <dt><kbd>G</kbd> rồi <kbd>O T I D P R A L</kbd></dt><dd>Tổng quan, Task, Issue, Decision, Thảo luận, Tài liệu, Kiến trúc, Nhật ký</dd>
+      <dt><kbd>J</kbd> <kbd>K</kbd></dt><dd>Dòng sau / trước</dd>
+      <dt><kbd>Enter</kbd></dt><dd>Mở dòng đang chọn</dd>
+      <dt><kbd>F</kbd></dt><dd>Tới bộ lọc</dd>
+      <dt><kbd>[</kbd></dt><dd>Thu / mở sidebar</dd>
+      <dt><kbd>Alt ←</kbd> <kbd>Alt →</kbd></dt><dd>Tài liệu trước / sau</dd>
+      <dt><kbd>Esc</kbd></dt><dd>Đóng lớp trên cùng</dd>
+    </dl>
+  </div>
+</div>
+<div id="chord" hidden>G …</div>
+<script>var STRATA_SHELL=1</script>
+<script src="/vendor/mermaid.min.js"></script>
+<script src="/page.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

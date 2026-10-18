@@ -1,0 +1,411 @@
+"use strict";
+// App shell. Read-only. All text goes through textContent (el() from page.js); never assigns markup.
+// el, get, enc and renderPage come from page.js (STRATA_SHELL makes it skip its own routing).
+const $=id=>document.getElementById(id);
+const TABS=[["overview","Tổng quan","o"],["task","Task","t"],["issue","Issue","i"],["decision","Decision","d"],["pages","Thảo luận","p"],["docs","Tài liệu","r"],["c4","Kiến trúc","a"],["audit","Nhật ký","l"]];
+const TAB_LABEL=Object.fromEntries(TABS.map(t=>[t[0],t[1]]));
+const ST_ITEM=["proposed","approved","open","doing","done","rejected"];
+const ST_DEC=["proposed","accepted","superseded","rejected"];
+const ST_DOC=["current","draft","outdated","missing"], KIND_DOC=["research","architect","review","plan","other"];
+const store={get(k){try{return localStorage.getItem(k)}catch{return null}},set(k,v){try{localStorage.setItem(k,v)}catch{}}};
+const NOGRP="Chưa phân nhóm";
+let PROJ=[], byId={}, token=0;
+
+/* ---------- ornament + icons: constant SVG strings only (numbers computed here, never user text) ---------- */
+const svg=s=>document.importNode(new DOMParser().parseFromString(s,"image/svg+xml").documentElement,true);
+const S=(vb,body,extra)=>`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" fill="none" stroke="currentColor" aria-hidden="true" ${extra||""}>${body}</svg>`;
+const O={
+  // crescent moon: logo mark
+  moon:S("0 0 24 24",'<path d="M15.5 3.2a9 9 0 1 0 5.6 14.6A7.4 7.4 0 0 1 15.5 3.2z" stroke-width="1.3"/><circle cx="18.6" cy="5.4" r=".7" fill="currentColor" stroke="none" opacity=".7"/>'),
+  // 夔龙 (HSK QuyLongBand): empty states only. A band, so running off the edge is allowed.
+  dragon:'<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs><pattern id="kl" width="72" height="24" patternUnits="userSpaceOnUse">'+
+    '<g fill="none" stroke="currentColor" stroke-width=".9" stroke-linejoin="round"><path d="M4 18 V8 H16 V4 H26 V18 Z"/><path d="M10 12 a2.5 2.5 0 1 0 0.01 0" stroke-width=".7"/>'+
+    '<path d="M26 11 H40 V6 H52 V16 H62 V10 H68"/><path d="M40 16 H50" stroke-width=".6" opacity=".75"/><path d="M30 18 V22 M46 18 V22 M58 16 V22" stroke-width=".7" opacity=".8"/>'+
+    '<path d="M68 10 a3 3 0 0 1 2 5"/></g></pattern></defs><rect width="100%" height="100%" fill="url(#kl)"/></svg>',
+};
+// procedural fading contour lines: sidebar header (fixed seed), overview background + project cards (seeded by id)
+function contours(seed,w=480,h=200,n=8){
+  let s=seed%233280;const r=()=>((s=(s*9301+49297)%233280)/233280), ph=[r()*6,r()*6,r()*6];let p="";
+  for(let i=0;i<n;i++){const k=h/200, y0=h*(.3+.6*i/(n-1));let d="M0 "+y0.toFixed(1);
+    for(let x=-32;x<=w+32;x+=8)d+=" L"+x+" "+(y0-k*(Math.sin(x/90+ph[0]+i*.3)*14+Math.sin(x/37+ph[1])*6*(1-i/n)+Math.sin(x/170+ph[2])*22)).toFixed(1);
+    p+=`<path d="${d}" stroke-opacity="${(.9*(1-i/n)).toFixed(2)}"/>`}
+  return S(`0 0 ${w} ${h}`,p,'stroke-width="1" vector-effect="non-scaling-stroke" preserveAspectRatio="none"');
+}
+// traced hero art (static asset from scripts/trace_hero.py), fetched once and inlined so CSS can colour fills and strokes
+const HERO={};const heroArt=n=>HERO[n]||(HERO[n]=fetch("/assets/hero-"+n+".svg").then(r=>r.ok?r.text():Promise.reject()).then(svg));
+const hash=s=>{let h=7;for(const c of String(s))h=(h*31+c.charCodeAt(0))>>>0;return h};
+// one status icon for every list (Linear geometry: dashed / ring / half / filled check / x / !)
+const SI={
+  dash:'<circle cx="7" cy="7" r="5.5" stroke-width="1.5" stroke-dasharray="2 2.3"/>',
+  ring:'<circle cx="7" cy="7" r="5.5" stroke-width="1.5"/>',
+  half:'<circle cx="7" cy="7" r="5.5" stroke-width="1.5"/><path d="M7 3.5A3.5 3.5 0 0 1 7 10.5Z" fill="currentColor" stroke="none"/>',
+  done:'<circle cx="7" cy="7" r="6.5" fill="currentColor" stroke="none"/><path d="M4.4 7.2l1.8 1.8 3.5-3.7" stroke-width="1.5" style="stroke:var(--bg)"/>',
+  x:'<circle cx="7" cy="7" r="6.5" fill="currentColor" stroke="none"/><path d="M5 5l4 4M9 5l-4 4" stroke-width="1.5" style="stroke:var(--bg)"/>',
+};
+const SHAPE={proposed:"dash",draft:"half",approved:"ring",open:"ring",outdated:"ring",doing:"half",done:"done",current:"done",accepted:"done",rejected:"x",missing:"x",superseded:"x"};
+function statusIcon(st){const e=svg(S("0 0 14 14",SI[SHAPE[st]]||SI.ring,'class="si"'));e.classList.add("s-"+st);return e}
+const PRI={low:'<rect x="2" y="10" width="3" height="4" rx="1" fill="currentColor" stroke="none"/><rect x="6.5" y="6" width="3" height="8" rx="1" fill="currentColor" stroke="none" opacity=".3"/><rect x="11" y="2" width="3" height="12" rx="1" fill="currentColor" stroke="none" opacity=".3"/>',
+  medium:'<rect x="2" y="10" width="3" height="4" rx="1" fill="currentColor" stroke="none"/><rect x="6.5" y="6" width="3" height="8" rx="1" fill="currentColor" stroke="none"/><rect x="11" y="2" width="3" height="12" rx="1" fill="currentColor" stroke="none" opacity=".3"/>',
+  high:'<rect x="2" y="10" width="3" height="4" rx="1" fill="currentColor" stroke="none"/><rect x="6.5" y="6" width="3" height="8" rx="1" fill="currentColor" stroke="none"/><rect x="11" y="2" width="3" height="12" rx="1" fill="currentColor" stroke="none"/>',
+  urgent:'<rect x="1" y="1" width="14" height="14" rx="3" fill="currentColor" stroke="none" style="color:var(--st-block)"/><path d="M8 4.5v4.5M8 11.2v.3" stroke-width="1.8" style="stroke:var(--bg)"/>',
+  none:'<path d="M2 8h2.5M6.75 8h2.5M11.5 8H14" stroke-width="1.5" opacity=".5"/>'};
+const priIcon=p=>{const e=svg(S("0 0 16 16",PRI[p]||PRI.none,'class="pri"')), t=document.createElementNS("http://www.w3.org/2000/svg","title");t.textContent=p||"không ưu tiên";e.append(t);return e};
+const IC={overview:'<path d="M2.5 13.5h11M4 11V7M8 11V3.5M12 11V6"/>',task:'<circle cx="8" cy="8" r="5.5"/><path d="M5.6 8.1l1.6 1.6 3.2-3.4"/>',
+  issue:'<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.5M8 10.8v.2"/>',decision:'<path d="M8 2.5v11M3 5.5h10M3 5.5l-1.5 4h3zM13 5.5l-1.5 4h3z"/>',
+  pages:'<path d="M3 3.5h10v7H7l-3 2.5v-2.5H3z"/>',docs:'<path d="M4 2.5h5.5L12 5v8.5H4z"/><path d="M6 8h4M6 10.5h4"/>',
+  c4:'<rect x="2.5" y="2.5" width="4" height="4" rx="1"/><rect x="9.5" y="9.5" width="4" height="4" rx="1"/><path d="M6.5 4.5h3a2 2 0 0 1 2 2v3"/>',
+  audit:'<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',folder:'<path d="M2.5 4.5h4l1.5 1.5h5.5v6.5h-11z"/>',proj:'<path d="M2 12.5l3.5-6 2.5 3.5 2-2.5 4 5z"/>',
+  chev:'<path d="M6 4l4 4-4 4"/>',prev:'<path d="M10 4L6 8l4 4"/>',reload:'<path d="M13 8a5 5 0 1 1-1.5-3.5M13 3v2.5h-2.5"/>',
+  ext:'<path d="M9 3h4v4M13 3L7.5 8.5M11 9.5V13H3V5h3.5"/>',copy:'<rect x="5.5" y="5.5" width="7.5" height="7.5" rx="1.5"/><path d="M10.5 5.5V3H3v7.5h2.5"/>',
+  sun:'<circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1"/>'};
+const icon=k=>svg(S("0 0 16 16",IC[k],'stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"'));
+const orn=(cls,s)=>{const d=el("div",cls);d.setAttribute("aria-hidden","true");d.append(svg(s));return d};
+function empty(title,hint,code){
+  const d=el("div","empty");d.append(orn("dragon",O.dragon),el("b","",title));
+  if(hint){const p=el("p","muted",hint);if(code)p.append(" ",el("code","",code));d.append(p)}
+  return d;
+}
+
+/* ---------- routing ---------- */
+const hashFor=(p,tab,id)=>"#/p/"+enc(p)+"/"+(tab||"overview")+(id!=null&&id!==""?"/"+String(id).split("/").map(enc).join("/"):"");
+function link(text,href,cls){const a=el("a",cls||"",text);a.href=href;return a}
+function route(){
+  const h=location.hash.startsWith("#/")?location.hash.slice(2).split("/").map(decodeURIComponent):[];
+  if(h[0]==="p"&&byId[h[1]]) return {p:h[1],tab:TAB_LABEL[h[2]]?h[2]:"overview",id:h.slice(3).join("/")};
+  return {p:(PROJ.find(x=>!x.parent)||PROJ[0]||{}).id,tab:"overview",id:""};
+}
+const total=o=>Object.values(o||{}).reduce((a,b)=>a+b,0);
+function counts(p){return {task:total(p.tasks),issue:p.issues_open,decision:p.decisions,pages:p.pages,docs:p.docs}}
+let CUR={};
+
+/* ---------- sidebar + breadcrumb ---------- */
+function side(r){
+  // flat list of real projects; groups (anything that is some project's parent) stay reachable via breadcrumb/palette
+  const leaf=PROJ.filter(p=>!PROJ.some(x=>x.parent===p.id));
+  $("tree").replaceChildren(...leaf.map(p=>{
+    const a=link("",hashFor(p.id,"overview"),"it"+(p.id===r.p?" on":""));
+    if(p.id===r.p)a.setAttribute("aria-current","page");
+    a.append(icon("proj"),el("span","l",p.name));return a}));
+  const c=r.p?counts(byId[r.p]):{};
+  $("tablabel").hidden=!r.p;
+  $("tabs").replaceChildren(...(r.p?TABS.map(([k,l])=>{
+    const a=link("",hashFor(r.p,k),"it"+(k===r.tab?" on edge":""));a.append(icon(k),el("span","l",l));
+    if(k===r.tab)a.setAttribute("aria-current","page");
+    if(c[k])a.append(el("span","n",c[k]));a.title=l+" (G "+TABS.find(t=>t[0]===k)[2].toUpperCase()+")";return a}):[]));
+}
+function crumbs(r){
+  const chain=[];for(let p=byId[r.p];p;p=byId[p.parent])chain.unshift(p);
+  const parts=[], sep=()=>el("span","sep","›");
+  chain.forEach((p,i)=>{if(i)parts.push(sep());parts.push(link(p.name,hashFor(p.id,"overview")))});
+  if(r.p){parts.push(sep(),r.tab==="overview"&&!r.id?el("b","",TAB_LABEL.overview):link(TAB_LABEL[r.tab],hashFor(r.p,r.tab)));
+    if(r.id)parts.push(sep(),el("b","",r.id.split("/").pop()))}
+  $("crumbs").replaceChildren(...parts);
+}
+
+async function render(){
+  const my=++token;
+  document.body.classList.remove("menu");
+  try{PROJ=await get("/api/projects");byId=Object.fromEntries(PROJ.map(p=>[p.id,p]))}catch(e){return $("content").replaceChildren(el("p","err",e.message))}
+  if(my!==token)return;
+  const r=route();CUR=r;side(r);crumbs(r);
+  const box=el("div");
+  try{
+    if(!r.p) box.append(empty("Chưa có project nào","Tạo bằng:","strata.py project add ID --name ..."));
+    else await VIEW[r.tab](box,r.p,r.id);
+  }catch(e){box.append(el("p","err",e.message))}
+  if(my!==token)return;
+  document.title=(r.p?byId[r.p].name+" · "+TAB_LABEL[r.tab]+" · ":"")+"Strata";
+  const rd=box.querySelector(":scope>.reader");
+  if(!rd&&!box.className)box.className="page";
+  $("content").replaceChildren(rd||box);
+  $("content").scrollTop=0;
+}
+/* gold sheen: one global scheduler, strictly sequential. Wait 6-12s, sweep ONE random visible title once, repeat. */
+const calm=matchMedia("(prefers-reduced-motion: reduce)");
+(function sheenLoop(){setTimeout(()=>{
+  const ts=[...document.querySelectorAll(".foil,#pg header h1")].filter(e=>e.getClientRects().length);
+  if(document.hidden||calm.matches||!ts.length)return sheenLoop();
+  const e=ts[Math.floor(Math.random()*ts.length)], done=()=>{if(over)return;over=1;e.classList.remove("sweep");sheenLoop()};let over=0;
+  e.addEventListener("animationend",done,{once:true});e.addEventListener("animationcancel",done,{once:true});
+  setTimeout(done,6500); // title removed mid-sweep fires no animationend
+  e.classList.add("sweep")},6e3+Math.random()*6e3)})();
+
+/* ---------- small builders ---------- */
+const ago=s=>(s||"").slice(0,16).replace("T"," ");
+function rel(s){
+  if(!s)return "";const m=(Date.now()-Date.parse(s))/6e4;
+  return m<1?"vừa xong":m<60?Math.round(m)+"p":m<1440?Math.round(m/60)+"h":m<43200?Math.round(m/1440)+"d":Math.round(m/43200)+"th";
+}
+function dateCell(s){const d=el("span","d",rel(s));d.title=ago(s);return d}
+function pill(st){const p=el("span","pill s-"+st);p.append(el("i"),st);return p}
+function head(title,n){const h=el("div","head");h.append(el("h1","foil",title));if(n!=null)h.append(el("span","n",n));return h}
+function fbar(groups){
+  const b=el("div","fbar");b.append(el("span","lbl","Lọc"));
+  groups.forEach(([opts,cur,on,plain],i)=>{if(i)b.append(el("span","sp"));
+    ["",...opts].forEach(o=>{const x=el("button",o===cur?"on":"");if(o&&!plain)x.append(statusIcon(o));x.append(o||"tất cả");
+      x.setAttribute("aria-pressed",o===cur);x.onclick=()=>on(o);b.append(x)})});
+  return b;
+}
+function grouped(rows,key,order,label,mkRow){
+  const out=[], g={};rows.forEach(x=>(g[key(x)]=g[key(x)]||[]).push(x));
+  [...order.filter(k=>g[k]),...Object.keys(g).filter(k=>!order.includes(k)).sort((a,b)=>(a===NOGRP)-(b===NOGRP)||a.localeCompare(b))].forEach(k=>{
+    const h=el("div","grouph");label(k,h);h.append(el("span","n",g[k].length));out.push(h,...g[k].map(mkRow))});
+  return out;
+}
+function card(title,tab,p,rows,emptyText,n){
+  const c=el("div","card edge"), h=el("h2","",title);if(n!=null)h.append(el("span","n",n));h.append(link("Xem tất cả →",hashFor(p,tab)));
+  const ul=el("ul");
+  if(!rows.length)ul.append(el("li","muted",emptyText||"Trống"));
+  rows.forEach(([st,t,href,extra])=>{const li=el("li");if(st)li.append(statusIcon(st));li.append(link(t,href));if(extra)li.append(extra);ul.append(li)});
+  c.append(h,ul);return c;
+}
+
+const VIEW={
+  async overview(box,p){
+    const [tasks,issues,decs,pages,docs]=await Promise.all([get("/api/items?kind=task&project="+enc(p)),get("/api/items?kind=issue&project="+enc(p)),
+      get("/api/decisions?project="+enc(p)),get("/api/pages?project="+enc(p)),get("/api/docs?project="+enc(p))]);
+    const pr=byId[p], done=pr.tasks.done||0, doing=pr.tasks.doing||0, all=total(pr.tasks), pct=all?Math.round(100*done/all):0;
+    const hero=el("div","hero");// full-bleed hero art behind the content column: traced mountains anchored right + fitted waves edge to edge
+    const bg=el("div","herobg");bg.setAttribute("aria-hidden","true");const mt=el("div","mtn"), wv=el("div","waves");bg.append(wv,mt);box.append(bg);
+    heroArt("mountains").then(x=>mt.append(x.cloneNode(true))).catch(()=>{});
+    heroArt("mountains-waves").then(x=>wv.append(x.cloneNode(true))).catch(()=>{});
+    hero.append(el("h1","foil",pr.name));
+    if(pr.description)hero.append(el("p","",pr.description));
+    const props=el("div","props");
+    [["Trạng thái",pr.status||"—"],["Task",all],["Issue mở",pr.issues_open],["Decision",pr.decisions],["Tài liệu",pr.docs],["Cập nhật",rel(pr.last_update)||"chưa có"]]
+      .forEach(([k,v])=>{const s=el("span","",k+" ");s.append(el("b","",v));props.append(s)});
+    const prog=el("div","prog"), bar=el("div","bar"), a=el("i","b-done"), b=el("i","b-doing");
+    a.style.width=(all?100*done/all:0)+"%";b.style.width=(all?100*doing/all:0)+"%";bar.append(a,b);
+    prog.append(bar,el("span","pct",pct+"%"));
+    const stats=el("div","props");[["Scope",all],["Đang làm",doing],["Xong",done]].forEach(([k,v])=>{const s=el("span","",k+" ");s.append(el("b","",v));stats.append(s)});
+    hero.append(props,prog,stats);box.append(hero);
+    const subs=PROJ.filter(x=>x.parent===p);
+    if(subs.length){const g=el("div","grid");subs.forEach(s=>{
+      const c=link("",hashFor(s.id,"overview"),"card edge pcard");c.append(orn("topo",contours(hash(s.id))),el("b","",s.name),
+        el("span","",total(s.tasks)+" task · "+s.issues_open+" issue mở · "+s.docs+" tài liệu"));g.append(c)});box.append(g)}
+    const open=issues.filter(x=>x.status!=="done"&&x.status!=="rejected");
+    const recent=[...pages.map(x=>[null,x.title,hashFor(p,"pages",x.slug),x.updated_at]),
+      ...docs.filter(x=>x.status!=="missing").map(x=>[x.status,x.title,hashFor(p,"docs",x.path),x.updated_at])]
+      .sort((a,b)=>(b[3]||"").localeCompare(a[3]||"")).slice(0,6);
+    const g=el("div","grid");
+    g.append(
+      card("Task đang làm","task",p,tasks.filter(x=>x.status==="doing").slice(0,5).map(x=>["doing","#"+x.id+" "+x.title,hashFor(p,"task",x.id)]),"Không có task đang làm",doing),
+      card("Issue đang mở","issue",p,open.slice(0,5).map(x=>[x.status,"#"+x.id+" "+x.title,hashFor(p,"issue",x.id),priIcon(x.priority)]),"Không có issue mở",open.length),
+      card("Decision mới nhất","decision",p,decs.slice(0,5).map(x=>[x.status,"#"+x.id+" "+x.title,hashFor(p,"decision",x.id)]),"Chưa có decision",decs.length),
+      card("Mới cập nhật","docs",p,recent.map(x=>[x[0]||"open",x[1],x[2],dateCell(x[3])]),"Chưa có tài liệu"));
+    box.append(g);
+  },
+  task:(box,p,id)=>itemView(box,p,id,"task"),
+  issue:(box,p,id)=>itemView(box,p,id,"issue"),
+  async decision(box,p,id){
+    const ds=await get("/api/decisions?project="+enc(p));
+    box.append(head("Decision",ds.length));
+    const d=ds.find(x=>String(x.id)===id);
+    if(d){
+      const c=el("div","detail");c.append(el("h2","","#"+d.id+" "+d.title));
+      const pr=el("div","props");pr.append(pill(d.status),el("span","",ago(d.created_at)));c.append(pr);
+      let rej;try{rej=JSON.parse(d.rejected_options)}catch{rej=[d.rejected_options]}
+      const dl=el("dl");
+      [["Bối cảnh",d.context],["Quyết định",d.decision],["Hệ quả",d.consequences],["Thay thế",d.supersedes?"#"+d.supersedes:null],
+       ["Phương án bị loại",(Array.isArray(rej)?rej:[rej]).filter(x=>x!=null).map(x=>typeof x==="string"?x:JSON.stringify(x)).join("; ")]]
+        .forEach(([k,v])=>{if(v)dl.append(el("dt","",k),el("dd","",v))});
+      c.append(dl);box.append(c);
+    }else if(id)box.append(el("p","err","Không tìm thấy #"+id));
+    if(!ds.length)return box.append(empty("Chưa có decision","Ghi bằng:","strata.py decision add --project "+p));
+    box.append(...grouped(ds,x=>x.status,ST_DEC,(k,h)=>h.append(statusIcon(k),k),x=>{
+      const a=link("",hashFor(p,"decision",x.id),"row"+(String(x.id)===id?" sel":""));
+      a.append(el("span"),el("span","id","D-"+x.id),statusIcon(x.status),el("span","t",x.title),el("span","x"),dateCell(x.created_at));return a}));
+  },
+  async pages(box,p,id){
+    if(id){
+      box.className="page narrow";
+      const root=el("article");root.id="pg";box.append(root);
+      renderPage(await get("/api/page/"+enc(p)+"/"+enc(id)),root);
+      return;
+    }
+    const ps=await get("/api/pages?project="+enc(p));
+    box.append(head("Thảo luận",ps.length));
+    if(!ps.length)return box.append(empty("Chưa có page nào","Page được ghi bằng CLI hoặc MCP của strata."));
+    ps.forEach(x=>{const a=link("",hashFor(p,"pages",x.slug),"row pg");a.append(icon("pages"),el("span","t",x.title),el("span","kind",x.kind),dateCell(x.updated_at));box.append(a)});
+  },
+  async docs(box,p,id){
+    const docs=await get("/api/docs?project="+enc(p));
+    if(id)return docReader(box,p,id,docs);
+    box.append(head("Tài liệu",docs.length));
+    if(!docs.length)return box.append(empty("Chưa có tài liệu","Chạy:","strata.py doc scan --project "+p));
+    const fl={status:"",kind:"",q:""}, list=el("div"), bar=el("div"), q=el("input");
+    q.type="search";q.placeholder="Lọc theo tên…";q.setAttribute("aria-label","Lọc tài liệu");q.oninput=()=>{fl.q=q.value.toLowerCase();draw()};
+    const mk=()=>{const b=fbar([[ST_DOC,fl.status,v=>{fl.status=v;mk();draw()}],[KIND_DOC,fl.kind,v=>{fl.kind=v;mk();draw()},1]]);b.append(q);bar.replaceChildren(b)};
+    const draw=()=>{
+      const rows=docs.filter(x=>(!fl.status||x.status===fl.status)&&(!fl.kind||x.kind===fl.kind)&&(!fl.q||(x.title+" "+x.path).toLowerCase().includes(fl.q)));
+      if(!rows.length){const e=empty("Không có tài liệu khớp bộ lọc");const c=el("button","","Xoá lọc");c.onclick=()=>{fl.status=fl.kind=fl.q="";q.value="";mk();draw()};e.append(c);return list.replaceChildren(e)}
+      list.replaceChildren(...grouped(rows,x=>x.feature||NOGRP,[],(k,h)=>h.append(icon("docs"),k),x=>{
+        const a=link("",hashFor(p,"docs",x.path),"row doc");
+        a.append(statusIcon(x.status),el("span","t",x.title),el("span","desc",x.path),el("span","kind",x.kind),pill(x.status),dateCell(x.updated_at));return a}));
+    };
+    mk();draw();box.append(bar,list);
+  },
+  async c4(box,p){
+    const q="/c4?project="+enc(p), r=el("div","reader"), t=el("div","tbar");
+    t.append(el("span","ttl","Kiến trúc · "+byId[p].name),toolBtn("ext","Mở toàn màn hình",q));
+    const f=el("iframe","frame c4");f.src=q+"&embed=1";f.title="C4";r.append(t,f);box.append(r);
+  },
+  async audit(box,p){
+    const rs=await get("/api/audit?limit=200&project="+enc(p));
+    box.append(head("Nhật ký",rs.length));
+    if(!rs.length)return box.append(empty("Chưa có bản ghi","Mọi thay đổi qua CLI/MCP được ghi ở đây."));
+    const day=d=>d.toDateString(), today=new Date(), yest=new Date(Date.now()-864e5);
+    let last="";
+    rs.forEach(x=>{const d=new Date(x.ts);
+      if(day(d)!==last){last=day(d);box.append(el("div","dayh",last===day(today)?"Hôm nay":last===day(yest)?"Hôm qua":d.toLocaleDateString("vi-VN",{day:"numeric",month:"short",year:"numeric"})))}
+      const a=x.after||"", r=el("div","arow");
+      r.append(el("span","tm",isNaN(d)?"":d.toTimeString().slice(0,5)),el("span","ac",x.actor_role||""),el("span","v",x.tool||""),el("span","",x.target||""),el("span","df",a.length>160?a.slice(0,160)+"…":a));
+      r.title=ago(x.ts);box.append(r)});
+  },
+};
+
+function toolBtn(ic,title,href,on){
+  const a=el(href?"a":"button","ib");a.append(icon(ic));a.title=title;a.setAttribute("aria-label",title);
+  if(href){a.href=href;a.target="_blank";a.rel="noopener"}else a.onclick=on;return a;
+}
+function docReader(box,p,id,docs){
+  const d=docs.find(x=>x.path===id), url="/docs/"+enc(p)+"/"+id.split("/").map(enc).join("/");
+  const sib=docs.filter(x=>x.status!=="missing"&&(x.feature||"")===((d&&d.feature)||"")), i=sib.findIndex(x=>x.path===id);
+  const r=el("div","reader"), t=el("div","tbar"), back=link("",hashFor(p,"docs"),"back");back.append(icon("prev"),"Tài liệu");
+  t.append(back,el("span","ttl",d?d.title:id));
+  if(d)t.append(el("span","kind",d.kind),pill(d.status));
+  const nav=(k,ic,lbl)=>{const x=sib[i+k], b=toolBtn(ic,lbl+" (Alt "+(k<0?"←":"→")+")",null,()=>{if(x)location.hash=hashFor(p,"docs",x.path)});b.disabled=!x;b.dataset.nav=k;return b};
+  const nx=nav(1,"chev","Tài liệu sau");
+  t.append(nav(-1,"prev","Tài liệu trước"),nx);
+  r.append(t);box.append(r);
+  if(!d||d.status==="missing")return r.append(empty("File không còn trên đĩa hoặc chưa được quét","Chạy lại:","strata.py doc scan --project "+p));
+  const f=el("iframe","frame");f.src=url;f.title=d.title;
+  t.append(toolBtn("reload","Tải lại",null,()=>{f.src=url}),toolBtn("ext","Mở tab mới",url),
+    toolBtn("copy","Copy link",null,()=>{navigator.clipboard&&navigator.clipboard.writeText(location.href).catch(()=>{})}));
+  r.append(f);
+}
+
+async function itemView(box,p,id,kind){
+  const rows=await get("/api/items?kind="+kind+"&project="+enc(p));
+  box.append(head(kind==="task"?"Task":"Issue",rows.length));
+  if(id){
+    const d=(await get("/api/items?id="+enc(id)))[0];
+    if(d&&d.project===p){
+      const c=el("div","detail");c.append(el("h2","","#"+d.id+" "+d.title));
+      const pr=el("div","props");pr.append(pill(d.status));
+      if(d.priority){const s=el("span");s.append(priIcon(d.priority));s.append(" "+d.priority);s.style.display="inline-flex";s.style.gap="4px";pr.append(s)}
+      if(d.owner)pr.append(el("span","",d.owner));pr.append(el("span","",ago(d.updated_at||d.created_at)));
+      c.append(pr,el("p","body",d.body||"(không có mô tả)"));box.append(c);
+    }else box.append(el("p","err","Không tìm thấy #"+id));
+  }
+  if(!rows.length)return box.append(empty("Chưa có "+kind,"Thêm bằng CLI:","strata.py item add --project "+p+" --kind "+kind+" --title ..."));
+  let cur="";
+  const chips=el("div"), body=el("div"), draw=()=>{
+    chips.replaceChildren(fbar([[ST_ITEM,cur,v=>{cur=v;draw()}]]));
+    const vis=rows.filter(x=>!cur||x.status===cur);
+    if(!vis.length){const e=empty("Không có "+kind+" ở trạng thái "+cur);const c=el("button","","Xoá lọc");c.onclick=()=>{cur="";draw()};e.append(c);return body.replaceChildren(e)}
+    body.replaceChildren(...grouped(vis,x=>x.status,["doing","open","approved","proposed","done","rejected"],(k,h)=>h.append(statusIcon(k),k),x=>{
+      const a=link("",hashFor(p,kind,x.id),"row"+(String(x.id)===id?" sel":""));
+      a.append(priIcon(x.priority),el("span","id",(kind==="task"?"T-":"I-")+x.id),statusIcon(x.status),el("span","t",x.title),el("span","x",x.owner||""),dateCell(x.updated_at||x.created_at));return a}));
+  };
+  draw();box.append(chips,body);
+}
+
+/* ---------- command palette ---------- */
+const SRC={item:["Task","task"],issue:["Issue","issue"],decision:["Decision","decision"],page:["Thảo luận","pages"],doc:["Tài liệu","docs"]};
+let hits=[], sel=0, qtok=0, timer=null, mouseMoved=false;
+function openPal(){closeKeys();$("pal").hidden=false;$("q").value="";hits=navHits();sel=0;drawHits();$("q").focus()}
+function closePal(){$("pal").hidden=true}
+function navHits(){
+  const out=[];
+  if(CUR.p)TABS.forEach(([k,l,g])=>out.push({grp:"Điều hướng",title:l,sub:byId[CUR.p].name,ic:k,kbd:"G "+g.toUpperCase(),run:()=>{location.hash=hashFor(CUR.p,k)}}));
+  PROJ.filter(p=>p.id!==CUR.p).forEach(p=>out.push({grp:"Dự án",title:p.name,sub:p.id,ic:"proj",run:()=>{location.hash=hashFor(p.id,"overview")}}));
+  out.push({grp:"Lệnh",title:"Đổi sáng / tối",ic:"sun",run:toggleTheme},{grp:"Lệnh",title:"Phím tắt",ic:"overview",kbd:"?",run:openKeys});
+  return out;
+}
+function searchHits(r){
+  const by={};r.forEach(h=>{const t=h.src==="item"&&h.key==="issue"?"issue":h.src;(by[t]=by[t]||[]).push(h)});
+  return Object.keys(SRC).filter(t=>by[t]).flatMap(t=>by[t].slice(0,8).map(h=>({grp:SRC[t][0],title:h.title||"(không tên)",ic:SRC[t][1],
+    sub:(byId[h.project]?byId[h.project].name:h.project)+(h.snippet?" · "+h.snippet.replace(/\s+/g," "):""),
+    run:()=>{location.hash=hashFor(h.project,SRC[t][1],h.src==="page"||h.src==="doc"?h.key:h.ref)}})));
+}
+function drawHits(){
+  const out=[];let g="";
+  if(!hits.length)out.push(el("li","none","Không có kết quả"));
+  hits.forEach((h,i)=>{
+    if(h.grp!==g){g=h.grp;const x=el("li","gh",g);x.setAttribute("role","presentation");out.push(x)}
+    const li=el("li","h"+(i===sel?" on":""));li.id="hit"+i;li.setAttribute("role","option");li.setAttribute("aria-selected",i===sel);
+    const tx=el("span","tx");tx.append(el("span","t",h.title));if(h.sub)tx.append(el("span","s",h.sub));
+    li.append(icon(h.ic),tx);if(h.kbd)li.append(el("kbd","",h.kbd));
+    li.onmousedown=e=>{e.preventDefault();go(h)};
+    li.onmousemove=()=>{if(mouseMoved&&sel!==i){sel=i;mark()}};out.push(li)});
+  $("hits").replaceChildren(...out);mark();
+}
+function mark(){
+  $("hits").querySelectorAll(".h").forEach(li=>{const on=li.id==="hit"+sel;li.classList.toggle("on",on);li.setAttribute("aria-selected",on)});
+  $("q").setAttribute("aria-activedescendant",hits.length?"hit"+sel:"");
+  const on=$("hit"+sel);if(on&&on.scrollIntoView)on.scrollIntoView({block:"nearest"});
+}
+function go(h){closePal();h.run()}
+$("hits").addEventListener("mousemove",()=>{mouseMoved=true});
+$("q").addEventListener("input",()=>{
+  clearTimeout(timer);mouseMoved=false;const v=$("q").value.trim();
+  if(!v){hits=navHits();sel=0;return drawHits()}
+  timer=setTimeout(()=>{const my=++qtok;
+    get("/api/search?q="+enc(v)).then(r=>{if(my===qtok){hits=searchHits(r);sel=0;drawHits()}}).catch(()=>{if(my===qtok){hits=[];drawHits()}})},120);
+});
+$("q").addEventListener("keydown",e=>{
+  if(e.key==="ArrowDown"||e.key==="ArrowUp"){e.preventDefault();mouseMoved=false;if(hits.length){sel=(sel+(e.key==="ArrowDown"?1:hits.length-1))%hits.length;mark()}}
+  else if(e.key==="Enter"&&hits[sel])go(hits[sel]);
+});
+$("pal").addEventListener("mousedown",e=>{if(e.target===$("pal"))closePal()});
+
+/* ---------- shortcuts, theme, drawer ---------- */
+function openKeys(){$("keys").hidden=false}
+function closeKeys(){$("keys").hidden=true}
+$("keys").addEventListener("mousedown",e=>{if(e.target===$("keys"))closeKeys()});
+function toggleTheme(){
+  const d=document.documentElement.dataset, dark=(d.theme||(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"))==="dark";
+  d.theme=dark?"light":"dark";store.set("strata-theme",d.theme);themeIcon();
+}
+function themeIcon(){const d=document.documentElement.dataset.theme||(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark");$("theme").replaceChildren(d==="dark"?icon("sun"):svg(O.moon))}
+function moveSel(k){
+  const rows=[...$("content").querySelectorAll("a.row")];if(!rows.length)return;
+  let i=rows.findIndex(r=>r.classList.contains("sel"));rows.forEach(r=>r.classList.remove("sel"));
+  i=Math.max(0,Math.min(rows.length-1,i<0?0:i+k));rows[i].classList.add("sel");rows[i].scrollIntoView({block:"nearest"});
+}
+let chord=0;
+document.addEventListener("keydown",e=>{
+  const pal=!$("pal").hidden, typing=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)||e.target.isContentEditable;
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();return pal?closePal():openPal()}
+  if(e.key==="Escape"){
+    if(pal)return closePal();if(!$("keys").hidden)return closeKeys();
+    if(document.body.classList.contains("menu"))return document.body.classList.remove("menu");
+    if(typing)return e.target.blur();
+    return $("content").querySelectorAll(".row.sel").forEach(r=>r.classList.remove("sel"));
+  }
+  if(pal||typing||e.ctrlKey||e.metaKey)return;
+  if(e.altKey){if(e.key==="ArrowLeft"||e.key==="ArrowRight"){const b=$("content").querySelector('[data-nav="'+(e.key==="ArrowLeft"?-1:1)+'"]');if(b&&!b.disabled){e.preventDefault();b.click()}}return}
+  const k=e.key.toLowerCase();
+  if(chord&&Date.now()-chord<800){chord=0;$("chord").hidden=true;const t=TABS.find(x=>x[2]===k);if(t&&CUR.p){e.preventDefault();location.hash=hashFor(CUR.p,t[0])}return}
+  chord=0;$("chord").hidden=true;
+  if(k==="g"){chord=Date.now();$("chord").hidden=false;setTimeout(()=>{if(Date.now()-chord>=790)$("chord").hidden=true},820)}
+  else if(k==="/"){e.preventDefault();openPal()}
+  else if(e.key==="?"){openKeys()}
+  else if(k==="j"||e.key==="ArrowDown"&&$("content").querySelector("a.row.sel")){e.preventDefault();moveSel(1)}
+  else if(k==="k"||e.key==="ArrowUp"&&$("content").querySelector("a.row.sel")){e.preventDefault();moveSel(-1)}
+  else if(e.key==="Enter"){const r=$("content").querySelector("a.row.sel");if(r&&document.activeElement!==r){e.preventDefault();location.hash=r.hash}}
+  else if(k==="f"){const b=$("content").querySelector(".fbar button,.fbar input");if(b){e.preventDefault();b.focus()}}
+  else if(e.key==="["){const c=document.body.classList.toggle("collapsed");store.set("strata-side",c?"1":"")}
+});
+if(store.get("strata-side"))document.body.classList.add("collapsed");
+$("moon").append(svg(O.moon));
+$("band").append(svg(contours(7,480,120,6)));
+themeIcon();
+$("theme").onclick=toggleTheme;
+$("help").onclick=openKeys;
+$("searchbtn").onclick=openPal;
+$("menu").onclick=()=>{document.body.classList.toggle("menu");document.body.classList.remove("collapsed")};
+$("scrim").onclick=()=>document.body.classList.remove("menu");
+addEventListener("hashchange",render);
+render();
