@@ -120,3 +120,38 @@ def set_doc(c, project, path, feature=None, status=None, ord=None):
     new = {"feature": feature if feature is not None else r["feature"], "status": status or r["status"], "ord": r["ord"] if ord is None else ord}
     c.execute("UPDATE doc SET feature=?,status=?,ord=? WHERE project=? AND path=?", (new["feature"], new["status"], new["ord"], project, path))
     audit(c, project, "doc.set", f"doc:{path}", dict(r), new); c.commit()
+
+
+# ---- C4 object <-> item/decision links ----
+def _link_target(c, project, object, item, decision):
+    if (item is None) == (decision is None): raise ValueError("give exactly one of --item / --decision")
+    if not c.execute("SELECT 1 FROM c4_object WHERE project=? AND id=?", (project, object)).fetchone():
+        raise ValueError(f"no object {project}/{object}")
+    kind, rid = ("item", item) if item is not None else ("decision", decision)
+    if not c.execute(f"SELECT 1 FROM {kind} WHERE project=? AND id=?", (project, rid)).fetchone():
+        raise ValueError(f"no {kind} {rid} in project {project}")
+    return kind, rid
+
+def link(c, project, object, item=None, decision=None):
+    """Returns True if added, False if it already existed (no audit then)."""
+    kind, rid = _link_target(c, project, object, item, decision)
+    if not c.execute("INSERT OR IGNORE INTO c4_link VALUES(?,?,?,?)", (project, object, kind, rid)).rowcount: return False
+    audit(c, project, "c4.link", f"{object}->{kind}:{rid}", None, {"object": object, "ref_kind": kind, "ref_id": rid}); c.commit()
+    return True
+
+def unlink(c, project, object, item=None, decision=None):
+    kind, rid = _link_target(c, project, object, item, decision)
+    if not c.execute("DELETE FROM c4_link WHERE project=? AND object_id=? AND ref_kind=? AND ref_id=?", (project, object, kind, rid)).rowcount: return False
+    audit(c, project, "c4.unlink", f"{object}->{kind}:{rid}", {"object": object, "ref_kind": kind, "ref_id": rid}, None); c.commit()
+    return True
+
+def links_for(c, project, object=None):
+    """{items:[{id,kind,title,status}], decisions:[{id,title,status}]} for one object; for object=None, {object_id: that} for the whole project."""
+    out = {}
+    for kind, cols in (("item", "t.id,t.kind,t.title,t.status"), ("decision", "t.id,t.title,t.status")):
+        for r in c.execute(f"SELECT l.object_id oid,{cols} FROM c4_link l JOIN {kind} t ON t.id=l.ref_id "
+                           f"WHERE l.project=? AND l.ref_kind='{kind}' AND t.project=? "
+                           + ("AND l.object_id=? " if object else "") + "ORDER BY t.id", (project, project, *([object] if object else []))):
+            d = dict(r); o = out.setdefault(d.pop("oid"), {"items": [], "decisions": []})
+            o["items" if kind == "item" else "decisions"].append(d)
+    return out.get(object, {"items": [], "decisions": []}) if object else out

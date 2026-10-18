@@ -52,6 +52,17 @@ def check(m, root):
     return errs, warns, len(objs), len(conns)
 
 
+def issues_by_object(m, root):
+    """{object id: [codes]} for objects with a problem: dead_link, no_link, no_desc."""
+    out = {}
+    for o in m.get("objects", []):
+        links = o.get("links") or []
+        codes = (["dead_link"] if any(not l.startswith("http") and not (root / l).exists() for l in links) else []) \
+            + ([] if links else ["no_link"]) + ([] if o.get("description") else ["no_desc"])
+        if codes: out[o["id"]] = codes
+    return out
+
+
 def report(m, root):
     errs, warns, no, nc = check(m, root)
     for w in warns: print("WARN ", w)
@@ -133,3 +144,100 @@ def read_model(c, project):
             "objects": [_row(r, jsons=("tags", "links")) for r in q("object")],
             "connections": [_row(r, (("from_id", "from"), ("to_id", "to")), ("tags",)) for r in q("connection")],
             "flows": [_row(r, jsons=("steps",)) for r in q("flow")]}
+
+
+# ---- text context for agents (port of lift/view in viewer/index.html) ----
+def _lift(byid, id, F):
+    chain = set()
+    o = byid.get(F)
+    while o: chain.add(o["id"]); o = byid.get(o.get("parent"))
+    o = byid.get(id)
+    while o:
+        p = o.get("parent")
+        if p == F: return o["id"], False
+        if p is None or p in chain: return o["id"], True
+        o = byid.get(p)
+    return None
+
+
+def _edges(m, F):
+    """Merged connections visible when focused on F: {(from,to): [connection]}."""
+    byid = {o["id"]: o for o in m["objects"]}
+    out = {}
+    for c in m["connections"]:
+        a, b = _lift(byid, c["from"], F), _lift(byid, c["to"], F)
+        if not a or not b or a[0] == b[0] or (a[1] and b[1]): continue
+        out.setdefault((a[0], b[0]), []).append(c)
+    return out
+
+
+def _est(s): return len(s) // 4
+
+
+def context_text(c, project, object=None, max_tokens=2000):
+    from strata import db
+    m = read_model(c, project)
+    if m is None: raise ValueError(f"project '{project}' chưa import")
+    byid = {o["id"]: o for o in m["objects"]}
+    kids = lambda i: [o for o in m["objects"] if o.get("parent") == i]
+    nm = lambda i: byid[i].get("name") or i
+    if object is None:
+        n = c.execute("SELECT count(*) FROM item WHERE project=? AND kind='issue' AND status NOT IN ('done','rejected')", (project,)).fetchone()[0]
+        per = {r[0]: r[1] for r in c.execute("SELECT l.object_id,count(DISTINCT t.id) FROM c4_link l JOIN item t ON t.id=l.ref_id WHERE l.project=? AND l.ref_kind='item' "
+                                             "AND t.project=? AND t.kind='issue' AND t.status NOT IN ('done','rejected') GROUP BY l.object_id", (project, project))}
+        lines = [f"# {m.get('name') or project} ({project}): {len(byid)} object, {len(m['connections'])} connection, {len(m['flows'])} flow, {n} issue mở"]
+        def walk(p, d):
+            for o in kids(p):
+                lines.append("  " * d + f"- {o['id']} [{o['type']}] {o.get('name') or ''}" + (f" ({o['technology']})" if o.get("technology") else "")
+                             + (f" — {per[o['id']]} issue mở" if per.get(o["id"]) else ""))
+                walk(o["id"], d + 1)
+        walk(None, 0)
+        return "\n".join(lines)
+    if object not in byid: raise ValueError(f"không có object '{object}' trong project '{project}'")
+    o = byid[object]
+    def desc(limit=None):
+        d = o.get("description") or ""
+        return d if limit is None or len(d) <= limit else d[:max(limit - 1, 0)] + "…"
+    def head(limit=None):
+        s = f"# {o['id']} [{o['type']}] {o.get('name') or ''}"
+        if o.get("technology"): s += f"\nTech: {o['technology']}"
+        if desc(limit): s += f"\nMô tả: {desc(limit)}"
+        if o.get("links"): s += "\nLink: " + ", ".join(o["links"])
+        return s
+    chain = []
+    p = o.get("parent")
+    while p: chain.append(p); p = byid[p].get("parent")
+    def under(i):
+        while i and i != object: i = byid[i].get("parent")
+        return i == object
+    sub = {i for i in byid if under(i)}
+    edges = _edges(m, o.get("parent"))
+    conn = []
+    for (a, b), cs in edges.items():
+        if object not in (a, b): continue
+        lbl = f"{len(cs)} kết nối" if len(cs) > 1 else " ".join(x for x in (cs[0].get("name"), f"[{cs[0]['technology']}]" if cs[0].get("technology") else "") if x)
+        conn.append(f"- {nm(a)} → {nm(b)}" + (f": {lbl}" if lbl else ""))
+    lk = db.links_for(c, project, object)
+    rel = [f"- {i['kind']} #{i['id']} [{i['status']}] {i['title']}" for i in lk["items"]] + \
+          [f"- decision #{d['id']} [{d['status']}] {d['title']}" for d in lk["decisions"]]
+    cmap = {x["id"]: x for x in m["connections"]}
+    flows = []
+    for f in m["flows"]:
+        for s in f.get("steps") or []:
+            x = cmap.get(s.get("connection"), s)
+            if x.get("from") in sub or x.get("to") in sub: flows.append(f"- {f['id']}: {f.get('name') or ''}"); break
+    sections = [  # (name, text): the parent chain stays, the rest drop from the end
+        ("chuỗi cha", "Cha: " + " > ".join(nm(i) for i in reversed(chain)) if chain else "Cha: (top level)"),
+        ("con trực tiếp", "Con:\n" + "\n".join(f"- {k['id']} [{k['type']}] {k.get('name') or ''}" for k in kids(object)) if kids(object) else "Con: (không)"),
+        ("connection", "Connection:\n" + "\n".join(conn) if conn else "Connection: (không)"),
+        ("liên quan", "Liên quan:\n" + "\n".join(rel) if rel else "Liên quan: (không)"),
+        ("flow", "Flow:\n" + "\n".join(flows) if flows else "Flow: (không)"),
+    ]
+    keep = len(sections)
+    build = lambda h: "\n\n".join([h] + [t if i < keep else f"... (cắt: {n})" for i, (n, t) in enumerate(sections)])
+    while _est(build(head())) > max_tokens and keep > 1: keep -= 1
+    out = build(head())
+    if _est(out) > max_tokens:  # only (1)(2) left: shorten the description
+        over = (_est(out) - max_tokens) * 4
+        out = build(head(max(len(desc()) - over, 0)))
+    return out

@@ -33,6 +33,69 @@ Route (GET): `/` shell, `/c4` viewer C4, `/pages`, `/page/<p>/<slug>`, `/api/pro
 `/api/decisions?project=`, `/api/docs?project=`, `/api/audit?project=&limit=`, `/api/search?q=&project=` (FTS, bm25, tối đa 30),
 `/docs/<project>/<path>` (phục vụ cả cây `docs_dir`; chặn `..`, dotfile, `.db`). Giá trị lọc ngoài whitelist trả 400.
 
+### Liên kết object với task/decision, context cho agent
+
+```
+python3 strata.py c4 link --project P --object X --item ID        # hoặc --decision ID; unlink cùng cú pháp
+python3 strata.py c4 links --project P --object X                  # liệt kê item/decision đã gắn
+python3 strata.py c4 context --project P [--object X] [--max-tokens 2000]   # văn bản gọn cho agent
+```
+
+`link/unlink` có audit (`c4.link`/`c4.unlink`); link trùng không ghi thêm. `context` không có `--object` thì in tổng quan cả map (kèm số issue mở); có `--object` thì in object, chuỗi cha, con, connection đã gộp, item/decision liên quan, flow; quá `--max-tokens` (ước len/4) thì cắt từ flow ngược lên, phần cắt ghi `... (cắt: <phần>)`.
+`/api/c4` trả thêm `issues` (dead_link/no_link/no_desc theo object), `links` và `open_issues`; viewer vẽ huy hiệu "!" cho object có vấn đề, viền đỏ cho object có issue mở, và có ô tìm object.
+
+## Hướng dẫn dùng bản đồ C4
+
+**Chuẩn bị**
+- `python3 strata.py import-yaml FILE.yaml --project P` nạp model vào DB.
+- `python3 strata.py serve --project P` rồi mở `http://127.0.0.1:8740/c4?project=P`, hoặc tab Kiến trúc trong app shell (`/#/p/P/c4`).
+
+**Đọc một ô**: icon, tên, nhãn loại (Người dùng / Hệ thống / Ứng dụng / Kho dữ liệu / Thành phần), technology và 1–2 dòng mô tả. Rê chuột vào ô để xem mô tả đầy đủ. Ô có chồng thẻ phía sau và dòng "N thành phần bên trong ›" ở chân là ô mở ra được. Ô nét đứt ghi "Bên ngoài tầng này". Hộp "Chú giải" ở góc phải trên canvas giải thích các ký hiệu, gập/mở được (nhớ lựa chọn).
+
+**Các tầng và zoom vào/ra**
+- Tầng 1 Context (actor, system), tầng 2 Container (app, store), tầng 3 Component. Mỗi lần chỉ vẽ con trực tiếp của object đang zoom. Thanh breadcrumb ghi rõ tầng, vd "Tầng 2 · Bên trong Cloud server".
+- Bấm một ô: chọn ô, làm nổi connection của nó và các ô nối với nó, làm mờ phần còn lại, mở panel chi tiết. Bấm nền hoặc `Esc` để bỏ chọn.
+- Đi vào: bấm "… bên trong ›" ở chân ô, double-click, `Enter` khi đang chọn ô, hoặc nút "Zoom vào" ở panel. Camera bay vào ô rồi tầng con nở ra từ chính vị trí ô đó.
+- Đi ra: nút Up, `Esc` khi không chọn gì, hoặc breadcrumb; tầng con thu lại vào ô của nó. ← → / Back / Forward của trình duyệt cũng chạy cùng hiệu ứng. Hiệu ứng tắt khi hệ điều hành bật "giảm chuyển động".
+- Đi lui/tới theo lịch sử: nút ← → cạnh breadcrumb, `Alt+←` / `Alt+→`, hoặc nút Back/Forward của trình duyệt. Mỗi lần đổi tầng là một bước lịch sử.
+- Cuộn chuột để phóng/thu, kéo nền để di chuyển, nút Fit để vừa khung.
+
+**Tìm object**: gõ vào ô "Tìm object…" ở thanh dưới (gợi ý theo id/tên), Enter hoặc chọn gợi ý. Viewer nhảy tới tầng chứa object, chọn và căn giữa nó. Không khớp thì hiện "Không tìm thấy".
+
+**Lọc tag**: ô "Tags" ở thanh dưới; object không có tag đó bị làm mờ.
+
+**Flow từng bước**: panel phải, tab "Diagram flows", chọn flow. Dùng « Previous / Next » hoặc bấm một step; connection của step đang chọn được tô sáng. Khi đã chọn flow, phím `←` / `→` đổi step.
+
+**Panel chi tiết** (bấm một object):
+- Code: link tới file code thật (mở tab mới); link http(s) mở nguyên văn.
+- Vấn đề: lý do object có huy hiệu "!".
+- Liên quan: task/issue/decision đã gắn bằng `c4 link`.
+- Bấm một connection để xem mô tả, technology, status.
+
+**Huy hiệu "!"** (góc trên phải object): object có vấn đề chất lượng model: link code chết (`dead_link`), không có link (`no_link`), thiếu mô tả (`no_desc`). Rê chuột để xem lý do. **Viền đỏ**: object có issue mở gắn vào.
+
+**Toàn màn hình**: trong tab Kiến trúc bấm "Toàn màn hình" (Fullscreen API); bấm lại nút (nay là "Thoát toàn màn hình") hoặc `Esc` để thoát. "Mở tab mới" mở `/c4?project=P` riêng; trang đó có link "← Strata" ở header để về `/#/p/P/c4`.
+
+**Nhúng**: `/c4?project=P&focus=<id>&embed=1`. Chế độ embed chỉ giữ một thanh mảnh gồm ← →, breadcrumb và sơ đồ; các phần khác ẩn.
+
+**Phím tắt** (không có tác dụng khi đang gõ trong ô nhập hoặc select):
+
+| Phím | Tác dụng |
+|---|---|
+| `Esc` | Bỏ chọn ô; nếu không chọn gì thì lên một tầng |
+| `Enter` | Đi vào bên trong ô đang chọn |
+| `Alt+←` / `Alt+→` | Lùi / tới trong lịch sử các tầng |
+| `←` / `→` | Step trước / sau (khi đã chọn flow) |
+| `f` | Vừa khung |
+| `+` hoặc `=` | Phóng to |
+| `-` | Thu nhỏ |
+| `Ctrl+K` | Tìm toàn văn (chỉ trong app shell) |
+
+**Cho agent** (xem thêm mục "Liên kết object với task/decision"):
+- `c4 link --project P --object X --item ID` (hoặc `--decision ID`) gắn; `unlink` gỡ.
+- `c4 links --project P --object X` liệt kê cái đã gắn.
+- `c4 context --project P [--object X] [--max-tokens N]` in văn bản gọn để đưa vào prompt.
+
 ## Tầng C4
 
 | type | Tầng | Được nằm trong |

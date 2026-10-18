@@ -60,10 +60,17 @@ def make_server(db_path=None, project=None, port=0):
                 with lock: ok = db.get_page(conn, parts[2], parts[3])
                 return self.file(VIEWER / "page.html") if ok else self.send_error(404)
             if p == "/api/c4":
-                with lock: m = c4.read_model(conn, q.get("project") or default_project())
+                proj = q.get("project") or default_project()
+                with lock:
+                    m = c4.read_model(conn, proj)
+                    links = db.links_for(conn, proj) if m else {}
+                    open_issues = [r["object_id"] for r in conn.execute(
+                        "SELECT DISTINCT l.object_id FROM c4_link l JOIN item t ON t.id=l.ref_id WHERE l.project=? AND l.ref_kind='item' "
+                        f"AND t.project=? AND t.kind='issue' AND t.status NOT IN {CLOSED} ORDER BY l.object_id", (proj, proj))] if m else []
                 if not m: return self.send_error(404)
-                m.pop("root"); meta = {k: m.pop(k) for k in ("name", "layout", "tags") if k in m}
-                return self.json({"meta": meta, **m})
+                issues = c4.issues_by_object(m, pathlib.Path(m.pop("root")))
+                meta = {k: m.pop(k) for k in ("name", "layout", "tags") if k in m}
+                return self.json({"meta": meta, **m, "issues": issues, "links": links, "open_issues": open_issues})
             if parts[1:2] == ["code"]:
                 with lock: m = c4.read_model(conn, q.get("project") or default_project())
                 if m:

@@ -44,7 +44,7 @@ def get(base, path):
 def test_api_c4_shape(srv):
     st, body = get(srv, "/api/c4?project=p")
     d = json.loads(body)
-    assert st == 200 and set(d) == {"meta", "objects", "connections", "flows"}
+    assert st == 200 and set(d) == {"meta", "objects", "connections", "flows", "issues", "links", "open_issues"}
     assert d["meta"]["name"] == "project1_app" and "security" in d["meta"]["tags"]
     assert len(d["objects"]) == 14 and "from" in d["connections"][0] and d["flows"][0]["steps"][0]["connection"] == "app_req"
     assert json.loads(get(srv, "/api/c4")[1]) == d  # default project
@@ -64,3 +64,9 @@ def test_code_and_traversal(srv):
     assert get(srv, "/code/a.py") == (200, b"print(1)")
     for bad in ("/code/../secret.txt", "/code/%2e%2e/secret.txt", "/code/..%2fsecret.txt", "/code//etc/passwd"):
         assert get(srv, bad)[0] == 404, bad
+
+
+def test_api_c4_issues(srv):
+    d = json.loads(get(srv, "/api/c4?project=p")[1])
+    assert isinstance(d["issues"], dict) and "root" not in d
+    assert all(c in ("dead_link", "no_link", "no_desc") for v in d["issues"].values() for c in v)

@@ -247,7 +247,10 @@ const VIEW={
   },
   async c4(box,p){
     const q="/c4?project="+enc(p), r=el("div","reader"), t=el("div","tbar");
-    t.append(el("span","ttl","Kiến trúc · "+byId[p].name),toolBtn("ext","Mở toàn màn hình",q));
+    const fs=el("button","ib");fs.style.cssText="width:auto;padding:0 8px;font-size:12px;border-radius:var(--r)";fs.onclick=()=>document.fullscreenElement?document.exitFullscreen():r.requestFullscreen&&r.requestFullscreen();
+    const lbl=()=>{const on=document.fullscreenElement===r;fs.textContent=on?"Thoát toàn màn hình":"Toàn màn hình";fs.title=on?"Thoát (Esc)":"Toàn màn hình"};lbl();
+    r.onfullscreenchange=lbl;
+    t.append(el("span","ttl","Kiến trúc · "+byId[p].name),fs,toolBtn("ext","Mở tab mới",q));
     const f=el("iframe","frame c4");f.src=q+"&embed=1";f.title="C4";r.append(t,f);box.append(r);
   },
   async audit(box,p){

@@ -95,3 +95,9 @@ CREATE TRIGGER IF NOT EXISTS doc_au AFTER UPDATE ON doc BEGIN
   INSERT INTO search VALUES(replace(replace(NEW.title,'đ','d'),'Đ','D'),replace(replace(NEW.text,'đ','d'),'Đ','D'),'doc',NEW.rowid,NEW.project); END;
 CREATE TRIGGER IF NOT EXISTS doc_ad AFTER DELETE ON doc BEGIN
   DELETE FROM search WHERE src='doc' AND ref=OLD.rowid; END;
+
+-- links an object to a task/issue/decision; no FK (objects are re-imported, decisions are append-only)
+CREATE TABLE IF NOT EXISTS c4_link(
+  project TEXT NOT NULL, object_id TEXT NOT NULL,
+  ref_kind TEXT NOT NULL CHECK(ref_kind IN ('item','decision')), ref_id INTEGER NOT NULL,
+  PRIMARY KEY(project,object_id,ref_kind,ref_id));

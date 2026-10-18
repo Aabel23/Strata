@@ -8,6 +8,8 @@
   strata.py page put|validate FILE | list [--project]
   strata.py project add ID --name N [--root --docs-dir --parent --description] | list
   strata.py doc scan --project P | set --project P PATH [--feature --status --ord]
+  strata.py c4 link|unlink|links --project P --object X [--item ID | --decision ID]   (links: list only)
+  strata.py c4 context --project P [--object X] [--max-tokens N]
   strata.py item add --project P --kind task|issue --title T [--body --priority --status] | set ID [--status --priority]
 """
 import argparse, json, pathlib, sqlite3, sys, webbrowser
@@ -41,6 +43,15 @@ def cmd_write(a):
             for r in c.execute("SELECT id,name,parent,status FROM project ORDER BY id"): print(f"{r['id']}  {r['name']}  parent={r['parent'] or '-'}  [{r['status']}]")
         elif a.action == "scan":
             print("scanned {}: {} found, {} missing".format(a.project, *db.scan_docs(c, a.project)))
+        elif a.cmd == "c4" and a.action == "context":
+            print(c4.context_text(c, a.project, a.object, a.max_tokens))
+        elif a.cmd == "c4" and a.action == "links":
+            l = db.links_for(c, a.project, a.object)
+            for i in l["items"]: print(f"{i['kind']} #{i['id']} [{i['status']}] {i['title']}")
+            for d in l["decisions"]: print(f"decision #{d['id']} [{d['status']}] {d['title']}")
+        elif a.cmd == "c4":
+            if not getattr(db, a.action)(c, a.project, a.object, a.item, a.decision): print("no change"); return 0
+            print("ok")
         elif a.cmd == "doc":
             db.set_doc(c, a.project, a.path, a.feature, a.status, a.ord); print("ok")
         elif a.action == "add":
@@ -82,8 +93,11 @@ def main(argv=None):
     group("item", {"add": [(["--project"], req), (["--kind"], {"required": True, "choices": ["task", "issue"]}), (["--title"], req), (["--body"], {}),
                            (["--priority"], {}), (["--status"], {"choices": ITEM_STATUS, "default": "open"})],
                    "set": [(["id"], {"type": int}), (["--status"], {"choices": ITEM_STATUS}), (["--priority"], {})]})
+    ref = [(["--project"], req), (["--object"], req), (["--item"], {"type": int}), (["--decision"], {"type": int})]
+    group("c4", {"link": ref, "unlink": ref, "links": ref[:2],
+                 "context": [(["--project"], req), (["--object"], {}), (["--max-tokens"], {"type": int, "default": 2000})]})
     a = ap.parse_args(argv)
-    if a.cmd in ("project", "doc", "item"): return cmd_write(a)
+    if a.cmd in ("project", "doc", "item", "c4"): return cmd_write(a)
     if a.cmd == "init":
         db.init(a.db).close(); print("ok:", db.db_path(a.db)); return 0
     if a.cmd == "import-yaml":

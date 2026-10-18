@@ -1,6 +1,6 @@
 import os, pathlib, subprocess, sys
 import pytest, yaml
-from strata import db
+from strata import c4, db
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 EX = ROOT / "examples/project1_app.strata.yaml"
@@ -79,3 +79,12 @@ def test_malformed_yaml_clean_error(dbp, tmp_path):
     f.write_text("objects:\n  - just a string\n")
     code, out = run(dbp, "import-yaml", str(f), "--project", "p")
     assert code == 1 and "ERROR" in out
+
+
+def test_issues_by_object(tmp_path):
+    (tmp_path / "ok.py").write_text("x")
+    m = {"objects": [{"id": "a", "links": ["ok.py"], "description": "d"},
+                     {"id": "b", "links": ["ok.py", "gone.py"], "description": "d"},
+                     {"id": "c", "links": ["http://x"]},
+                     {"id": "d", "description": "d"}]}
+    assert c4.issues_by_object(m, tmp_path) == {"b": ["dead_link"], "c": ["no_desc"], "d": ["no_link"]}
