@@ -111,3 +111,12 @@ def test_migration_adds_columns_with_backup(tmp_path):
     c = db.init(p)
     assert {"phase", "roadmap"} <= {r[1] for r in c.execute("PRAGMA table_info(item)")} and c.execute("SELECT count(*) FROM item").fetchone()[0] == 1
     assert list((tmp_path / "backups").glob("strata-*.db"))
+
+
+def test_check_zero_step_roadmap_lists_gaps(tmp_path, dbp, capsys):
+    c = setup_objs(dbp, "a", "b"); f = yml(tmp_path, phases=[{**yaml.safe_load(yml(tmp_path).read_text())["phases"][0], "steps": []}])
+    assert rm(capsys, dbp, "import", f)[0] == 0
+    rc, out = rm(capsys, dbp, "check")
+    assert rc == 0 and "P1 skeleton: steps 0/0, core criteria 0/2 passed" in out and "criterion c1" in out and "block a has no task" in out
+    rc, out = rm(capsys, dbp, "check", "--json")
+    assert json.loads(out)["phases"][0]["gate"]["gaps"]

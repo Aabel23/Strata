@@ -351,8 +351,19 @@ def _counts(steps, gates):
 
 def check(c, project, roadmap):
     steps, gates = _load(c, project, roadmap)
-    if not steps: raise KeyError(f"no roadmap {roadmap} in project {project}")
-    return {"roadmap": roadmap, "progress": _counts(steps, gates),
+    pg = db.get_page(c, project, f"roadmap-{roadmap}")
+    if not steps and not (pg and pg["kind"] == "plan"): raise KeyError(f"no roadmap {roadmap} in project {project}")
+    d = _def(c, project, roadmap); gk = {g["key"]: g for g in gates}; phases = []
+    for ph in sorted(d["phases"], key=lambda p: p["n"]):
+        g = gk.get(f"G{ph['n']}"); ss = [s for s in steps if s["phase"] == ph["n"] and not s["orphan"]]
+        core = [cr for cr in ph["criteria"] if cr["level"] == "core"]; res = [(cr.get("result") or {}).get("result") for cr in core]
+        bl = []
+        for b in ph["blocks"]:
+            ts = _tasks(c, project, b["object"]); bl.append({"object": b["object"], "done": sum(t["status"] == "done" for t in ts), "total": len(ts)})
+        phases.append({"n": ph["n"], "level": ph["level"], "steps": {"done": sum(s["status"] == "done" and not s["stale"] for s in ss), "total": len(ss)},
+                       "criteria": {"passed": res.count("pass"), "waived": res.count("waived"), "total": len(core)}, "blocks": bl,
+                       "gate": {"status": g["status"], "gaps": g["blockers"]} if g else None})
+    return {"roadmap": roadmap, "phases": phases, "progress": _counts(steps, gates),
             "gates": [{"id": g["key"], "status": g["status"], "done": g["done"], "total": g["total"], "phases": g["phases"], "blockers": g["blockers"]} for g in gates],
             "stale": [s["key"] for s in steps if s["stale"]], "orphan": [s["key"] for s in steps if s["orphan"]],
             "blocked": [{"key": s["key"], "reason": s["blocked"]} for s in steps if s["state"] == "blocked"]}
@@ -361,6 +372,11 @@ def check(c, project, roadmap):
 def check_text(r):
     p = r["progress"]; out = [f"{r['roadmap']}: {p['done']}/{p['total']} steps done"]
     out += [f"  phase {x['phase']}: {x['done']}/{x['total']}" for x in p["phases"]]
+    for ph in r["phases"]:
+        cr, g = ph["criteria"], ph["gate"]
+        out.append(f"  P{ph['n']} {ph['level']}: steps {ph['steps']['done']}/{ph['steps']['total']}, core criteria {cr['passed']}/{cr['total']} passed (+{cr['waived']} waived)")
+        out += [f"    block {b['object']}: tasks {b['done']}/{b['total']}" for b in ph["blocks"]]
+        if g: out.append(f"    gate [{'passed' if g['status'] == 'done' else 'open'}]" + (": " + ", ".join(g["gaps"]) if g["gaps"] else ""))
     out += [f"  gate {g['id']} (phases {','.join(map(str, g['phases']))}): {g['done']}/{g['total']} [{'passed' if g['status'] == 'done' else 'open'}]" for g in r["gates"]]
     out.append("  stale: " + (", ".join(r["stale"]) or "-")); out.append("  orphan: " + (", ".join(r["orphan"]) or "-"))
     out.append("  blocked: " + ("; ".join(f"{b['key']} ({b['reason']})" for b in r["blocked"]) or "-"))
