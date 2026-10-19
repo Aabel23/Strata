@@ -46,6 +46,7 @@ def without(i, k):
     (bad(6, ids=[]), "type c4: missing 'ids'"),
     (bad(7, src="audit"), "src must be item|decision"),
     (bad(7, where={"body": "x"}), "where column 'body' not allowed for item"),
+    (bad(7, where={"scope": "x"}), "where column 'scope' not allowed for item"),
     (bad(7, where={"status": ["a"]}), "non-empty string or an integer"),
     (bad(7, where={"status": ""}), "non-empty string or an integer"),
     (bad(7, where={"core": True}), "non-empty string or an integer"),

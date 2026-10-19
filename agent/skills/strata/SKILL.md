@@ -35,7 +35,12 @@ Hiện có: `internproj`; `project1_app` (cha internproj, root `/home/abel/proje
 | Tìm kiếm | `curl -s 'localhost:8740/api/search?q=từ+khoá&project=P'` |
 | Thêm task/issue | `$S item add --project P --kind task --title "..." [--body "..." --priority high --status approved]` → in `ok: item N` |
 | Đổi trạng thái | `$S item set N --status doing [--priority ...]` |
-| Item list/show/claim/submit/approve | Chưa có; đi kèm task #42 |
+| Item list/ready | `$S item list [--project P --kind K --status S --owner O --ready --json]`; `$S item ready [--project P]` (việc nhận được ngay) |
+| Item show/edit | `$S item show N` (kèm dep); `$S item edit N [--title --body --spec JSON --priority]` |
+| Item claim/submit | coder: `$S item claim N --as coder` → `$S item submit N --as coder --note "..."` (doing → review) |
+| Item approve/reject | main: `$S item approve N [--note]` (review → done; proposed → approved); `$S item reject N --note "..."` |
+| Item release | `$S item release N` (doing → approved, bỏ claim) |
+| Item dep | `$S item dep add\|rm N DEP` (N phụ thuộc DEP) |
 | Thêm decision | `$S decision add --project P --title T --context C --decision D --consequences Q --rejected R [--supersedes N]`; đổi trạng thái: `$S decision set N --status S` |
 | Tìm kiếm (CLI) | `$S search Q [--project P --src item\|decision\|page\|doc --limit N]` |
 | MCP server | `$S mcp --role main\|coder\|reviewer` (stdio) |
@@ -49,7 +54,7 @@ Hiện có: `internproj`; `project1_app` (cha internproj, root `/home/abel/proje
 | Gán feature/status doc | `$S doc set --project P research/x.yaml --feature F --status current\|draft\|outdated\|missing [--ord N]` |
 | Page JSON | `$S page validate F.json` / `$S page put F.json` / `$S page list [--project P]` |
 
-Status item: `proposed|approved|open|doing|review|done|rejected` (mặc định `open`). Kind: `task|issue`. Luồng task: approved → doing → review → done.
+Status item: `proposed|approved|open|doing|review|done|rejected` (mặc định `open`). Kind: `task|issue|step|gate`. Luồng task: approved → doing → review → done.
 
 ## Ví dụ doc tối thiểu (`<docs_dir>/research/vi-du.yaml`)
 ```yaml
@@ -75,7 +80,7 @@ Kiểm lỗi: mở viewer (trang hiện khung lỗi) hoặc `curl -s 'localhost:
 - **B2 sơ đồ**: viết/sửa C4 YAML + flow → `validate` → `import-yaml`.
 - **B3 research**: mỗi research-stage là một note trong vault `research/<project>/` (chat chính ghi qua Obsidian MCP, theo skill `research-stage`); user chốt xong thì `decision add`.
 - **B4 user duyệt**: `item add --kind task --status approved` + `c4 link` vào object liên quan.
-- **B5 làm**: `item set N --status doing` → `done`.
+- **B5 làm**: coder `item claim N --as coder` → `item submit N --as coder --note "..."`; main `item approve N`.
 - **B6 lỗi**: `item add --kind issue` (+ `c4 link`).
 - Ngoại lệ: `project1_app` vẫn dùng `documentation/plan/plan.json` cho luồng đang chạy.
 

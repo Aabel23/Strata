@@ -1,6 +1,6 @@
 import json, threading, urllib.request
 import pytest
-from strata import db, server
+from strata import db, server, service
 from test_c4 import EX, run
 
 
@@ -53,6 +53,6 @@ def test_api_links_and_open_issues(dbp):
         d = json.load(urllib.request.urlopen(url))
         assert d["open_issues"] == ["relay"] and set(d["links"]) == {"relay", "mail"}
         assert d["links"]["relay"]["items"][0]["id"] == 1
-        run(dbp, "item", "set", "1", "--status", "done")
+        c = db.init(dbp); service.transition(c, "main", 1, "done", note="fixed"); c.commit(); c.close()   # open -> done needs a note
         assert json.load(urllib.request.urlopen(url))["open_issues"] == []
     finally: s.shutdown(); s.server_close()

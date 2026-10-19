@@ -4,7 +4,7 @@ import re
 STATUS = ("done", "plan")
 KINDS = ("research", "discussion", "note")
 # Columns a query block / /api/query may filter on, per source table.
-QUERY_COLS = {"item": {"id", "project", "kind", "status", "priority", "scope", "owner", "always_load", "core"},
+QUERY_COLS = {"item": {"id", "project", "kind", "status", "priority", "owner", "always_load", "core"},
               "decision": {"id", "project", "status", "supersedes"}}
 SLUG = re.compile(r"^[\w.-]+$")
 
