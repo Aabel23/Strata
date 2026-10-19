@@ -632,7 +632,13 @@ async function roadmapView(box,p,id){
   box.className="page wide";
   const list=await get("/api/roadmap?project="+enc(p));
   if(!list.length){box.append(head("Lộ trình",0),empty("Chưa có lộ trình","Nạp bằng:","strata.py roadmap import PLAN.json --project "+p+" --roadmap ID"));return}
-  const cur=list.find(x=>x.roadmap===id)||list[0], url="/api/roadmap?project="+enc(p)+"&roadmap="+enc(cur.roadmap), host=el("div");
+  // default: newest roadmap of the phase model (has phases), else newest; the list API carries no phases flag, so ask each
+  let def=null;
+  if(!list.some(x=>x.roadmap===id)&&list.length>1){
+    const full=await Promise.all(list.map(x=>get("/api/roadmap?project="+enc(p)+"&roadmap="+enc(x.roadmap)).then(d=>({x,ph:(d.phases||[]).length>0}),()=>({x,ph:false}))));
+    const newest=a=>a.sort((a,b)=>String(b.x.updated_at).localeCompare(String(a.x.updated_at)))[0];
+    def=(newest(full.filter(f=>f.ph))||newest(full)).x}
+  const cur=list.find(x=>x.roadmap===id)||def||list[0], url="/api/roadmap?project="+enc(p)+"&roadmap="+enc(cur.roadmap), host=el("div");
   if(list.length>1){const r=el("div","tchips");r.append(el("span","lbl","Lộ trình"));list.forEach(x=>{const a=link(x.title,hashFor(p,"roadmap",x.roadmap),x===cur?"on":"");r.append(a)});box.append(r)}
   box.append(host);
   let ver=null, data=null, sel=+hq().get("ph")||null;

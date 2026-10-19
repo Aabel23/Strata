@@ -79,7 +79,7 @@ const astraMap=(()=>{
       sv(sg,"path",{class:"body",d:lineD(L.pts)+" L1020 360 L-20 360 Z","stroke-width":L.w,"stroke-opacity":L.op});
       [10,22].forEach((o,k)=>sv(sg,"path",{class:"ln",d:lineD(L.pts.map(([x,y])=>[x,+(y+o+Math.sin(x*.05)*2).toFixed(1)])),"stroke-width":.6,opacity:(L.op*(.45-k*.18)).toFixed(2)}))});
     sv(g,"path",{class:"body",d:smooth(main)+` L${W+20} 360 L-20 360 Z`,"stroke-width":1.5});
-    [12,26,44].forEach((o,k)=>sv(g,"path",{class:"ln",d:smooth(main.map(([x,y])=>[x,y+o+(x>W-100?(x-W+100)*.2:0)])),"stroke-width":.8,opacity:(.6-k*.17).toFixed(2)}));
+    [12,26,44].forEach((o,k)=>sv(g,"path",{class:"ln",d:smooth(main.map(([x,y])=>[x,y+o+(x>W*.95?(x-W*.95)*.2:0)])),"stroke-width":.8,opacity:(.6-k*.17).toFixed(2)}));
     const wg=sv(g,"g",{transform:`scale(${X.toFixed(4)},1)`});
     // waves start below the lowest camp label (fix: they used to cross the TRẠI 1 caption)
     [[322,1.3,.85],[334,1.05,.6],[345,.9,.4],[354,.8,.25]].forEach(([y0,w,o],i)=>{const pts=[];
@@ -91,39 +91,82 @@ const astraMap=(()=>{
     const W=Math.max(680,Math.round(o.width||1000)), H=W<900?340:400, X=W/1000;
     const svgEl=sv(null,"svg",{class:"lt-map",viewBox:`0 0 ${W} ${H}`,width:W,height:H,role:"group","aria-label":o.label||"Bản đồ lộ trình"}), s=sv(svgEl,"g",{transform:`translate(0,${H-360})`});
     const seq=[];camps.forEach(c=>{seq.push({c});if(c.gate)seq.push({g:c.gate})});
-    const M=seq.length, step=840/Math.max(M-1,1);
-    seq.forEach((q,k)=>{const t=M>1?k/(M-1):0;q.p=[+((80+k*step)*X).toFixed(1),+(262-204*Math.pow(t,1.15)+(q.c?6:-4)).toFixed(1)]});
-    const P=seq.map(q=>q.p), last=P[M-1];
-    scene(s,[[-20,250],...P,[Math.min(last[0]+55,W-10),last[1]+24],[W+20,last[1]+54]],X,W);
-    // here: between the current camp and the next point, at pct; no current = trail walked to the end
+    // route: spread over the width with a real climb whatever the phase count; the summit is always the last vertex
+    const M=seq.length, x0=Math.max(90,W*.07), x1=W*.86, sum=[+(W*.93).toFixed(1),62];
+    seq.forEach((q,k)=>{const t=M>1?k/(M-1):0;q.p=[+(x0+(x1-x0)*t).toFixed(1),+(268-170*Math.pow(t,1.1)+(q.c?6:-4)).toFixed(1)]});
+    const P=seq.map(q=>q.p), lastG=seq[M-1].g, R=lastG?P:[...P,sum], top=R[R.length-1];
+    // few points: add terraces between them so the ridge climbs in steps instead of one straight ramp
+    if(R.length<5){const d=[R[0]];for(let k=1;k<R.length;k++){const a=R[k-1],b=R[k];[[.33,-.12],[.66,.18]].forEach(([t,j])=>{const dy=b[1]-a[1];d.push([+(a[0]+(b[0]-a[0])*t).toFixed(1),+(a[1]+dy*t+dy*j).toFixed(1),1])});d.push(b)}R.splice(0,R.length,...d)}
+    scene(s,[[-20,256],...R.map(p=>[p[0],p[1]]),[Math.min(top[0]+55,W-10),top[1]+24],[W+20,top[1]+54]],X,W);
     const ci=seq.findIndex(q=>q.c&&q.c.n===o.cur);
-    let hi=M-1,here=last;
-    if(ci>=0){hi=ci;const a=P[ci],b=P[ci+1]||a,f=Math.max(0,Math.min(1,(o.pct||0)/100))*.85;here=[+(a[0]+(b[0]-a[0])*f).toFixed(1),+(a[1]+(b[1]-a[1])*f).toFixed(1)]}
-    const up={transform:"translate(0,-6)"};
-    if(hi<M-1||ci>=0)sv(s,"path",{class:"trail-todo",d:smooth([here,...P.slice(hi+1)]),...up});
-    if(hi>0||here!==P[0]){const dd=smooth([...P.slice(0,hi+1),here]);sv(s,"path",{class:"trail-done",d:dd,...up});sv(s,"path",{class:"sheen",d:dd,...up})}
+    // here: on the way from the current camp to the next route point, at pct; no current = walked to the top
+    let here=top, done=R, todo=[];
+    if(ci>=0){const f=Math.max(0,Math.min(1,(o.pct||0)/100))*.85, i0=R.indexOf(P[ci]), nx=P[ci+1]||(lastG?P[ci]:sum), i1=Math.max(i0,R.indexOf(nx));
+      // walk the route polyline (terraces included) from this camp toward the next real point
+      const seg=R.slice(i0,i1+1), L=seg.slice(1).map((p,k)=>Math.hypot(p[0]-seg[k][0],p[1]-seg[k][1]));let d=f*L.reduce((x,y)=>x+y,0),k=0;
+      while(k<L.length-1&&d>L[k]){d-=L[k];k++}
+      const a=seg[k],b=seg[k+1]||a,t=L[k]?d/L[k]:0;here=[+(a[0]+(b[0]-a[0])*t).toFixed(1),+(a[1]+(b[1]-a[1])*t).toFixed(1)];
+      done=[...R.filter(p=>p[0]<here[0]),here];todo=[here,...R.filter(p=>p[0]>here[0])]}
+    const up={transform:"translate(0,-6)"}, xy=a=>a.map(p=>[p[0],p[1]]);
+    // put "here" on the drawn curve (Catmull-Rom segment, t taken from x), not on the straight polyline
+    if(ci>=0){const k=Math.max(0,R.findIndex((p,i)=>R[i+1]&&p[0]<=here[0]&&here[0]<=R[i+1][0]));
+      const p0=R[k-1]||R[k],p1=R[k],p2=R[k+1]||p1,p3=R[k+2]||p2,t=p2[0]>p1[0]?(here[0]-p1[0])/(p2[0]-p1[0]):0,u=1-t;
+      const c1=p1[1]+(p2[1]-p0[1])/6,c2=p2[1]-(p3[1]-p1[1])/6;here=[here[0],+(u*u*u*p1[1]+3*u*u*t*c1+3*u*t*t*c2+t*t*t*p2[1]).toFixed(1)]}
+    // one curve for the whole route, split at "here" by two clip rects, so the walked part sits exactly on the ridge
+    const rd=smooth(xy(R)), id="ltc"+(++draw.n), defs=sv(s,"defs",{});
+    sv(sv(defs,"clipPath",{id:id+"a"}),"rect",{x:-50,y:-200,width:here[0]+50,height:800});
+    sv(sv(defs,"clipPath",{id:id+"b"}),"rect",{x:here[0],y:-200,width:W+50,height:800});
+    if(todo.length>1)sv(s,"path",{class:"trail-todo",d:rd,"clip-path":`url(#${id}b)`,...up});
+    if(done.length>1){sv(s,"path",{class:"trail-done",d:rd,"clip-path":`url(#${id}a)`,...up});sv(s,"path",{class:"sheen",d:rd,"clip-path":`url(#${id}a)`,...up})}
+    if(!lastG)sv(s,"polygon",{class:"cairn",points:`${sum[0]},${sum[1]-6-17} ${sum[0]+13},${sum[1]-6+6.5} ${sum[0]-13},${sum[1]-6+6.5}`});
+
+    /* label placement: boxes in svg-group coords. Obstacles = route samples, dots, cairns, flag, already placed labels.
+       Each label tries candidate slots in order and takes the first free one (else the least bad), clamped inside the map. */
+    const OFF=H-360, PAD=10, boxes=[], route=[];
+    for(let k=0;k<R.length-1;k++)for(let t=0;t<=1;t+=.05)route.push([R[k][0]+(R[k+1][0]-R[k][0])*t,R[k][1]-6+(R[k+1][1]-R[k][1])*t]);
+    const hit=(b,a)=>b.x<a.x+a.w&&a.x<b.x+b.w&&b.y<a.y+a.h&&a.y<b.y+b.h;
+    const cost=b=>{let c=0;const g={x:b.x-5,y:b.y-5,w:b.w+10,h:b.h+10};
+      boxes.forEach(a=>{if(hit(b,a))c+=10});route.forEach(([x,y])=>{if(x>g.x&&x<g.x+g.w&&y>g.y&&y<g.y+g.h)c+=4});
+      if(b.y<-OFF+4||b.y+b.h>360-30)c+=6;return c};
+    const clamp=b=>({...b,x:Math.max(PAD,Math.min(W-PAD-b.w,b.x))});
+    const place=(cands,w,h)=>{let best=null;for(const [cx,cy] of cands){const b=clamp({x:cx,y:cy,w,h}), c=cost(b);if(!best||c<best.c)best={...b,c};if(c===0)break}return best};
+    const wName=t=>t.length*7.4, wMono=t=>t.length*7.2+4;
+    // reserved: dots, cairns, flag, summit
+    seq.forEach(q=>{const[x,y]=q.p;boxes.push({x:x-14,y:y-6-14,w:28,h:28})});
+    if(ci>=0)boxes.push({x:here[0]-3,y:here[1]-6-46,w:20,h:46});
+    if(o.summit){const w=o.summit.length*8.2, b=clamp({x:top[0]+14-w,y:top[1]-6-66,w,h:20});
+      if(top[1]-6-66<-OFF+2)b.y=-OFF+2;boxes.push(b);sv(s,"text",{class:"summit",x:b.x+w,y:b.y+15,"text-anchor":"end"},o.summit)}
+    if(ci>=0){const t="BẠN Ở ĐÂY · "+(o.pct||0)+"%", w=wMono(t)*1.12, hx=here[0], hy=here[1]-6;
+      const b=place([[hx-10-w,hy-40],[hx+22,hy-46],[hx-w/2,hy-66],[hx-10-w,hy-14]],w,14);boxes.push(b);
+      const f=sv(s,"g",{class:"flag","aria-hidden":"true"});
+      sv(f,"line",{x1:hx,y1:hy,x2:hx,y2:hy-44});sv(f,"polygon",{points:`${hx},${hy-44} ${hx+16},${hy-38} ${hx},${hy-32}`});sv(f,"circle",{cx:hx,cy:hy,r:4});
+      sv(f,"text",{class:"here",x:b.x,y:b.y+11},t)}
     seq.forEach((q,k)=>{if(!q.g)return;const[x,y0]=q.p,y=y0-6,st=q.g.state,sz=k===M-1?13:9;
       sv(s,"polygon",{class:"cairn "+st,points:`${x},${y-sz*1.3} ${x+sz},${y+sz*.5} ${x-sz},${y+sz*.5}`});
-      // label always above the cairn (fix: the open gate's label used to sit on the trail end)
-      sv(s,"text",{class:"gid"+(st==="open"?" open":""),x,y:y-sz*1.3-7,"text-anchor":"middle"},q.g.key+(st==="open"?" · CHƯA QUA":""))});
-    if(o.summit)sv(s,"text",{class:"summit",x:Math.min(last[0]+12,W-15),y:Math.max(last[1]-50,20),"text-anchor":"end"},o.summit);
-    // crowded (many phases): shorter names, no caption line, so neighbouring camp labels do not overlap
-    const gap=camps.length>1?step*(M-1)/(camps.length-1):840, crowd=gap*X<160, alt=gap*X<260, room=Math.max(8,Math.floor(gap*X*(alt?1.7:.95)/7.6)), cut=t=>t.length>room?t.slice(0,room-1).trimEnd()+"…":t;
-    // alternate labels above/below; parity chosen so the current camp (flag) keeps its label below
-    let ci2=0;const cpar=Math.max(0,camps.findIndex(c=>c.n===o.cur))%2;
-    seq.forEach(q=>{if(!q.c)return;const c=q.c,up2=alt&&ci2++%2!==cpar&&c!==camps[camps.length-1],[x,y0]=q.p,y=y0-6;
+      const t=q.g.key+(st==="open"?" · CHƯA QUA":""), w=wMono(t)*.9, top=y-sz*1.3;
+      const b=place([[x-w/2,top-18],[x+6,top-16],[x-w-6,top-16],[x-w/2,top-34],[x+10,top-30],[x-w-10,top-30],[x-w/2,y+sz*.5+6]],w,13);boxes.push(b);
+      sv(s,"text",{class:"gid"+(st==="open"?" open":""),x:b.x,y:b.y+10},t)});
+    // camps: current first, then left to right. Variants: one line, two lines, then short "Trại n" (full name in <title>)
+    const order=seq.filter(q=>q.c).sort((a,b)=>(b.c.n===o.cur)-(a.c.n===o.cur));
+    const wrap2=t=>{const w=t.split(" ");let best=null;for(let i=1;i<w.length;i++){const a=w.slice(0,i).join(" "),b=w.slice(i).join(" "),m=Math.max(a.length,b.length);if(!best||m<best.m)best={l:[a,b],m}}return best?best.l:[t]};
+    order.forEach(q=>{const c=q.c,[x,y0]=q.p,y=y0-6, cap="TRẠI "+c.n+" · "+LBL[c.state].toUpperCase();
+      let pick=null;
+      for(const lines of [[c.label],wrap2(c.label),[]]){
+        const cp=lines.length?cap:"TRẠI "+c.n, w=Math.max(wMono(cp),...lines.map(wName)), h=lines.length*17+14;
+        const cands=[[x-w/2,y+20],[x-w/2,y-20-h],[x-w-8,y-12-h],[x+10,y+16],[x-w-10,y+16],[x+12,y-12-h]];
+        const b=place(cands,w,h);if(!pick||b.c<pick.b.c)pick={b,lines,cap:cp};if(b.c===0)break}
+      boxes.push(pick.b);q.lab=pick});
+    seq.forEach(q=>{if(!q.c)return;const c=q.c,[x,y0]=q.p,y=y0-6,{b,lines,cap}=q.lab,cx=b.x+b.w/2;
       const g=sv(s,"g",{class:"camp "+c.state+(c.n===o.sel?" sel":""),tabindex:0,role:"button","aria-pressed":String(c.n===o.sel),"aria-label":`Trại ${c.n}: ${c.label}, ${LBL[c.state]}`});
       sv(g,"title",{},c.label);
       sv(g,"circle",{class:"ring",cx:x,cy:y,r:19});sv(g,"circle",{class:"dot",cx:x,cy:y,r:12});
       sv(g,"text",{class:"n",x,y:y+4},String(c.n));
-      sv(g,"text",{class:"nm",x,y:up2?y-40:y+36,"text-anchor":"middle"},cut(c.label));
-      if(!crowd)sv(g,"text",{class:"sm",x,y:up2?y-26:y+50,"text-anchor":"middle"},"TRẠI "+c.n+" · "+LBL[c.state].toUpperCase());
-      const pick=()=>o.onPick&&o.onPick(c.n);
-      g.addEventListener("click",pick);g.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();pick()}})});
-    if(ci>=0){const[hx,hy0]=here,hy=hy0-6,f=sv(s,"g",{class:"flag","aria-hidden":"true"});
-      sv(f,"line",{x1:hx,y1:hy,x2:hx,y2:hy-44});sv(f,"polygon",{points:`${hx},${hy-44} ${hx+16},${hy-38} ${hx},${hy-32}`});sv(f,"circle",{cx:hx,cy:hy,r:4});
-      sv(f,"text",{class:"here",x:hx<220?hx+22:hx-10,y:hy-28,"text-anchor":hx<220?"start":"end"},"BẠN Ở ĐÂY · "+(o.pct||0)+"%")}
+      lines.forEach((l,i)=>sv(g,"text",{class:"nm",x:cx,y:b.y+14+i*17,"text-anchor":"middle"},l));
+      sv(g,"text",{class:"sm",x:cx,y:b.y+lines.length*17+11,"text-anchor":"middle"},cap);
+      const pk=()=>o.onPick&&o.onPick(c.n);
+      g.addEventListener("click",pk);g.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();pk()}})});
     return svgEl;
   }
+  draw.n=0;
   return draw;
 })();
