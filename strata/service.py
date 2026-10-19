@@ -18,13 +18,24 @@ def _role(c, role, op, project=None, target=None, info=None):
     if role not in ROLES: _deny(c, role, op, project, target, info, f"unknown role {role!r}")
 
 
-def add_item(c, role, project, kind, title, body=None, priority=None, status="open", spec=None):
+def _phase(c, project, phase):
+    """(phase, roadmap) to store: an explicit phase goes with the running roadmap; no phase on an issue = the running phase."""
+    from strata import roadmap
+    act = roadmap.active(c, project)
+    if phase is None: return act[::-1] if act else (None, None)
+    if not isinstance(phase, int) or isinstance(phase, bool) or phase < 0: raise ValueError("phase must be an integer >= 0")
+    return phase, act and act[0]
+
+
+def add_item(c, role, project, kind, title, body=None, priority=None, status="open", spec=None, phase=None):
     info = {"kind": kind, "title": title}
     _role(c, role, "item.add", project, None, info)
     if role != "main" and kind != "issue": _deny(c, role, "item.add", project, None, info, f"{role} may only add issues")
     if role != "main": status = "proposed"
     if spec is not None and not isinstance(spec, dict): raise ValueError("spec must be a JSON object")
-    return db.add_item(c, project, kind, title, body, priority, status, role, spec)
+    if phase is not None or kind == "issue": phase, rid = _phase(c, project, phase)
+    else: rid = None
+    return db.add_item(c, project, kind, title, body, priority, status, role, spec, phase, rid)
 
 
 # (from, to) -> (roles allowed, note required). Owner/dep/version rules live in transition().
@@ -93,12 +104,13 @@ def set_item(c, role, id, status=None, priority=None):
     if priority is not None: db.set_item(c, id, None, priority, role)
 
 
-def edit_item(c, role, id, title=None, body=None, spec=None, priority=None):
+def edit_item(c, role, id, title=None, body=None, spec=None, priority=None, phase=None):
     r = c.execute("SELECT project,version FROM item WHERE id=?", (id,)).fetchone()
     if role != "main": _deny(c, role, "item.edit", r and r["project"], f"item:{id}", {"id": id}, f"{role} may not edit items")
     if not r: raise KeyError(f"no item {id}")
     if spec is not None and not isinstance(spec, dict): raise ValueError("spec must be a JSON object")
-    new = {k: v for k, v in (("title", title), ("body", body), ("priority", priority),
+    if phase is not None: phase, rid = _phase(c, r["project"], phase)
+    new = {k: v for k, v in (("title", title), ("body", body), ("priority", priority), ("phase", phase), ("roadmap", phase is not None and rid or None),
                              ("spec", None if spec is None else json.dumps(spec, ensure_ascii=False))) if v is not None}
     if not new: raise ValueError("nothing to edit")
     sets = ",".join(f"{k}=?" for k in new)

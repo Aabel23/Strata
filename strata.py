@@ -19,6 +19,8 @@
   strata.py item add --project P --kind task|issue|step|gate --title T [--body --priority --status --spec FILE|-] | set ID [--status --priority]
   strata.py item list [--project --kind --status --owner --ready] | show ID | edit ID [--title --body --spec FILE|- --priority] | ready [--project]
   strata.py roadmap import PLAN.json [--progress PROGRESS.json] [--gates "G0=0;G1=1,2"] --project P --roadmap ID | check --project P --roadmap ID [--json]
+  strata.py roadmap init --project P --roadmap ID --template five-phase | pull BLOCK --to PHASE --note N --project P --roadmap ID
+  strata.py roadmap criterion set ROADMAP CRIT --project P (--result pass|fail [--value T] | --waive REASON) --as machine|reviewer|user
   strata.py roadmap gate pass GATE --project P --roadmap ID --as user [--evidence E] | reaccept STEP ... --as user   (steps use the item verbs)
   strata.py item claim ID --as NAME | submit ID --note N [--as NAME] | rework ID --note N | close ID --note N | approve ID [--note --as] | reject ID --note N | release ID | dep add|rm ID DEP   (all: --json)
 """
@@ -64,7 +66,7 @@ def cmd_item(c, a):
     out = lambda v, text: print(json.dumps(v, ensure_ascii=False) if a.json else text)
     act, who = a.action, getattr(a, "as_", None) or "main"
     if act == "add":
-        i = service.add_item(c, "main", a.project, a.kind, a.title, a.body, a.priority, a.status, _spec_arg(a.spec)); out({"id": i}, f"ok: item {i}")
+        i = service.add_item(c, "main", a.project, a.kind, a.title, a.body, a.priority, a.status, _spec_arg(a.spec), a.phase); out({"id": i}, f"ok: item {i}")
     elif act == "set":
         service.set_item(c, "main", a.id, a.status, a.priority); out({"ok": True}, "ok")
     elif act in ("list", "ready"):
@@ -76,7 +78,7 @@ def cmd_item(c, a):
             + "".join(f"\n  blocks #{d['id']} [{d['status']}] {d['title']}" for d in i["blocks"]) + (f"\n{i['body']}" if i["body"] else "")
             + (f"\nspec: {json.dumps(i['spec'], ensure_ascii=False, indent=2)}" if i["spec"] else ""))
     elif act == "edit":
-        service.edit_item(c, "main", a.id, a.title, a.body, _spec_arg(a.spec), a.priority); out({"ok": True}, "ok")
+        service.edit_item(c, "main", a.id, a.title, a.body, _spec_arg(a.spec), a.priority, a.phase); out({"ok": True}, "ok")
     elif act == "dep":
         ch = service.dep(c, "main", a.id, a.dep, a.op == "add"); out({"changed": ch}, "ok" if ch else "no change")
     else:  # status verbs
@@ -97,6 +99,10 @@ def cmd_roadmap(a):
             print("imported {}/{}: {steps} steps ({created} new, {updated} updated, {same} unchanged, {orphan} orphan), {gates} gates changed".format(a.project, a.roadmap, **r))
         elif a.action == "check":
             r = roadmap.check(c, a.project, a.roadmap); print(json.dumps(r, ensure_ascii=False) if a.json else roadmap.check_text(r))
+        elif a.action == "init": print("ok:", roadmap.init_template(c, a.project, a.roadmap, a.template))
+        elif a.action == "pull": roadmap.pull(c, a.project, a.roadmap, a.block, a.to, a.note); print(f"ok: {a.block} -> phase {a.to}")
+        elif a.action == "criterion":
+            roadmap.criterion_set(c, a.project, a.roadmap, a.crit, a.result, a.value, a.as_, a.waive); print(f"ok: {a.crit}")
         elif a.action == "gate":
             roadmap.gate_pass(c, a.project, a.roadmap, a.id, a.as_, a.evidence); print(f"ok: {a.id} passed")
         else:
@@ -176,20 +182,23 @@ def main(argv=None):
     js = (["--json"], {"action": "store_true"})
     filt = [(["--project"], {}), (["--kind"], {}), (["--status"], {}), (["--owner"], {})]
     group("item", {"add": [(["--project"], req), (["--kind"], {"required": True, "choices": ["task", "issue", "step", "gate"]}), (["--title"], req), (["--body"], {}),
-                           (["--priority"], {}), (["--status"], {"choices": ITEM_STATUS, "default": "open"}), (["--spec"], {}), js],
+                           (["--priority"], {}), (["--status"], {"choices": ITEM_STATUS, "default": "open"}), (["--spec"], {}), (["--phase"], {"type": int}), js],
                    "set": [idp, (["--status"], {"choices": ITEM_STATUS}), (["--priority"], {}), js],
                    "list": [*filt, (["--ready"], {"action": "store_true"}), js], "ready": [(["--project"], {}), js], "show": [idp, js],
-                   "edit": [idp, (["--title"], {}), (["--body"], {}), (["--spec"], {}), (["--priority"], {}), js],
+                   "edit": [idp, (["--title"], {}), (["--body"], {}), (["--spec"], {}), (["--priority"], {}), (["--phase"], {"type": int}), js],
                    "claim": [idp, (["--as"], {"dest": "as_", "required": True}), js], "submit": [idp, (["--note"], req), asp, js],
                    "approve": [idp, notep, asp, js], "reject": [idp, (["--note"], req), js], "rework": [idp, (["--note"], req), asp, js], "close": [idp, (["--note"], req), js], "release": [idp, js],
                    "dep": [(["op"], {"choices": ["add", "rm"]}), idp, (["dep"], {"type": int}), js]})
     group("task", {"context": [(["id"], {"type": int}), (["--budget"], {"type": int, "default": 12000})]})
     rm = sub.add_parser("roadmap"); rs = rm.add_subparsers(dest="action", required=True)
     for n, args in {"import": [(["file"], {}), (["--progress"], {}), (["--gates"], {})], "check": [(["--json"], {"action": "store_true"})],
-                    "gate": [(["op"], {"choices": ["pass"]}), (["id"], {}), (["--evidence"], {})], "reaccept": [(["id"], {})]}.items():
+                    "gate": [(["op"], {"choices": ["pass"]}), (["id"], {}), (["--evidence"], {})], "reaccept": [(["id"], {})],
+                    "init": [(["--template"], {"required": True})], "pull": [(["block"], {}), (["--to"], {"type": int, "required": True}), (["--note"], {"required": True})]}.items():
         p = rs.add_parser(n); p.add_argument("--db"); p.add_argument("--project", required=True); p.add_argument("--roadmap", required=True)
         if n in ("gate", "reaccept"): p.add_argument("--as", dest="as_")
         for x in args: p.add_argument(*x[0], **x[1])
+    p = rs.add_parser("criterion"); p.add_argument("op", choices=["set"]); p.add_argument("roadmap"); p.add_argument("crit"); p.add_argument("--db"); p.add_argument("--project", required=True)
+    p.add_argument("--result", choices=["pass", "fail"]); p.add_argument("--value", default=""); p.add_argument("--as", dest="as_", required=True); p.add_argument("--waive")
     p = sub.add_parser("search"); p.add_argument("q"); p.add_argument("--db"); p.add_argument("--project"); p.add_argument("--limit", type=int, default=30)
     p.add_argument("--src", choices=["item", "decision", "page", "doc"])
     group("decision", {"add": [(["--project"], req), (["--title"], req), (["--context"], req), (["--decision"], req), (["--consequences"], req),

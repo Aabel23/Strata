@@ -64,6 +64,88 @@ def _phases(plan):
     return ph
 
 
+LEVELS = ("skeleton", "demo", "hardened", "staging", "release")
+INTENTS = ("build", "extend", "harden", "encrypt")
+CATEGORIES = ("chức năng", "kiểm thử", "bảo mật", "tài liệu", "vận hành", "hiệu năng", "bảo trì", "phát hành", "trình diễn")
+CONFIRM = {"machine": ("machine", "reviewer", "user"), "reviewer": ("reviewer", "user"), "user": ("user",)}  # confirm_by -> who may set the result
+TEMPLATES = pathlib.Path(__file__).resolve().parent.parent / "docs" / "plan" / "templates"
+
+
+def _def(c, project, roadmap):
+    """The phase definition (goal, blocks, criteria + results) kept in the plan page; {'phases': []} for a plan.json roadmap."""
+    pg = db.get_page(c, project, f"roadmap-{roadmap}")
+    return (pg and pg["blocks"].get("def")) or {"phases": []}
+
+
+def _save_def(c, project, roadmap, d):
+    pg = db.get_page(c, project, f"roadmap-{roadmap}"); pg["blocks"]["def"] = d
+    db.put_page(c, project, f"roadmap-{roadmap}", pg["title"], "plan", pg["blocks"])
+
+
+def _from_yaml(c, project, roadmap, y):
+    """Validate a phases-YAML roadmap, merge results/pulls of the stored one, return (legacy-shaped plan, def)."""
+    def bad(m): raise ValueError("roadmap: " + m)
+    phs = y.get("phases")
+    if not isinstance(phs, list) or not phs: bad("phases must be a non-empty list")
+    old = _def(c, project, roadmap)
+    res = {cr["id"]: cr.get("result") for p in old["phases"] for cr in p["criteria"]}
+    loc = {b["object"]: (p["n"], b["planned_phase"]) for p in old["phases"] for b in p["blocks"]}
+    ns = [p.get("n") for p in phs]
+    if not all(isinstance(n, int) and not isinstance(n, bool) and n >= 0 for n in ns) or len(set(ns)) != len(ns): bad("phase n must be unique integers >= 0")
+    seen, cids, out = set(), set(), []
+    for p in phs:
+        n = p["n"]; w = f"phase {n}"
+        if not all(isinstance(p.get(k), str) and p[k] for k in ("title", "goal")): bad(f"{w}: title and goal required")
+        if p.get("level") not in LEVELS: bad(f"{w}: level must be one of {'|'.join(LEVELS)}")
+        for st in p.get("steps") or []:
+            if not str(st.get("id", "")).startswith(f"{n}.") or not st.get("title"): bad(f"{w}: step needs title and id starting with '{n}.'")
+        blocks, crits = [], []
+        for b in p.get("blocks") or []:
+            o = b.get("object")
+            if not c.execute("SELECT 1 FROM c4_object WHERE project=? AND id=?", (project, o)).fetchone(): bad(f"{w}: block object {o!r} is not a C4 object of project {project}")
+            if b.get("intent") not in INTENTS: bad(f"{w}: block {o} intent must be one of {'|'.join(INTENTS)}")
+            if o in seen: bad(f"block {o} listed twice")
+            seen.add(o); blocks.append({"object": o, "intent": b["intent"], "planned_phase": n})
+        for cr in p.get("criteria") or []:
+            w2 = f"{w}: criterion {cr.get('id')!r}"
+            if not cr.get("id") or cr["id"] in cids: bad(f"{w2} id missing or duplicated")
+            if cr.get("category") not in CATEGORIES: bad(f"{w2} category must be one of {', '.join(CATEGORIES)}")
+            if cr.get("confirm_by") not in CONFIRM: bad(f"{w2} confirm_by must be machine|reviewer|user")
+            if cr.get("level") not in ("core", "optional"): bad(f"{w2} level must be core|optional")
+            if not isinstance(cr.get("text"), str) or not isinstance(cr.get("verify"), str): bad(f"{w2} text and verify required")
+            cids.add(cr["id"]); crits.append({**{k: cr[k] for k in ("id", "category", "text", "verify", "confirm_by", "level")}, "result": res.get(cr["id"])})
+        out.append({"n": n, "title": p["title"], "goal": p["goal"], "level": p["level"], "blocks": blocks, "criteria": crits})
+    byn = {p["n"]: p for p in out}
+    for o, (at, planned) in loc.items():  # keep an earlier pull when the block is still planned where it was
+        for p in out:
+            for b in list(p["blocks"]):
+                if b["object"] == o and p["n"] == planned and at in byn and at != planned:
+                    p["blocks"].remove(b); byn[at]["blocks"].append({**b, "pulled_from": planned})
+    plan = {"version": 1, "header": {"title": y.get("title") or f"Roadmap {roadmap}"},
+            "sections": [{"id": "ban-do", "route": [{"code": f"G{p['n']}", "title": p["title"], "detail": p["goal"]} for p in out]},
+                         {"id": "chi-tiet", "phases": [{"anchor": f"p{p['n']}", "title": p["title"], "steps": [dict(st) for st in phs[i].get("steps") or []]} for i, p in enumerate(out)]}],
+            "gates": {f"G{p['n']}": [p["n"]] for p in out}}
+    return plan, {"phases": out}
+
+
+def init_template(c, project, roadmap, template):
+    """Write the template as <docs_dir>/plan/<roadmap>.yaml (never overwrite)."""
+    import yaml
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", roadmap or "") or not re.fullmatch(r"[A-Za-z0-9_-]+", template or ""): raise ValueError("bad roadmap or template name")
+    src = TEMPLATES / f"{template}.yaml"
+    if not src.is_file(): raise ValueError(f"no template {template!r}")
+    r = c.execute("SELECT docs_dir FROM project WHERE id=?", (project,)).fetchone()
+    if not r: raise KeyError(f"no project {project}")
+    if not r["docs_dir"]: raise ValueError(f"project {project}: docs_dir not set")
+    dst = pathlib.Path(r["docs_dir"]) / "plan" / f"{roadmap}.yaml"
+    if dst.exists(): raise ValueError(f"{dst} already exists")
+    y = yaml.safe_load(src.read_text(encoding="utf-8")); y["title"] = f"Roadmap {roadmap}"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_text(yaml.safe_dump(y, allow_unicode=True, sort_keys=False, width=200), encoding="utf-8")
+    db.audit(c, project, "roadmap.init", f"{project}/{roadmap}", None, {"template": template, "file": str(dst)}, "main"); c.commit()
+    return dst
+
+
 def _check_inputs(plan, prog):
     if plan.get("version") != 1: raise ValueError("plan: version must be 1")
     ids = [s["id"] for p in _phases(plan) for s in p["steps"]]
@@ -150,10 +232,14 @@ def import_plan(c, project, roadmap, plan_file, progress_file=None, gates=None):
     if not c.execute("SELECT 1 FROM project WHERE id=?", (project,)).fetchone(): raise KeyError(f"no project {project}")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", roadmap or ""): raise ValueError("bad roadmap id")
     plan = _load_file(plan_file); prog = _load_file(progress_file) if progress_file else {}
+    rdef = None
+    if isinstance(plan, dict) and "phases" in plan: plan, rdef = _from_yaml(c, project, roadmap, plan)
     ids = _check_inputs(plan, prog)
     gates = plan.get("gates") or (parse_gates(gates) if gates else {})  # plan key wins over --gates
     if not isinstance(gates, dict) or not all(isinstance(v, list) and all(isinstance(x, int) for x in v) for v in gates.values()): raise ValueError('plan: "gates" must be {"G0": [0], ...}')
-    page = _build_page(plan, roadmap, gates); counts = {"created": 0, "updated": 0, "same": 0, "orphan": 0, "gates": 0}
+    page = _build_page(plan, roadmap, gates)
+    if rdef: page["def"] = rdef
+    counts = {"created": 0, "updated": 0, "same": 0, "orphan": 0, "gates": 0}
     try:
         keyid = {}
         for p in _phases(plan):
@@ -188,6 +274,48 @@ def import_plan(c, project, roadmap, plan_file, progress_file=None, gates=None):
     return {"steps": len(ids), **counts}
 
 
+def _gaps(c, project, d, phases):
+    """What still blocks a gate beyond its steps: core criteria not pass/waived, tasks of the phase's blocks not done."""
+    out = []
+    for ph in d["phases"]:
+        if ph["n"] not in phases: continue
+        out += [f"criterion {cr['id']}" for cr in ph["criteria"] if cr["level"] == "core" and (cr.get("result") or {}).get("result") not in ("pass", "waived")]
+        for b in ph["blocks"]:
+            ts = _tasks(c, project, b["object"])
+            out += [f"task #{t['id']}" for t in ts if t["status"] != "done"] or ([] if ts else [f"block {b['object']} has no task"])
+    return out
+
+
+def _tasks(c, project, obj):
+    return [dict(r) for r in c.execute("SELECT t.id,t.title,t.status FROM c4_link l JOIN item t ON t.id=l.ref_id WHERE l.project=? AND l.object_id=? AND l.ref_kind='item' "
+                                       "AND t.project=? AND t.kind='task' AND t.status!='rejected' ORDER BY t.id", (project, obj, project))]
+
+
+def _current(c, project, roadmap, d):
+    """Lowest phase whose gate is not passed (None = all passed or no phase definition)."""
+    for ph in sorted(d["phases"], key=lambda p: p["n"]):
+        g = _find(c, project, roadmap, "gate", f"G{ph['n']}")
+        if not g or g["status"] != "done": return ph["n"]
+
+
+def active(c, project):
+    """(roadmap id, running phase) of the most recently updated phases-roadmap that is not finished, else None."""
+    for p in sorted((p for p in db.list_pages(c, project) if p["kind"] == "plan" and p["slug"].startswith("roadmap-")), key=lambda p: p["updated_at"], reverse=True):
+        rid = p["slug"][len("roadmap-"):]; d = _def(c, project, rid)
+        n = _current(c, project, rid, d) if d["phases"] else None
+        if n is not None: return rid, n
+
+
+def annotate(c, rows):
+    """Add off_roadmap to item rows: the item has a phase of a roadmap whose running phase is another one (computed on read)."""
+    cur = {}
+    for r in rows:
+        k = (r["project"], r.get("roadmap"))
+        if k not in cur: cur[k] = r.get("roadmap") and _current(c, r["project"], r["roadmap"], _def(c, r["project"], r["roadmap"]))
+        r["off_roadmap"] = r.get("phase") is not None and cur[k] is not None and r["phase"] != cur[k]
+    return rows
+
+
 def _load(c, project, roadmap):
     rows = c.execute("SELECT * FROM item WHERE project=? AND kind IN ('step','gate') AND json_extract(spec,'$.roadmap')=? ORDER BY id", (project, roadmap)).fetchall()
     steps, gates = [], []
@@ -204,11 +332,12 @@ def _load(c, project, roadmap):
         else:
             d.update(phases=sp["phases"], gate=sp["gate"], deps=[x[0] for x in c.execute("SELECT depends_on FROM item_dep WHERE item_id=?", (r["id"],))]); gates.append(d)
     steps.sort(key=lambda s: (s["phase"], _nat(s["key"]))); gates.sort(key=lambda g: g["key"])
-    by = {s["id"]: s for s in steps}
+    by = {s["id"]: s for s in steps}; d = _def(c, project, roadmap)
     for g in gates:
         ds = [by[i] for i in g["deps"] if i in by]; live = [s for s in ds if not s["orphan"]]
         g["done"] = sum(s["status"] == "done" and not s["stale"] for s in live); g["total"] = len(live)
-        g["blockers"] = [s["key"] for s in ds if s["status"] != "done" or s["stale"] or s["orphan"]]
+        g["gaps"] = _gaps(c, project, d, g["phases"])
+        g["blockers"] = [s["key"] for s in ds if s["status"] != "done" or s["stale"] or s["orphan"]] + g["gaps"]
         g["ready"] = g["status"] != "done" and not g["blockers"]
     return steps, gates
 
@@ -251,12 +380,47 @@ def gate_pass(c, project, roadmap, gate, actor, evidence=None):
     if g["status"] == "done": deny(f"{gate} already passed")
     steps, gates = _load(c, project, roadmap)
     bad = next(x["blockers"] for x in gates if x["id"] == g["id"])
-    if bad: deny(f"{gate} cannot pass: steps not done, stale or orphan: {', '.join(bad)}")
+    if bad: deny(f"{gate} cannot pass: steps not done, stale or orphan, criteria or tasks open: {', '.join(bad)}")
     spec = json.loads(g["spec"]); spec.update(reviewer=actor, updated=db.now()[:10], **({"evidence": evidence} if evidence else {}))
     if not c.execute("UPDATE item SET status='done',spec=?,updated_at=?,version=version+1 WHERE id=? AND version=?",
                      (json.dumps(spec, ensure_ascii=False), db.now(), g["id"], g["version"])).rowcount: deny("gate changed concurrently, retry")
     db.audit(c, project, "roadmap.gate_pass", f"item:{g['id']}", {"status": g["status"]}, {"status": "done", "actor": actor, "evidence": evidence, "version": g["version"] + 1}, "main")
     c.commit()
+
+
+def criterion_set(c, project, roadmap, crit, result, value, actor, waive=None):
+    """Record a criterion result. Who may: machine -> any of machine/reviewer/user; reviewer -> reviewer/user; user -> user only. --waive REASON (user, core or optional) = exception."""
+    d = _def(c, project, roadmap)
+    cr = next((x for p in d["phases"] for x in p["criteria"] if x["id"] == crit), None)
+    if not cr: raise KeyError(f"no criterion {crit} in roadmap {roadmap}")
+    deny = lambda m: _refuse(c, project, "roadmap.criterion", f"{roadmap}/{crit}", {"actor": actor, "result": result}, m)
+    if waive is not None:
+        if actor != "user": deny("waive needs --as user")
+        if not waive.strip(): deny("waive needs a reason")
+        result, value = "waived", waive
+    elif result not in ("pass", "fail"): raise ValueError("--result must be pass or fail")
+    if actor not in CONFIRM[cr["confirm_by"]]: deny(f"{crit} is confirmed by {cr['confirm_by']}: --as {' or '.join(CONFIRM[cr['confirm_by']])}")
+    before = cr.get("result"); cr["result"] = {"result": result, "value": value or "", "by": actor, "at": db.now()[:10]}
+    db.audit(c, project, "roadmap.criterion", f"{roadmap}/{crit}", before, cr["result"], "main")
+    _save_def(c, project, roadmap, d)  # commits
+
+
+def pull(c, project, roadmap, block, to, note):
+    """Move a block to another phase before its time; its tasks follow; planned_phase stays so the drift is visible."""
+    d = _def(c, project, roadmap)
+    if not (note or "").strip(): raise ValueError("pull needs --note")
+    src = next((p for p in d["phases"] for b in p["blocks"] if b["object"] == block), None)
+    if not src: raise KeyError(f"no block {block} in roadmap {roadmap}")
+    dst = next((p for p in d["phases"] if p["n"] == to), None)
+    if not dst: raise ValueError(f"no phase {to} in roadmap {roadmap}")
+    if dst is src: raise ValueError(f"block {block} is already in phase {to}")
+    b = next(b for b in src["blocks"] if b["object"] == block); src["blocks"].remove(b); dst["blocks"].append(b)
+    if to == b["planned_phase"]: b.pop("pulled_from", None)
+    else: b["pulled_from"] = b["planned_phase"]
+    ids = [t["id"] for t in _tasks(c, project, block) if t["status"] != "done"]
+    for i in ids: c.execute("UPDATE item SET phase=?,roadmap=?,updated_at=?,version=version+1 WHERE id=?", (to, roadmap, db.now(), i))
+    db.audit(c, project, "roadmap.pull", f"{roadmap}/{block}", {"phase": src["n"]}, {"phase": to, "planned_phase": b["planned_phase"], "note": note, "items": ids}, "main")
+    _save_def(c, project, roadmap, d)
 
 
 def reaccept(c, project, roadmap, key, actor):
@@ -282,5 +446,12 @@ def api(c, project, roadmap=None, only_version=False):
     version = f"{pg['updated_at']}:{v[0]}:{v[1]}:{v[2]}"
     if only_version: return {"version": version}
     steps, gates = _load(c, project, roadmap)
+    d = _def(c, project, roadmap); cur = _current(c, project, roadmap, d); gk = {g["key"]: g for g in gates}; phases = []
+    for ph in sorted(d["phases"], key=lambda p: p["n"]):
+        g = gk.get(f"G{ph['n']}"); bl = []
+        for b in ph["blocks"]:
+            ts = _tasks(c, project, b["object"]); bl.append({**b, "done": sum(t["status"] == "done" for t in ts), "total": len(ts)})
+        phases.append({**ph, "blocks": bl, "gate": g and {"key": g["key"], "status": g["status"], "ready": g["ready"], "missing": g["blockers"]}, "current": ph["n"] == cur})
+    off = annotate(c, [dict(r) for r in c.execute("SELECT id,project,title,kind,status,phase,roadmap FROM item WHERE project=? AND roadmap=? AND phase IS NOT NULL", (project, roadmap))])
     return {"project": project, "roadmap": roadmap, "title": pg["title"], "updated_at": pg["updated_at"], "version": version, "plan": pg["blocks"],
-            "steps": steps, "gates": gates, "progress": _counts(steps, gates)}
+            "steps": steps, "gates": gates, "progress": _counts(steps, gates), "phases": phases, "current_phase": cur, "off_roadmap": [r for r in off if r["off_roadmap"]]}

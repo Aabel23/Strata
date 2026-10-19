@@ -168,6 +168,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             with lock:
                 out = service.list_items(conn, q.get("project") or None, q.get("kind"), q.get("status"), q.get("owner") or None, ready)
                 if "id" in q: out = [r for r in out if r["id"] == int(q["id"])]
+                roadmap.annotate(conn, out)
                 if not ready: out.sort(key=lambda r: r["id"])
                 if "id" in q and out: out[0].update(self.detail(out[0]))
             self.json(out)

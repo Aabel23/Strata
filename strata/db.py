@@ -21,12 +21,16 @@ def _page_rebuild_due(c):
     r = c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='page'").fetchone()
     return bool(r) and "'plan'" not in r[0] and not c.execute("SELECT 1 FROM sqlite_master WHERE name='page_old'").fetchone()  # CHECK predates kind 'plan'
 
+def _item_phase_due(c):
+    cols = [r[1] for r in c.execute("PRAGMA table_info(item)")]
+    return bool(cols) and "phase" not in cols  # ALTER ADD COLUMN: back up first like the rebuilds
+
 def _backup_if_rebuild(path):
     """Copy the DB file to <dir>/backups/strata-YYYYmmdd-HHMMSS.db before a destructive item/page rebuild (one backup for both) (before connect() flips it to WAL, so bytes match)."""
     p = db_path(path)
     if p == ":memory:" or not os.path.exists(p): return
     k = sqlite3.connect(p)
-    try: due = _item_rebuild_due(k) or _page_rebuild_due(k)
+    try: due = _item_rebuild_due(k) or _page_rebuild_due(k) or _item_phase_due(k)
     finally: k.close()
     if due:
         d = pathlib.Path(p).parent / "backups"; d.mkdir(exist_ok=True)
@@ -84,7 +88,7 @@ def _finish_page(c):
 ADDED = [("c4_connection", "description", "TEXT"), ("c4_connection", "feature", "TEXT"), ("c4_connection", "interface", "TEXT"),
          ("c4_connection", "payload", "JSON"), ("c4_connection", "kind", "TEXT"),
          ("c4_object", "responsibilities", "JSON"), ("c4_object", "state", "TEXT"),
-         ("doc", "prev_status", "TEXT"), ("doc", "summary", "TEXT"), ("doc", "code", "JSON")]
+         ("item", "phase", "INT"), ("item", "roadmap", "TEXT"), ("doc", "prev_status", "TEXT"), ("doc", "summary", "TEXT"), ("doc", "code", "JSON")]
 
 def _migrate(c):
     """ALTER old tables up to the current schema. Returns True if c4_object was renamed to c4_object_old
@@ -142,12 +146,12 @@ def add_project(c, id, name, root=None, docs_dir=None, parent=None, description=
     c.execute("INSERT INTO project(id,name,description,root,docs_dir,parent) VALUES(:id,:name,:description,:root,:docs_dir,:parent)", r)
     audit(c, id, "project.add", id, None, r); c.commit()
 
-def add_item(c, project, kind, title, body=None, priority=None, status="open", role="cli", spec=None):
+def add_item(c, project, kind, title, body=None, priority=None, status="open", role="cli", spec=None, phase=None, roadmap=None):
     if not c.execute("SELECT 1 FROM project WHERE id=?", (project,)).fetchone(): raise KeyError(f"no project {project}")
     t = now()
-    cur = c.execute("INSERT INTO item(project,kind,title,body,status,priority,spec,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                    (project, kind, title, body, status, priority, None if spec is None else json.dumps(spec, ensure_ascii=False), role, t, t))
-    audit(c, project, "item.add", f"item:{cur.lastrowid}", None, {"kind": kind, "title": title, "status": status}, role)
+    cur = c.execute("INSERT INTO item(project,kind,title,body,status,priority,spec,created_by,created_at,updated_at,phase,roadmap) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (project, kind, title, body, status, priority, None if spec is None else json.dumps(spec, ensure_ascii=False), role, t, t, phase, roadmap))
+    audit(c, project, "item.add", f"item:{cur.lastrowid}", None, {"kind": kind, "title": title, "status": status, **({"phase": phase} if phase is not None else {})}, role)
     c.commit(); return cur.lastrowid
 
 def set_item(c, id, status=None, priority=None, role="cli"):
