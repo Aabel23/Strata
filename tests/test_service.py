@@ -15,17 +15,17 @@ def test_main_all(c):
     t = service.add_item(c, "main", "p", "task", "T"); service.add_item(c, "main", "p", "issue", "I")
     service.set_item(c, "main", t, "doing", "high")
     assert c.execute("SELECT created_by FROM item WHERE id=?", (t,)).fetchone()[0] == "main"
-    assert roles(c) == [("item.add", "main"), ("item.add", "main"), ("item.set", "main")]
+    assert roles(c) == [("item.add", "main"), ("item.add", "main"), ("item.transition", "main"), ("item.set", "main")]
 
 
 def test_coder(c):
     t = service.add_item(c, "main", "p", "task", "T")
     i = service.add_item(c, "coder", "p", "issue", "I")
-    service.set_item(c, "coder", t, "done")
+    service.set_item(c, "coder", t, "doing")
     with pytest.raises(PermissionError): service.add_item(c, "coder", "p", "task", "X")
     with pytest.raises(PermissionError): service.set_item(c, "coder", t, priority="high")
     with pytest.raises(PermissionError): service.set_item(c, "coder", i, "done")  # not a task
-    assert roles(c)[1:] == [("item.add", "coder"), ("item.set", "coder")]
+    assert roles(c)[1:] == [("item.add", "coder"), ("item.transition", "coder")]
 
 
 def test_reviewer(c):
@@ -123,7 +123,7 @@ def test_non_main_status_rules(c):
         with pytest.raises(PermissionError): service.set_item(c, "coder", t, st)
     service.set_item(c, "coder", t, "doing")
     i = service.add_item(c, "coder", "p", "issue", "I", status="done")
-    assert c.execute("SELECT status FROM item WHERE id=?", (i,)).fetchone()[0] == "open"
+    assert c.execute("SELECT status FROM item WHERE id=?", (i,)).fetchone()[0] == "proposed"
     j = service.add_item(c, "main", "p", "issue", "J", status="done")
     assert c.execute("SELECT status FROM item WHERE id=?", (j,)).fetchone()[0] == "done"
 
@@ -141,7 +141,7 @@ def test_denials_audited_without_body(c):
     with pytest.raises(PermissionError): service.set_decision_status(c, "coder", 1, "accepted")
     d = denied(c)
     assert [(r["tool"], r["actor_role"]) for r in d] == [
-        ("denied:item.add", "coder"), ("denied:item.add", "invalid"), ("denied:item.set", "reviewer"),
+        ("denied:item.add", "coder"), ("denied:item.add", "invalid"), ("denied:item.transition", "reviewer"),
         ("denied:item.set", "coder"), ("denied:decision.add", "coder"), ("denied:decision.set", "coder")]
     assert d[0]["project"] == "p" and d[2]["project"] == "p" and d[3]["project"] == "-"
     assert "SECRET" not in str(d) and ("T" * 81) not in str(d)

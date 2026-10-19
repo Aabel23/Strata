@@ -67,11 +67,11 @@ def test_cli_project_doc_item_audit(env):
     assert cli(p, "doc", "set", "--project", "a", "b.html", "--feature", "F", "--status", "draft", "--ord", "3")[0] == 0
     assert dict(c.execute("SELECT feature,status,ord FROM doc WHERE path='b.html'").fetchone()) == {"feature": "F", "status": "draft", "ord": 3}
     assert cli(p, "doc", "set", "--project", "a", "nope.html", "--ord", "1")[0] == 1
-    cli(p, "item", "set", "1", "--status", "done")
-    assert c.execute("SELECT status,version FROM item WHERE id=1").fetchone()[:] == ("done", 2)
+    cli(p, "item", "set", "1", "--status", "approved")  # release
+    assert c.execute("SELECT status,version FROM item WHERE id=1").fetchone()[:] == ("approved", 2)
     assert cli(p, "item", "set", "99", "--status", "done")[0] == 1
     tools = {r[0] for r in c.execute("SELECT tool FROM audit")}
-    assert {"project.add", "doc.scan", "doc.set", "item.add", "item.set"} <= tools
+    assert {"project.add", "doc.scan", "doc.set", "item.add", "item.transition"} <= tools
     assert c.execute("SELECT count(*) FROM audit WHERE tool='project.add'").fetchone()[0] == 2
     assert cli(p, "item", "add", "--project", "a", "--kind", "bogus", "--title", "x")[0] != 0
     assert cli(p, "project", "add", "a", "--name", "dup")[0] == 1
