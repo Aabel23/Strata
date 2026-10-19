@@ -1,4 +1,4 @@
-import datetime, html.parser, json, os, pathlib, re, sqlite3
+import datetime, html.parser, json, os, pathlib, re, shutil, sqlite3
 
 DEFAULT_DB = str(pathlib.Path(__file__).resolve().parent.parent / "strata.db")
 SCHEMA = pathlib.Path(__file__).with_name("schema.sql")
@@ -13,11 +13,36 @@ def connect(path=None):
     c.execute("PRAGMA foreign_keys=ON")
     return c
 
+def _item_rebuild_due(c):
+    return not c.execute("SELECT 1 FROM sqlite_master WHERE name='item_old'").fetchone() and bool(c.execute("SELECT 1 FROM sqlite_master WHERE name='item'").fetchone()) \
+        and "spec" not in [r[1] for r in c.execute("PRAGMA table_info(item)")]
+
+def _backup_if_rebuild(path):
+    """Copy the DB file to <dir>/backups/strata-YYYYmmdd-HHMMSS.db before the destructive item rebuild (before connect() flips it to WAL, so bytes match)."""
+    p = db_path(path)
+    if p == ":memory:" or not os.path.exists(p): return
+    k = sqlite3.connect(p)
+    try: due = _item_rebuild_due(k)
+    finally: k.close()
+    if due:
+        d = pathlib.Path(p).parent / "backups"; d.mkdir(exist_ok=True)
+        shutil.copy2(p, d / datetime.datetime.now().strftime("strata-%Y%m%d-%H%M%S.db"))
+
 def init(path=None):
+    _backup_if_rebuild(path)
     c = connect(path)
     if c.execute("SELECT 1 FROM sqlite_master WHERE name='research'").fetchone() and c.execute("SELECT 1 FROM research").fetchone():
         raise RuntimeError("table research is not empty: move rows to page(kind='research') first")
     rebuild = _migrate(c)
+    if _item_rebuild_due(c):  # one transaction: rename + new schema + copy; any error rolls back to the old table
+        c.execute("PRAGMA foreign_keys=OFF")  # no-op inside a transaction, so set it first
+        try:
+            c.executescript("BEGIN;DROP TRIGGER IF EXISTS item_ai;DROP TRIGGER IF EXISTS item_au;DROP TRIGGER IF EXISTS item_ad;"
+                            "ALTER TABLE item RENAME TO item_old;" + SCHEMA.read_text())
+            _finish_item(c)
+        except BaseException:
+            c.rollback(); raise
+        finally: c.execute("PRAGMA foreign_keys=ON")
     c.executescript(SCHEMA.read_text())
     _finish_item(c)
     if rebuild:  # copy rows from the old-CHECK table into the new one
@@ -34,9 +59,9 @@ def _finish_item(c):
     c.execute("DELETE FROM search WHERE src='item'")  # item_ai refills it row by row
     c.execute(f"INSERT INTO item({cols},spec) SELECT {cols}, CASE WHEN scope IS NULL THEN NULL "
               "WHEN json_valid(scope) THEN json_object('scope',json(scope)) ELSE json_object('scope',scope) END FROM item_old")
-    c.execute("DROP TABLE item_old"); c.commit()
-    c.execute("PRAGMA foreign_keys=ON")
+    c.execute("DROP TABLE item_old")
     if (r := c.execute("PRAGMA integrity_check").fetchone()[0]) != "ok": raise RuntimeError(f"integrity_check: {r}")
+    c.commit()
 
 # columns added after a table was first created: (table, column, type)
 ADDED = [("c4_connection", "description", "TEXT"), ("c4_connection", "feature", "TEXT"), ("c4_connection", "interface", "TEXT"),
@@ -54,10 +79,6 @@ def _migrate(c):
     if t and "rejected_options" not in t["sql"]:  # old index body lacks rejected options: schema.sql recreates the trigger, reindex here
         c.execute("DROP TRIGGER decision_ai"); c.execute("DELETE FROM search WHERE src='decision'")
         c.execute("INSERT INTO search SELECT replace(replace(title,'đ','d'),'Đ','D'), replace(replace(trim(coalesce(context,'')||' '||coalesce(decision,'')||' '||coalesce(consequences,'')||' '||coalesce(rejected_options,'')),'đ','d'),'Đ','D'), 'decision', id, project FROM decision")
-    if "spec" not in [r["name"] for r in c.execute("PRAGMA table_info(item)")] and c.execute("SELECT 1 FROM sqlite_master WHERE name='item'").fetchone():
-        c.commit(); c.execute("PRAGMA foreign_keys=OFF")  # no-op inside a transaction, hence the commit
-        for t in ("item_ai", "item_au", "item_ad"): c.execute(f"DROP TRIGGER IF EXISTS {t}")
-        c.execute("ALTER TABLE item RENAME TO item_old")  # init's schema script makes the new table, _finish_item copies
     r = c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='c4_object'").fetchone()
     if r and "'function'" not in r["sql"]:
         c.execute("ALTER TABLE c4_object RENAME TO c4_object_old"); return True

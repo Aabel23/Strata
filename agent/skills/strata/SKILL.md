@@ -39,6 +39,7 @@ Hiện có: `internproj`; `project1_app` (cha internproj, root `/home/abel/proje
 | Item show/edit | `$S item show N` (kèm dep); `$S item edit N [--title --body --spec JSON --priority]` |
 | Item claim/submit | coder: `$S item claim N --as coder` → `$S item submit N --as coder --note "..."` (doing → review) |
 | Item approve/reject | main: `$S item approve N [--note]` (review → done; proposed → approved); `$S item reject N --note "..."` |
+| Item rework/close | main: `$S item rework N --note "..."` (review → doing, trả coder); `$S item close N --note "..."` (open → done, vd issue). `approve` chỉ từ proposed/review, trạng thái khác báo ERROR |
 | Item release | `$S item release N` (doing → approved, bỏ claim) |
 | Item dep | `$S item dep add\|rm N DEP` (N phụ thuộc DEP) |
 | Thêm decision | `$S decision add --project P --title T --context C --decision D --consequences Q --rejected R [--supersedes N]`; đổi trạng thái: `$S decision set N --status S` |

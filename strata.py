@@ -17,7 +17,7 @@
   strata.py mcp --role main|coder|reviewer [--db]   MCP server on stdio
   strata.py item add --project P --kind task|issue|step|gate --title T [--body --priority --status --spec FILE|-] | set ID [--status --priority]
   strata.py item list [--project --kind --status --owner --ready] | show ID | edit ID [--title --body --spec FILE|- --priority] | ready [--project]
-  strata.py item claim ID --as NAME | submit ID --note N [--as NAME] | approve ID [--note --as] | reject ID --note N | release ID | dep add|rm ID DEP   (all: --json)
+  strata.py item claim ID --as NAME | submit ID --note N [--as NAME] | rework ID --note N | close ID --note N | approve ID [--note --as] | reject ID --note N | release ID | dep add|rm ID DEP   (all: --json)
 """
 import argparse, json, pathlib, sqlite3, sys, threading, webbrowser
 from strata import blocks, c4, db, service
@@ -79,7 +79,8 @@ def cmd_item(c, a):
     else:  # status verbs
         cur = c.execute("SELECT status FROM item WHERE id=?", (a.id,)).fetchone()
         if not cur: raise KeyError(f"no item {a.id}")
-        to = {"claim": "doing", "submit": "review", "reject": "rejected", "release": "approved"}.get(act) or ("done" if cur["status"] == "review" else "approved")
+        if act == "approve" and cur["status"] not in ("proposed", "review"): raise ValueError(f"approve only from proposed or review, item {a.id} is {cur['status']}")
+        to = {"claim": "doing", "submit": "review", "reject": "rejected", "release": "approved", "rework": "doing", "close": "done"}.get(act) or ("done" if cur["status"] == "review" else "approved")
         service.transition(c, "main", a.id, to, who, getattr(a, "note", None)); out({"ok": True, "status": to}, f"ok: {to}")
 
 
@@ -155,7 +156,7 @@ def main(argv=None):
                    "list": [*filt, (["--ready"], {"action": "store_true"}), js], "ready": [(["--project"], {}), js], "show": [idp, js],
                    "edit": [idp, (["--title"], {}), (["--body"], {}), (["--spec"], {}), (["--priority"], {}), js],
                    "claim": [idp, (["--as"], {"dest": "as_", "required": True}), js], "submit": [idp, (["--note"], req), asp, js],
-                   "approve": [idp, notep, asp, js], "reject": [idp, (["--note"], req), js], "release": [idp, js],
+                   "approve": [idp, notep, asp, js], "reject": [idp, (["--note"], req), js], "rework": [idp, (["--note"], req), asp, js], "close": [idp, (["--note"], req), js], "release": [idp, js],
                    "dep": [(["op"], {"choices": ["add", "rm"]}), idp, (["dep"], {"type": int}), js]})
     p = sub.add_parser("search"); p.add_argument("q"); p.add_argument("--db"); p.add_argument("--project"); p.add_argument("--limit", type=int, default=30)
     p.add_argument("--src", choices=["item", "decision", "page", "doc"])

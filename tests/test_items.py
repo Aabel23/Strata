@@ -177,15 +177,20 @@ def test_cli_flow(tmp_path, capsys, monkeypatch):
     assert out("item", "release", "2")[0] == 1  # rejected -> approved is illegal
 
 
-def test_migration_old_db_with_scope(tmp_path):
-    p = str(tmp_path / "old.db"); k = sqlite3.connect(p)
-    k.executescript("""CREATE TABLE item(id INTEGER PRIMARY KEY, project TEXT NOT NULL,
+OLD_ITEM = """CREATE TABLE item(id INTEGER PRIMARY KEY, project TEXT NOT NULL,
       kind TEXT NOT NULL CHECK(kind IN ('rule','task','issue','knowledge','draft','note')), title TEXT NOT NULL, body TEXT,
       status TEXT NOT NULL CHECK(status IN ('proposed','approved','open','doing','done','rejected')),
       priority TEXT, scope TEXT, always_load INT NOT NULL DEFAULT 0, core INT NOT NULL DEFAULT 0,
       owner TEXT, created_by TEXT, created_at TEXT, updated_at TEXT, version INT NOT NULL DEFAULT 1);
-      INSERT INTO item(id,project,kind,title,body,status,scope) VALUES(7,'p','task','alpha','zebrax','open','{"touch":["a"]}'),(9,'p','task','beta','x','done','src/**');""")
-    k.commit(); k.close()
+      INSERT INTO item(id,project,kind,title,body,status,scope) VALUES(7,'p','task','alpha','zebrax','open','{"touch":["a"]}'),(9,'p','task','beta','x','done','src/**');"""
+
+
+def old_db(p):
+    k = sqlite3.connect(p); k.executescript(OLD_ITEM); k.commit(); k.close()
+
+
+def test_migration_old_db_with_scope(tmp_path):
+    p = str(tmp_path / "old.db"); old_db(p)
     for _ in range(2):
         c = db.init(p)
         assert [r[0] for r in c.execute("SELECT id FROM item ORDER BY id")] == [7, 9]
@@ -194,6 +199,34 @@ def test_migration_old_db_with_scope(tmp_path):
         assert [h["ref"] for h in service.search(c, "zebrax", src="item")] == [7]
         assert c.execute("SELECT count(*) FROM search WHERE src='item'").fetchone()[0] == 2
         assert not c.execute("SELECT 1 FROM sqlite_master WHERE name='item_old'").fetchone()
+
+
+def test_migration_backup_and_rollback(tmp_path, monkeypatch):
+    p = tmp_path / "old.db"; old_db(str(p)); pre = p.read_bytes()
+    def boom(c): raise RuntimeError("boom")
+    monkeypatch.setattr(db, "_finish_item", boom)
+    with pytest.raises(RuntimeError): db.init(str(p))
+    k = sqlite3.connect(p)
+    assert [r[0] for r in k.execute("SELECT id FROM item ORDER BY id")] == [7, 9] and "scope" in [r[1] for r in k.execute("PRAGMA table_info(item)")]
+    assert not k.execute("SELECT 1 FROM sqlite_master WHERE name='item_old'").fetchone(); k.close()
+    bk = list((tmp_path / "backups").glob("strata-*.db"))
+    assert len(bk) == 1 and bk[0].read_bytes() == pre
+    monkeypatch.undo(); db.init(str(p)).close()
+
+
+def test_cli_rework_close_approve_guard(tmp_path, capsys):
+    db_ = str(tmp_path / "t.db"); c = db.init(db_); db.add_project(c, "p", "P")
+    a = task(c); b = service.add_item(c, "main", "p", "issue", "I", status="open"); c.close()
+    def out(*x): return cli.main([*x, "--db", db_])
+    assert out("item", "approve", str(a)) == 1  # approved is not approvable
+    assert out("item", "claim", str(a), "--as", "w") == 0
+    assert out("item", "approve", str(a)) == 1 and "approve only from" in capsys.readouterr().out
+    k = db.connect(db_); assert st(k, a) == ("doing", "w")
+    assert out("item", "submit", str(a), "--note", "ev", "--as", "w") == 0
+    with pytest.raises(SystemExit): out("item", "rework", str(a))
+    assert out("item", "rework", str(a), "--note", "fix") == 0 and st(k, a)[0] == "doing"
+    with pytest.raises(SystemExit): out("item", "close", str(b))
+    assert out("item", "close", str(b), "--note", "ok") == 0 and st(k, b)[0] == "done"
 
 
 REAL = pathlib.Path("/home/abel/project/tools/strata/strata.db")
