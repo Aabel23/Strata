@@ -15,6 +15,7 @@
   strata.py search Q [--project P --src item|decision|page|doc --limit N]
   strata.py decision add --project P --title T --context C --decision D --consequences Q --rejected R [--supersedes N] | set N --status S
   strata.py mcp --role main|coder|reviewer [--db]   MCP server on stdio
+  strata.py task context ID [--budget N] [--db]   ticket + rules + decisions + c4 + paths in one budgeted text
   strata.py item add --project P --kind task|issue|step|gate --title T [--body --priority --status --spec FILE|-] | set ID [--status --priority]
   strata.py item list [--project --kind --status --owner --ready] | show ID | edit ID [--title --body --spec FILE|- --priority] | ready [--project]
   strata.py item claim ID --as NAME | submit ID --note N [--as NAME] | rework ID --note N | close ID --note N | approve ID [--note --as] | reject ID --note N | release ID | dep add|rm ID DEP   (all: --json)
@@ -80,6 +81,7 @@ def cmd_item(c, a):
         cur = c.execute("SELECT status FROM item WHERE id=?", (a.id,)).fetchone()
         if not cur: raise KeyError(f"no item {a.id}")
         if act == "approve" and cur["status"] not in ("proposed", "review"): raise ValueError(f"approve only from proposed or review, item {a.id} is {cur['status']}")
+        if act == "rework" and cur["status"] != "review": raise ValueError(f"rework only from review, item {a.id} is {cur['status']}")
         to = {"claim": "doing", "submit": "review", "reject": "rejected", "release": "approved", "rework": "doing", "close": "done"}.get(act) or ("done" if cur["status"] == "review" else "approved")
         service.transition(c, "main", a.id, to, who, getattr(a, "note", None)); out({"ok": True, "status": to}, f"ok: {to}")
 
@@ -100,6 +102,9 @@ def cmd_write(a):
             service.set_decision_status(c, "main", a.id, a.status); print("ok")
         elif a.cmd == "search":
             for h in service.search(c, a.q, a.project, a.src, a.limit): print(f"{h['src']}#{h['ref']} {h['project']} {h['title']}")
+        elif a.cmd == "task":
+            from strata import context
+            print(context.build(c, a.id, a.budget))
         elif a.cmd == "c4" and a.action == "context":
             print(c4.context_text(c, a.project, a.object, a.max_tokens))
         elif a.cmd == "c4" and a.action == "flow":
@@ -158,6 +163,7 @@ def main(argv=None):
                    "claim": [idp, (["--as"], {"dest": "as_", "required": True}), js], "submit": [idp, (["--note"], req), asp, js],
                    "approve": [idp, notep, asp, js], "reject": [idp, (["--note"], req), js], "rework": [idp, (["--note"], req), asp, js], "close": [idp, (["--note"], req), js], "release": [idp, js],
                    "dep": [(["op"], {"choices": ["add", "rm"]}), idp, (["dep"], {"type": int}), js]})
+    group("task", {"context": [(["id"], {"type": int}), (["--budget"], {"type": int, "default": 12000})]})
     p = sub.add_parser("search"); p.add_argument("q"); p.add_argument("--db"); p.add_argument("--project"); p.add_argument("--limit", type=int, default=30)
     p.add_argument("--src", choices=["item", "decision", "page", "doc"])
     group("decision", {"add": [(["--project"], req), (["--title"], req), (["--context"], req), (["--decision"], req), (["--consequences"], req),
@@ -170,7 +176,7 @@ def main(argv=None):
                  "flow": [(["--project"], req), (["--id"], {})]})
     a = ap.parse_args(argv)
     if a.cmd == "doc" and a.action == "validate": return cmd_doc_validate(a)
-    if a.cmd in ("project", "doc", "item", "c4", "search", "decision"): return cmd_write(a)
+    if a.cmd in ("project", "doc", "item", "c4", "search", "decision", "task"): return cmd_write(a)
     if a.cmd == "mcp":
         from strata import mcp
         return mcp.serve(a.role, a.db)

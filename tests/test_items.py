@@ -224,6 +224,7 @@ def test_cli_rework_close_approve_guard(tmp_path, capsys):
     k = db.connect(db_); assert st(k, a) == ("doing", "w")
     assert out("item", "submit", str(a), "--note", "ev", "--as", "w") == 0
     with pytest.raises(SystemExit): out("item", "rework", str(a))
+    assert out("item", "rework", str(b), "--note", "x") == 1 and "rework only from review" in capsys.readouterr().out
     assert out("item", "rework", str(a), "--note", "fix") == 0 and st(k, a)[0] == "doing"
     with pytest.raises(SystemExit): out("item", "close", str(b))
     assert out("item", "close", str(b), "--note", "ok") == 0 and st(k, b)[0] == "done"

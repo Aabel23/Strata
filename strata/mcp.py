@@ -42,6 +42,11 @@ def _audit(c, role, project, limit=20):
     return [dict(r) for r in c.execute("SELECT id,ts,actor_role,tool,target,before,after FROM audit WHERE project=? ORDER BY id DESC LIMIT ?", (project, limit))]
 
 
+def _context(c, role, id, budget=12000):
+    from strata import context
+    return context.build(c, id, budget)
+
+
 def _move(to):
     def f(c, role, id, note=None, actor=None):
         service.transition(c, role, id, to, actor, note)
@@ -69,6 +74,7 @@ TOOLS = {
                    "C4 overview or one object with its links, connections and flows", schema({"project": S(), "object": S(), "max_tokens": I()}, ["project"]), ALL),
     "c4_flow": (lambda c, role, project, id=None: c4.flow_text(c, project, id), "Numbered trace of a flow; no id lists flows", schema({"project": S(), "id": S()}, ["project"]), ALL),
     "audit": (_audit, "Recent audit rows of a project, newest first", schema({"project": S(), "limit": _lim}, ["project"]), ALL),
+    "task_context": (_context, "Budgeted context bundle for a task: ticket, hard rules, decisions, c4, paths", schema({"id": I(), "budget": I("Max chars, default 12000")}, ["id"]), ALL),
     "search": (service.search, "Full-text search over items, decisions, pages and docs", schema(
         {"q": S(), "project": S(), "src": {"type": "string", "enum": ["item", "decision", "page", "doc"]}, "limit": {"type": "integer"}}, ["q"]), ALL),
     "add_item": (_w(service.add_item), "Add a task or issue (non-main: issues only, as proposed)", schema({"project": S(), "kind": {"type": "string", "enum": ["task", "issue"]}, "title": S(), "body": S(),
@@ -133,9 +139,15 @@ def handle(c, role, msg):
         if a is None: a = {}
         if not isinstance(name, str): return err(-32602, "name must be a string")
         if not isinstance(a, dict): return err(-32602, "arguments must be an object")
-        if name not in TOOLS or role not in TOOLS[name][3]: return err(-32602, f"unknown tool {name}")
+        if name not in TOOLS: return err(-32602, f"unknown tool {name}")
+        if role not in TOOLS[name][3]:
+            try: service._deny(c, role, name, None, None, {"name": name}, "tool hidden for role")  # audits tool 'denied:<name>'
+            except PermissionError: pass
+            return err(-32602, f"unknown tool {name}")
         try: text, bad = call(c, role, name, a), False
-        except KeyError as e: text, bad = f"error: {e.args[0]}", True
+        except (PermissionError, ValueError, KeyError) as e:
+            text, bad = f"error: {e.args[0] if isinstance(e, KeyError) else e}", True
+            print(f"strata mcp: {name}: {type(e).__name__}: {text[7:]}", file=sys.stderr)
         except Exception as e:  # never crash the server on a bad call
             traceback.print_exc(file=sys.stderr); text, bad = f"{type(e).__name__}: {e}", True
         return ok({"content": [{"type": "text", "text": text}], "isError": bad})

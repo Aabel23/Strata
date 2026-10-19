@@ -13,9 +13,9 @@ def run(tmp_path, role, msgs, db_=None):
     return r, [json.loads(l) for l in r.stdout.splitlines()]
 
 
-MAIN_TOOLS = ["list_projects", "list_items", "get_item", "list_decisions", "get_doc", "c4_context", "c4_flow", "audit", "search", "add_item", "edit_item",
+MAIN_TOOLS = ["list_projects", "list_items", "get_item", "list_decisions", "get_doc", "c4_context", "c4_flow", "audit", "search", "task_context", "add_item", "edit_item",
               "item_claim", "item_submit", "item_approve", "item_reject", "item_release", "dep_add", "dep_rm", "add_decision", "set_decision_status"]
-READ = MAIN_TOOLS[:9]
+READ = MAIN_TOOLS[:10]
 
 
 def call(i, name, **a): return {"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": name, "arguments": a}}
@@ -189,3 +189,19 @@ def test_mcp_json():
     cfg = json.loads((ROOT / ".mcp.json").read_text())["mcpServers"]
     assert {k: v["args"][-1] for k, v in cfg.items()} == {"strata": "main", "strata-coder": "coder", "strata-reviewer": "reviewer"}
     assert all(v["command"] == "python3" and v["args"][0].endswith("/strata.py") and v["args"][1] == "mcp" for v in cfg.values())
+
+
+def test_expected_errors_one_stderr_line_and_hidden_tool_audited(tmp_path):
+    p = seeded(tmp_path)
+    r, out = run(tmp_path, "coder", [call(1, "item_submit", id=1, note="x"), call(2, "item_approve", id=1), call(3, "get_item", id=999)], p)
+    assert out[0]["result"]["isError"] and out[1]["error"]["code"] == -32602 and out[2]["result"]["isError"]
+    assert "Traceback" not in r.stderr and len(r.stderr.strip().splitlines()) == 2  # submit (not owner) + get_item KeyError
+    c = db.connect(p)
+    assert c.execute("SELECT count(*) FROM audit WHERE tool='denied:item_approve' AND actor_role='coder'").fetchone()[0] == 1
+
+
+def test_task_context_all_roles(tmp_path):
+    p = seeded(tmp_path)
+    for role in ("main", "coder", "reviewer"):
+        r, out = run(tmp_path, role, [call(1, "task_context", id=1, budget=500)], p)
+        assert out[0]["result"]["isError"] is False and len(out[0]["result"]["content"][0]["text"]) <= 500

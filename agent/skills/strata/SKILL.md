@@ -46,6 +46,7 @@ Hiện có: `internproj`; `project1_app` (cha internproj, root `/home/abel/proje
 | Tìm kiếm (CLI) | `$S search Q [--project P --src item\|decision\|page\|doc --limit N]` |
 | MCP server | `$S mcp --role main\|coder\|reviewer` (stdio) |
 | Gắn item vào object C4 | `$S c4 link --project P --object OBJ --item N` (gỡ: `unlink`; xem: `c4 links --project P --object OBJ`) |
+| Gói ngữ cảnh task | `$S task context ID [--budget 12000]` (ticket, luật cứng, decision, c4, đường dẫn; quá ngân sách thì cắt, cảnh báo stderr) |
 | Đọc map | `$S c4 context --project P [--object OBJ] [--max-tokens 2000]` |
 | Đọc flow | `$S c4 flow --project P` (liệt kê) / `$S c4 flow --project P --id FLOW` |
 | Sửa map | sửa YAML → `$S validate FILE` (0 lỗi) → `$S import-yaml FILE --project P`. Chi tiết: `docs/AGENT_C4.md` |
