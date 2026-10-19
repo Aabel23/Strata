@@ -32,3 +32,11 @@ def test_non_dict_and_bad_json_allowed():
 
 def test_missing_tool_input_no_crash():
     assert not run({"agent_type": "coder", "tool_name": "Read"})
+
+
+def test_bare_word_in_hook_filename_allowed():
+    assert not run({"agent_type": "coder", "tool_name": "Bash", "tool_input": {"command": "ls agent/hooks/block_secondbrain_creative_agents.py"}})
+
+
+def test_dotted_vault_path_denied():
+    assert run({"agent_type": "coder", "tool_name": "Bash", "tool_input": {"command": "cat ~/.secondbrain/RAM.md"}})

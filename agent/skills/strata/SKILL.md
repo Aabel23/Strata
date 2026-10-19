@@ -35,6 +35,7 @@ Hiện có: `internproj`; `project1_app` (cha internproj, root `/home/abel/proje
 | Tìm kiếm | `curl -s 'localhost:8740/api/search?q=từ+khoá&project=P'` |
 | Thêm task/issue | `$S item add --project P --kind task --title "..." [--body "..." --priority high --status approved]` → in `ok: item N` |
 | Đổi trạng thái | `$S item set N --status doing [--priority ...]` |
+| Item list/show/claim/submit/approve | Chưa có; đi kèm task #42 |
 | Thêm decision | `$S decision add --project P --title T --context C --decision D --consequences Q --rejected R [--supersedes N]`; đổi trạng thái: `$S decision set N --status S` |
 | Tìm kiếm (CLI) | `$S search Q [--project P --src item\|decision\|page\|doc --limit N]` |
 | MCP server | `$S mcp --role main\|coder\|reviewer` (stdio) |
@@ -43,6 +44,7 @@ Hiện có: `internproj`; `project1_app` (cha internproj, root `/home/abel/proje
 | Đọc flow | `$S c4 flow --project P` (liệt kê) / `$S c4 flow --project P --id FLOW` |
 | Sửa map | sửa YAML → `$S validate FILE` (0 lỗi) → `$S import-yaml FILE --project P`. Chi tiết: `docs/AGENT_C4.md` |
 | Viết tài liệu | file YAML trong `<docs_dir>/research\|architect\|plan\|review/`, server tự quét. Định dạng: `docs/architect/doc-format.yaml` |
+| Kiểm tra doc | `$S doc validate FILE` |
 | Quét doc tay | `$S doc scan --project P` |
 | Gán feature/status doc | `$S doc set --project P research/x.yaml --feature F --status current\|draft\|outdated\|missing [--ord N]` |
 | Page JSON | `$S page validate F.json` / `$S page put F.json` / `$S page list [--project P]` |

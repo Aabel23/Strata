@@ -9,7 +9,7 @@ import json
 import re
 import sys
 
-VAULT = re.compile(r"secondbrain|second[\s_-]brain", re.I)  # gồm /home/abel/.secondbrain, ~/.secondbrain, $HOME/.secondbrain
+VAULT = re.compile(r"\.secondbrain", re.I)  # cần dấu chấm đầu: tên file hook chứa từ trần không bị chặn
 VAULT_TOOL = re.compile(r"^mcp__obsidian", re.I)
 
 try:
