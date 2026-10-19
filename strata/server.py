@@ -3,6 +3,16 @@ import http.server, json, mimetypes, pathlib, re, socket, sqlite3, threading
 from urllib.parse import parse_qs, unquote, urlsplit
 from strata import blocks, c4, db, service
 
+SERVE_EXT = set(".py .js .mjs .ts .tsx .css .html .htm .md .txt .yaml .yml .json .toml .c .h .cpp .hpp .dart .java .kt .go .rs .svg .png .jpg .jpeg .gif .webp".split())
+
+def servable(root, segs):
+    """File under root that /code/ and /docs/ may serve, else None. Extension allowlist; no dot/empty/'..'/NUL segments."""
+    if not segs or any(x in ("", "..") or x.startswith(".") or "\0" in x for x in segs): return None
+    try:
+        root = pathlib.Path(root).resolve(); f = (root / "/".join(segs)).resolve()
+    except (ValueError, OSError): return None
+    return f if f.is_relative_to(root) and f.suffix.lower() in SERVE_EXT and f.is_file() else None
+
 VIEWER = pathlib.Path(__file__).resolve().parent.parent / "viewer"
 STATIC = {"/": "app.html", "/app.js": "app.js", "/app.css": "app.css", "/c4": "index.html", "/index.html": "index.html", "/page.js": "page.js", "/swimlane.js": "swimlane.js", "/roadmap.js": "roadmap.js", "/page.css": "page.css"}
 TYPES = {".html": "text/html", ".md": "text/plain", ".yaml": "text/plain", ".js": "application/javascript", ".css": "text/css", ".json": "application/json"}
@@ -66,14 +76,8 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             if p == "/api/search": return self.search(q)
             if parts[1:2] == ["docs"] and len(parts) > 3:
                 with lock: r = rows("SELECT docs_dir FROM project WHERE id=?", (parts[2],))
-                segs = parts[3:]
-                hidden = any(x.startswith(".") for x in segs) or segs[-1].endswith(".db") or ".sqlite" in segs[-1]
-                if r and r[0]["docs_dir"] and not hidden:
-                    try:
-                        root = pathlib.Path(r[0]["docs_dir"]).resolve(); f = (root / "/".join(segs)).resolve()
-                        if f.is_relative_to(root) and f.is_file(): return self.file(f)
-                    except (ValueError, OSError): pass
-                return self.send_error(404)
+                f = r and r[0]["docs_dir"] and servable(r[0]["docs_dir"], parts[3:])
+                return self.file(f) if f else self.send_error(404)
             if p == "/pages": return self.file(VIEWER / "page.html")
             if parts[1:2] == ["page"] and len(parts) == 4:
                 with lock: ok = db.get_page(conn, parts[2], parts[3])
@@ -93,14 +97,8 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 return self.json({"meta": meta, **m, "issues": issues, "links": links, "open_issues": open_issues})
             if parts[1:2] == ["code"]:
                 with lock: m = c4.read_model(conn, q.get("project") or default_project())
-                if m:
-                    segs = parts[2:]
-                    hidden = any(x.startswith(".") for x in segs) or (segs and (segs[-1].endswith(".db") or ".sqlite" in segs[-1]))
-                    try:
-                        root = pathlib.Path(m["root"]); f = (root / "/".join(segs)).resolve()
-                        if not hidden and f.is_relative_to(root) and f.is_file(): return self.file(f, "text/plain")
-                    except (ValueError, OSError): pass
-                return self.send_error(404)
+                f = m and servable(m["root"], parts[2:])
+                return self.file(f, "text/plain") if f else self.send_error(404)
             if parts[1:2] in (["vendor"], ["assets"]) and len(parts) == 3:
                 try:
                     f = (VIEWER / parts[1] / parts[2]).resolve()

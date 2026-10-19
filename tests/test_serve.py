@@ -116,3 +116,38 @@ def test_autoscan_no_audit_and_keeps_doc_state(dbp, tmp_path):
         (d / "a.md").write_text("# A\nx"); get(base, "/api/docs?project=q")
         assert tuple(c.execute("SELECT feature,status,ord FROM doc WHERE path='a.md'").fetchone()) == ("f", "draft", 3)
     finally: s.shutdown(); s.server_close()
+
+
+def test_servable_allowlist(srv, tmp_path):
+    code = tmp_path / "code"
+    (code / "sub").mkdir(); (code / "sub/n.md").write_text("n"); (code / "FOO.PY").write_text("x")
+    for n in ("strata.db-wal", "x.db-journal", "noext"): (code / n).write_text("s")
+    (code / "link.py").symlink_to(tmp_path / "secret.txt")
+    for bad in ("strata.db-wal", "x.db-journal", ".env", "%2e%2e/secret.txt", "link.py", "sub", "noext", "a.py%00"):
+        assert get(srv, "/code/" + bad)[0] == 404, bad
+    assert get(srv, "/code/FOO.PY")[0] == 200 and get(srv, "/code/sub/n.md")[0] == 200
+    assert server.servable(code, ["sub", "n.md"]) and not server.servable(code, ["sub", ""]) and not server.servable(code, [])
+
+
+def test_decision_insert_or_replace_blocked(tmp_path):
+    c = db.init(tmp_path / "d.db")
+    ins = "INSERT OR REPLACE INTO decision(id,project,title,status,rejected_options) VALUES(?, 'p','t','proposed','[1]')"
+    c.execute(ins, (1,)); c.execute(ins, (2,))
+    with pytest.raises(Exception, match="append-only"): c.execute(ins, (1,))
+    c.execute("UPDATE decision SET status='accepted' WHERE id=1")
+
+
+def test_put_page_audited_without_body(tmp_path):
+    c = db.init(tmp_path / "d.db")
+    db.put_page(c, "p", "s", "T", "note", [{"type": "md", "text": "SECRETBODY"}])
+    db.put_page(c, "p", "s", "T", "note", [{"type": "md", "text": "SECRETBODY2"}])
+    rs = c.execute("SELECT after FROM audit WHERE tool='page.put' ORDER BY id").fetchall()
+    assert [json.loads(r[0])["action"] for r in rs] == ["create", "update"]
+    assert "SECRETBODY" not in json.dumps([tuple(r) for r in c.execute("SELECT * FROM audit")])
+
+
+def test_mermaid_labels_escaped():
+    js = (ROOT / "viewer/page.js").read_text()
+    assert 'securityLevel:"loose"' in js
+    for ch in ('"#35;"', '"#quot;"', '"#lt;"', '"#gt;"'): assert ch in js
+    assert "lines(n.text" in js and "lines(s.text" in js and "lines(l)" in js

@@ -56,6 +56,8 @@ def put_page(c, project, slug, title, kind, blocks):
     """Insert or replace one page; `text` (for FTS) is derived from blocks."""
     from strata.blocks import page_text
     now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="microseconds")
+    existed = c.execute("SELECT 1 FROM page WHERE project=? AND slug=?", (project, slug)).fetchone()
+    audit(c, project, "page.put", f"{project}/{slug}", after={"action": "update" if existed else "create"})  # never the body
     c.execute("INSERT INTO page(project,slug,title,kind,blocks,text,updated_at) VALUES(?,?,?,?,?,?,?) "
               "ON CONFLICT(project,slug) DO UPDATE SET title=excluded.title,kind=excluded.kind,"
               "blocks=excluded.blocks,text=excluded.text,updated_at=excluded.updated_at",

@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS decision(
   rejected_options TEXT NOT NULL CHECK(trim(rejected_options) NOT IN ('','[]')),
   supersedes INTEGER REFERENCES decision(id), created_at TEXT);
 
+CREATE TRIGGER IF NOT EXISTS decision_no_replace BEFORE INSERT ON decision WHEN EXISTS(SELECT 1 FROM decision WHERE id=NEW.id)
+BEGIN SELECT RAISE(ABORT,'decision is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS decision_no_delete BEFORE DELETE ON decision
 BEGIN SELECT RAISE(ABORT,'decision is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS decision_status_only BEFORE UPDATE ON decision
