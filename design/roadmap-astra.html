@@ -52,24 +52,14 @@ body { margin: 0; background: var(--haze), var(--bg-0); background-attachment: f
 .cap { font: 600 10.5px/1.3 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--faint); }
 button { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tag { font: 700 10.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; padding: 4px 7px; border: 1px solid currentColor; border-radius: 3px; white-space: nowrap; }
+.tag.done { color: var(--st-done); } .tag.doing { color: var(--st-doing); } .tag.todo { color: var(--st-todo); }
 .row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 
 header { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; align-items: flex-end; }
 h1 { margin: 2px 0 0; font: 500 44px/1 var(--display); letter-spacing: .005em; color: var(--gold-3); text-wrap: balance; }
 .meta { font: 12px/1.6 var(--mono); color: var(--muted); text-align: right; }
 
-/* dải trạng thái */
-.status { display: grid; grid-template-columns: 1.1fr 1fr; border: 1px solid var(--line); border-radius: var(--r-lg); background: color-mix(in srgb, var(--card) 70%, transparent); }
-.status > div { padding: 18px 20px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-.status > div + div { border-left: 1px solid var(--line); }
-.status h2 { margin: 0; font: 500 28px/1.1 var(--display); text-wrap: balance; }
-.big { font: 500 46px/1 var(--display); color: var(--gold-3); font-variant-numeric: lining-nums tabular-nums; }
-.tag { font: 700 10.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; padding: 4px 7px; border: 1px solid currentColor; border-radius: 3px; white-space: nowrap; }
-.tag.done { color: var(--st-done); } .tag.doing { color: var(--st-doing); } .tag.todo { color: var(--st-todo); }
-.miss { margin: 2px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
-.miss li { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
-.miss li::before { content: "\25B3"; color: var(--st-doing); font-size: 11px; }
-.miss .who { font: 11.5px var(--mono); color: var(--muted); }
 
 /* bản đồ */
 .mapbox { position: relative; border-radius: var(--r-lg); background: var(--haze); overflow: hidden; border: 1px solid var(--line); }
@@ -85,7 +75,7 @@ svg.map { display: block; width: 100%; min-width: 680px; height: auto; color: va
 .map .trail-todo { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-dasharray: 1.5 7; stroke-linecap: round; opacity: .9; }
 .map .trail-done { fill: none; stroke: var(--trail); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
 .map .sheen { fill: none; stroke: var(--sheen); stroke-width: 2.6; stroke-linecap: round; stroke-dasharray: 60 1340; opacity: .85; }
-.map text { font-family: var(--mono); fill: var(--fg); paint-order: stroke; stroke: var(--bg); stroke-width: 4px; stroke-linejoin: round; }
+.map text { font-family: var(--mono); fill: var(--fg); paint-order: stroke; stroke: var(--bg); stroke-width: 6px; stroke-linejoin: round; }
 .map .sm { font-size: 9.5px; fill: var(--muted); letter-spacing: .12em; }
 .map .nm { font: 600 15px var(--display); letter-spacing: .01em; }
 .map .camp { cursor: pointer; }
@@ -106,20 +96,7 @@ svg.map { display: block; width: 100%; min-width: 680px; height: auto; color: va
 .map .flag polygon { fill: var(--trail); }
 .map .here { fill: var(--trail); font-size: 11px; font-weight: 700; letter-spacing: .14em; }
 .map .summit { font: italic 500 17px var(--display); fill: var(--gold-3); letter-spacing: .02em; }
-.legend { display: flex; flex-wrap: wrap; gap: 6px 22px; padding: 10px 16px; border-top: 1px solid var(--line); font: 11px var(--mono); color: var(--muted); align-items: center; background: color-mix(in srgb, var(--bg) 60%, transparent); }
-.legend span { display: inline-flex; align-items: center; gap: 7px; }
-.sw { width: 20px; height: 0; border-top: 2.5px solid var(--trail); }
-.sw.d { border-top: 2px dotted var(--gold); }
-.sw.t { width: 0; height: 0; border: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 10px solid var(--gold); }
 
-/* chọn phase */
-.rail { display: grid; grid-template-columns: repeat(5, 1fr); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
-.rail button { background: transparent; border: 0; text-align: left; padding: 11px 14px; cursor: pointer; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.rail button + button { border-left: 1px solid var(--line); }
-.rail button:hover { background: var(--accent-soft); }
-.rail button[aria-pressed="true"] { background: var(--accent-soft); box-shadow: inset 0 -2px 0 var(--gold); }
-.rail .t { font: 500 17px/1.2 var(--display); overflow-wrap: anywhere; }
-.rail .st-done { color: var(--st-done); } .rail .st-doing { color: var(--st-doing); }
 
 /* chi tiết */
 .detail { display: grid; grid-template-columns: 1fr 1.25fr; gap: 32px; align-items: start; }
@@ -145,16 +122,19 @@ details summary { cursor: pointer; font: 600 10.5px var(--mono); letter-spacing:
 .steps { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .steps li { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: baseline; }
 .id { font: 12px var(--mono); color: var(--faint); }
+.gc { font: 12px var(--mono); color: var(--muted); } .gc b { color: var(--st-doing); font-weight: 700; }
+.gmiss { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 14px; }
+.gmiss li { display: inline-flex; gap: 6px; align-items: baseline; }
+.gmiss li::before { content: "\25B3"; color: var(--st-doing); font-size: 10px; }
+.gmiss .who { font: 11px var(--mono); color: var(--muted); }
+.then { font-size: 13px; color: var(--muted); }
 .empty { margin: 0; color: var(--muted); font-style: italic; }
 .off { border-top: 1px solid var(--line); padding-top: 14px; display: flex; flex-direction: column; gap: 8px; }
 .off ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 26px; }
 
 @media (max-width: 760px) {
   h1 { font-size: 34px; } .meta { text-align: left; }
-  .status, .detail { grid-template-columns: 1fr; }
-  .status > div + div { border-left: 0; border-top: 1px solid var(--line); }
-  .rail { grid-template-columns: 1fr; }
-  .rail button + button { border-left: 0; border-top: 1px solid var(--line); }
+  .detail { grid-template-columns: 1fr; }
   .crit { grid-template-columns: 1fr auto; } .crit .what { grid-column: 1 / -1; }
 }
 </style>
@@ -165,18 +145,9 @@ details summary { cursor: pointer; font: 600 10.5px var(--mono); letter-spacing:
     <div><div class="cap">Lộ trình dự án</div><h1>Lộ trình Strata v1</h1></div>
     <div class="meta">5 phase · 5 cổng · đỉnh là bản phát hành</div>
   </header>
-  <div class="status" id="status"></div>
   <div class="mapbox">
-    <div class="scroll"><svg class="map" id="map" viewBox="0 0 1000 420" role="img" aria-label="Năm trại trên các lớp núi; năm trại là năm phase, đỉnh là bản phát hành"></svg></div>
-    <div class="legend">
-      <span><i class="sw"></i> đoạn đã đi</span>
-      <span><i class="sw d"></i> đoạn chưa đi</span>
-      <span>tròn = trại (phase)</span>
-      <span><i class="sw t"></i> cổng, chỉ user cho qua</span>
-      <span>nhấn vào trại để xem phase</span>
-    </div>
+    <div class="scroll"><svg class="map" id="map" viewBox="0 0 1000 360" role="img" aria-label="Nhấn vào trại để xem phase. Năm trại trên các lớp núi; năm trại là năm phase, đỉnh là bản phát hành"></svg></div>
   </div>
-  <nav class="rail" id="rail" aria-label="Chọn phase"></nav>
   <div class="detail" id="detail"></div>
   <div class="off" id="off"></div>
 </div>
@@ -217,6 +188,8 @@ const NS = "http://www.w3.org/2000/svg";
 const lbl = { done:"xong", doing:"đang làm", todo:"sắp tới" };
 const esc = s => String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
 const P = { C1:[80,338], G1:[178,312], C2:[282,300], G2:[396,252], C3:[490,246], G3:[584,196], C4:[684,180], G4:[766,136], C5:[838,122], G5:[920,58] };
+const K = 360/420;
+for (const k in P) P[k] = [P[k][0], +(P[k][1]*K).toFixed(1)];
 const ORDER = ["C1","G1","C2","G2","C3","G3","C4","G4","C5","G5"];
 const FRAC = 0.62;
 const here = [P.C2[0] + (P.G2[0]-P.C2[0])*FRAC, P.C2[1] + (P.G2[1]-P.C2[1])*FRAC];
@@ -245,7 +218,7 @@ function ridge(base, amp, seed, peaks) {
     let y = base;
     peaks.forEach(([px, h, w]) => { y -= h * Math.max(0, 1 - Math.abs(x - px) / w); });
     y += amp * (Math.sin(x * .031 + seed) * .6 + Math.sin(x * .087 + seed * 2) * .3 + Math.sin(x * .19 + seed) * .12);
-    pts.push([x, +y.toFixed(1)]);
+    pts.push([x, +(y*K).toFixed(1)]);
   }
   return pts;
 }
@@ -258,7 +231,7 @@ function buildScene(s) {
   const rnd = () => (r = (r * 9301 + 49297) % 233280) / 233280;
   const stars = el("g", { class:"stars" }, g);
   for (let i = 0; i < 46; i++) {
-    const x = rnd() * 1000, y = rnd() * 150, big = rnd() > .85;
+    const x = rnd() * 1000, y = rnd() * 120, big = rnd() > .85;
     el("circle", { class:"star", cx:x.toFixed(1), cy:y.toFixed(1), r: big ? 1.3 : .7, opacity: (big ? .8 : .35 + rnd() * .3).toFixed(2) }, stars);
   }
   // lớp núi xa -> gần
@@ -269,19 +242,19 @@ function buildScene(s) {
   ];
   layers.forEach(L => {
     const d = lineD(L.pts);
-    el("path", { class:"body", d: d + " L1020 420 L-20 420 Z", "stroke-width":L.w, "stroke-opacity":L.op }, g);
+    el("path", { class:"body", d: d + " L1020 360 L-20 360 Z", "stroke-width":L.w, "stroke-opacity":L.op }, g);
     // nét sườn (hatch) song song dưới sống núi
     [10, 22].forEach((off, k) => el("path", { class:"ln", d: lineD(L.pts.map(([x,y]) => [x, y + off + Math.sin(x*.05)*2])), "stroke-width":.6, opacity:(L.op * (.45 - k*.18)).toFixed(2) }, g));
   });
   // sống núi chính: đường mòn chạy trên đó
-  const main = [[-20,360], ...ORDER.map(k => P[k]), [975,96], [1020,130]];
+  const main = [[-20,310], ...ORDER.map(k => P[k]), [975,82], [1020,112]];
   const md = smooth(main);
-  el("path", { class:"body", d: md + " L1020 420 L-20 420 Z", "stroke-width":1.5 }, g);
+  el("path", { class:"body", d: md + " L1020 360 L-20 360 Z", "stroke-width":1.5 }, g);
   [12, 26, 44].forEach((off, k) => el("path", { class:"ln", d: smooth(main.map(([x,y]) => [x, y + off + (x > 900 ? (x-900)*.2 : 0)])), "stroke-width":.8, opacity:(.6 - k*.17).toFixed(2) }, g));
   // sóng ngang dưới chân núi
-  [[372,1.3,.85],[388,1.05,.6],[402,.9,.4],[414,.8,.25]].forEach(([y0,w,o], i) => {
+  [[318,1.3,.85],[332,1.05,.6],[344,.9,.4],[354,.8,.25]].forEach(([y0,w,o], i) => {
     const pts = [];
-    for (let x = -20; x <= 1020; x += 8) pts.push([x, +(y0 + Math.sin(x*.018 + i*1.7)*3 + Math.sin(x*.05 + i)*1.2).toFixed(1)]);
+    for (let x = -20; x <= 1020; x += 8) pts.push([x, +(y0 + Math.sin(x*.018 + i*1.7)*2.5 + Math.sin(x*.05 + i)*1.2).toFixed(1)]);
     el("path", { class:"ln", d: lineD(pts), "stroke-width":w, opacity:o }, g);
   });
   return main;
@@ -299,9 +272,9 @@ function drawMap() {
     const [x,y0] = P["G"+ph.n], y = y0 - 6, st = ph.gate.state;
     const sz = ph.n === 5 ? 13 : 9;
     el("polygon", { class:"cairn " + st, points:`${x},${y-sz*1.3} ${x+sz},${y+sz*.5} ${x-sz},${y+sz*.5}` }, s);
-    el("text", { class:"gid" + (st === "open" ? " open" : ""), x: st === "open" ? x + 14 : x, y: st === "open" ? y - 10 : y - sz*1.3 - 6, "text-anchor": st === "open" ? "start" : "middle" }, s, ph.gate.id + (st === "open" ? " · CHƯA QUA" : st === "done" ? " · ĐÃ QUA" : ""));
+    el("text", { class:"gid" + (st === "open" ? " open" : ""), x, y: st === "open" ? y + 20 : y - sz*1.3 - 6, "text-anchor":"middle" }, s, ph.gate.id + (st === "open" ? " · CHƯA QUA" : st === "done" ? " · ĐÃ QUA" : ""));
   });
-  el("text", { class:"summit", x:896, y:44, "text-anchor":"end" }, s, "Đỉnh · phát hành v1");
+  el("text", { class:"summit", x:896, y:40, "text-anchor":"end" }, s, "Đỉnh · phát hành v1");
   // trại
   PHASES.forEach(ph => {
     const [x,y0] = P["C"+ph.n], y = y0 - 6;
@@ -322,23 +295,6 @@ function drawMap() {
   el("circle", { cx:hx, cy:hy, r:4, fill:"var(--trail)" }, f);
   el("text", { class:"here", x:hx-8, y:hy-50, "text-anchor":"end" }, f, "BẠN Ở ĐÂY · 62%");
 }
-function renderStatus() {
-  const c = PHASES[CUR - 1];
-  const miss = [];
-  c.crit.forEach(([g, rows]) => rows.forEach(r => { if (!r[2]) miss.push([r[0], r[1], r[3]]); }));
-  $("status").innerHTML =
-    `<div><span class="cap">Vị trí hiện tại</span>
-       <h2>Trại ${c.n} · ${esc(c.name)}</h2>
-       <div class="row"><span class="big">${c.pct}%</span><span class="tag doing">${lbl[c.state]}</span></div></div>
-     <div><span class="cap">Cổng G${c.n} · chưa qua</span>
-       <div class="row"><span class="big">${miss.length}</span><span>tiêu chí còn thiếu, rồi chờ User cho qua</span></div>
-       <ul class="miss">${miss.map(m => `<li>${esc(m[0])} <span class="who">${esc(m[1])} · ${esc(m[2])}</span></li>`).join("")}</ul></div>`;
-}
-function renderRail() {
-  $("rail").innerHTML = PHASES.map(p =>
-    `<button type="button" data-n="${p.n}" aria-pressed="${p.n === sel}"><span class="cap">Phase ${p.n} · <span class="st-${p.state}">${lbl[p.state]}</span></span><span class="t">${esc(p.short)}</span></button>`).join("");
-  $("rail").querySelectorAll("button").forEach(b => b.addEventListener("click", () => select(+b.dataset.n)));
-}
 function renderDetail() {
   const p = PHASES[sel - 1];
   const blocks = p.blocks.map(b => {
@@ -351,9 +307,15 @@ function renderDetail() {
     `<div class="grp"><span class="cap">${esc(g)}</span>${rows.map(r =>
       `<div class="crit ${r[2] ? "" : "miss-row"}"><span class="what">${esc(r[0])}</span><span class="by">${esc(r[1])}</span><span class="tag ${r[2] ? "done" : "doing"}">${esc(r[3])}</span></div>`).join("")}</div>`).join("")
     : `<p class="empty">Tiêu chí đánh giá của phase này chưa được lập. Sẽ viết khi phase trước qua cổng.</p>`;
-  const steps = p.steps.length ? `<details><summary>Các bước của phase (${p.steps.length})</summary><ul class="steps">${p.steps.map(s =>
+  const steps = p.steps.length ? `<details open><summary>Các bước của phase (${p.steps.length})</summary><ul class="steps">${p.steps.map(s =>
     `<li><span class="id">${s[0]}</span><span>${esc(s[1])}</span><span class="tag ${s[2]}">${lbl[s[2]]}</span></li>`).join("")}</ul></details>` : "";
   const gs = p.gate.state;
+  const all = p.crit ? p.crit.flatMap(([, rows]) => rows) : [];
+  const miss = all.filter(r => !r[2]);
+  const gateCount = all.length ? `<span class="gc">còn <b>${miss.length}/${all.length}</b> tiêu chí</span>` : "";
+  const gateBody = miss.length && gs === "open"
+    ? `<ul class="gmiss">${miss.map(r => `<li>${esc(r[0].replace(/\s*\(.*\)$/, ""))} <span class="who">${esc(r[1])}</span></li>`).join("")}</ul><span class="then">Sau đó user cho qua.</span>`
+    : `<span>${esc(p.gate.note)}</span>`;
   const gateTag = gs === "done" ? "done" : gs === "open" ? "doing" : "todo";
   const gateTxt = gs === "done" ? "đã qua" : gs === "open" ? "chưa qua" : "sắp tới";
   $("detail").innerHTML =
@@ -367,14 +329,14 @@ function renderDetail() {
        ${steps}
      </section>
      <section>
-       <div class="gate-box ${gs}"><div class="row"><span class="cap">Cổng ${p.gate.id}</span><span class="tag ${gateTag}">${gateTxt}</span></div><span>${esc(p.gate.note)}</span></div>
+       <div class="gate-box ${gs}"><div class="row"><span class="cap">Cổng ${p.gate.id}</span><span class="tag ${gateTag}">${gateTxt}</span>${gateCount}</div>${gateBody}</div>
        <h4 class="cap">Tiêu chí đánh giá chuyên nghiệp</h4>
        ${crit}
      </section>`;
 }
-function select(n) { sel = n; drawMap(); renderRail(); renderDetail(); }
+function select(n) { sel = n; drawMap(); renderDetail(); }
 $("off").innerHTML = `<span class="cap">Ngoài lộ trình</span><ul>${OFF.map(o => `<li><span class="id">${o[0]}</span> ${esc(o[1])}</li>`).join("")}</ul>`;
-renderStatus(); select(CUR);
+select(CUR);
 </script>
 </body>
 </html>
