@@ -13,6 +13,11 @@ def run(tmp_path, role, msgs, db_=None):
     return r, [json.loads(l) for l in r.stdout.splitlines()]
 
 
+MAIN_TOOLS = ["list_projects", "list_items", "get_item", "list_decisions", "get_doc", "c4_context", "c4_flow", "audit", "search", "add_item", "edit_item",
+              "item_claim", "item_submit", "item_approve", "item_reject", "item_release", "dep_add", "dep_rm", "add_decision", "set_decision_status"]
+READ = MAIN_TOOLS[:9]
+
+
 def call(i, name, **a): return {"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": name, "arguments": a}}
 
 
@@ -27,7 +32,8 @@ def test_handshake_list_ping_unknown(tmp_path):
     assert out[0]["result"]["protocolVersion"] == "2025-03-26" and "tools" in out[0]["result"]["capabilities"] and out[0]["result"]["serverInfo"]["name"]
     assert out[1]["result"] == {}
     tools = {t["name"]: t for t in out[2]["result"]["tools"]}
-    assert set(tools) == {"add_item", "set_item", "add_decision", "set_decision_status", "search"}
+    assert set(tools) == set(MAIN_TOOLS)
+    assert out[0]["result"]["serverInfo"]["name"] == "strata-main"
     assert all("role" not in t["inputSchema"]["properties"] and t["inputSchema"]["type"] == "object" for t in tools.values())
     assert out[3]["error"]["code"] == -32601 and out[4]["error"]["code"] == -32700
 
@@ -40,12 +46,11 @@ def test_tools_and_role_fixed(tmp_path):
         call(3, "add_decision", project="p", title="T", context="c", decision="d", consequences="q", rejected="r"),
         call(4, "add_decision", project="p", title="T", context="c", decision="d", consequences="q", rejected=""),
         call(5, "set_decision_status", id=1, status="accepted"),
-        call(6, "search", q="zork"),
-        call(7, "set_item", id=1, status="done")], p)
-    assert r.returncode == 0 and r.stdout.count("\n") == 7  # server survived every error
-    flags = [o["result"]["isError"] for o in out]
-    assert flags == [False, True, False, True, True, False, True]
-    assert json.loads(out[5]["result"]["content"][0]["text"])[0]["title"] == "bug zork"
+        call(6, "search", q="zork")], p)
+    assert r.returncode == 0 and r.stdout.count("\n") == 6  # server survived every error
+    flags = [o.get("result", {}).get("isError") for o in out]
+    assert flags == [False, True, False, True, None, False] and out[4]["error"]["code"] == -32602  # set_decision_status is main-only, hidden from coder
+    assert json.loads(out[5]["result"]["content"][0]["text"].splitlines()[0])["title"] == "bug zork"
     c = db.connect(p)
     assert c.execute("SELECT created_by FROM item WHERE id=1").fetchone()[0] == "coder"
     assert c.execute("SELECT status FROM decision WHERE id=1").fetchone()[0] == "proposed"
@@ -65,9 +70,9 @@ def test_malformed_input_never_crashes(tmp_path):
            {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": [1]},
            {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "search", "arguments": [1]}},
            {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": ["x"]}},
-           '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"set_item","arguments":{"id":1e23}}}',
+           '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"item_claim","arguments":{"id":1e23}}}',
            '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"search","arguments":{"q":"a","limit":1e400}}}',
-           call(7, "set_item", id=True), call(8, "set_item", id=10**30), call(9, "search", q=["a"]),
+           call(7, "item_claim", id=True), call(8, "item_claim", id=10**30), call(9, "search", q=["a"]),
            '[{"jsonrpc":"2.0","id":10,"method":"ping"}]', "[" * 100000,
            {"jsonrpc": "2.0", "id": 11, "method": "ping"}]
     r, out = run(tmp_path, "coder", bad)
@@ -81,3 +86,106 @@ def test_missing_project_clean_error(tmp_path):
     r, out = run(tmp_path, "main", [call(1, "add_item", project="zz", kind="task", title="t")])
     res = out[0]["result"]
     assert res["isError"] and res["content"][0]["text"] == "error: no project zz" and "Traceback" not in r.stderr
+
+
+# ---- task #44: role filtering, read tools, cap, protocol, pipe ----
+def tool_names(tmp_path, role):
+    _, out = run(tmp_path, role, [{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}])
+    return {t["name"] for t in out[0]["result"]["tools"]}
+
+
+def test_tools_list_by_role(tmp_path):
+    assert tool_names(tmp_path, "main") == set(MAIN_TOOLS)
+    coder, rev = tool_names(tmp_path, "coder"), tool_names(tmp_path, "reviewer")
+    assert set(READ) <= coder and {"item_claim", "item_submit", "add_item", "add_decision"} <= coder
+    assert not coder & {"edit_item", "item_approve", "dep_add", "set_decision_status"}
+    assert rev == set(READ) | {"add_item", "add_decision"}
+    _, out = run(tmp_path, "reviewer", [call(1, "item_claim", id=1)])
+    assert out[0]["error"]["code"] == -32602  # hidden tools are not callable
+
+
+def seeded(tmp_path):
+    p = str(tmp_path / "s.db")
+    c = db.init(p); db.add_project(c, "p", "P", docs_dir=str(tmp_path / "docs"))
+    (tmp_path / "docs").mkdir(); (tmp_path / "docs" / "a.yaml").write_text("title: A\nblocks:\n  - {type: md, text: hi}\n", encoding="utf-8")
+    a = db.add_item(c, "p", "task", "first", "body one", "high", "approved"); b = db.add_item(c, "p", "task", "second", None, None, "approved")
+    c.execute("INSERT INTO item_dep VALUES(?,?)", (b, a)); c.commit()
+    c.execute("INSERT INTO decision(project,title,status,context,decision,consequences,rejected_options,created_at) VALUES('p','D1','accepted','c','d','q','r','now')"); c.commit()
+    c.close()
+    return p
+
+
+def test_read_tools(tmp_path):
+    p = seeded(tmp_path)
+    r, out = run(tmp_path, "reviewer", [call(1, "list_projects"), call(2, "list_items", project="p", ready=True), call(3, "get_item", id=2),
+                                        call(4, "list_decisions", project="p"), call(5, "get_doc", project="p", path="a.yaml"), call(6, "c4_context", project="p"),
+                                        call(7, "c4_flow", project="p"), call(8, "audit", project="p", limit=2), call(9, "search", q="first"),
+                                        call(10, "get_doc", project="p", path="../x.yaml")], p)
+    t = [o["result"]["content"][0]["text"] for o in out]
+    flags = [o["result"]["isError"] for o in out]
+    assert flags[:5] == [False] * 5 and flags[7:9] == [False] * 2 and flags[9]  # c4 tools may error: no model imported
+    assert '"id": "p"' in t[0]
+    assert [json.loads(l)["title"] for l in t[1].splitlines()] == ["first"]  # second is blocked by first
+    i = json.loads(t[2].split("\n--- body ---")[0]); assert i["depends_on"][0]["id"] == 1 and "links" in i and i["audit"]
+    assert json.loads(t[3].splitlines()[0])["title"] == "D1"
+    d = json.loads(t[4]); assert d["title"] == "A" and d["errors"] == []
+    assert len(t[7].splitlines()) == 2
+
+
+def test_cap_line_boundary(tmp_path):
+    p = seeded(tmp_path)
+    c = db.connect(p); c.execute("UPDATE item SET body=? WHERE id=1", ("line of text\n" * 2000,)); c.commit(); c.close()
+    _, out = run(tmp_path, "main", [call(1, "get_item", id=1)], p)
+    t = out[0]["result"]["content"][0]["text"]
+    assert len(t) <= 8000 and "… truncated, " in t and t.endswith("more chars; narrow with limit/filters")
+    body, foot = t.rsplit("\n", 1)
+    assert foot.startswith("… truncated") and body.endswith("line of text")  # cut on a line boundary
+
+
+def test_protocol(tmp_path):
+    msgs = [{"jsonrpc": "2.0", "id": i, "method": "initialize", "params": {"protocolVersion": v}} for i, v in enumerate(["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05", "1999-01-01"])]
+    msgs += [{"jsonrpc": "2.0", "id": 9}, {"jsonrpc": "2.0", "id": 10, "method": 5}, '{"jsonrpc":"2.0","id":null,"method":"ping"}', '{"jsonrpc":"2.0","id":true,"method":"ping"}',
+             '{"jsonrpc":"2.0","id":{"a":1},"method":"ping"}', '{"jsonrpc":"2.0","id":[1],"method":"ping"}', {"jsonrpc": "2.0", "id": "s", "method": "ping"}]
+    _, out = run(tmp_path, "coder", msgs)
+    assert [o["result"]["protocolVersion"] for o in out[:5]] == ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05", "2025-11-25"]
+    assert out[0]["result"]["serverInfo"]["name"] == "strata-coder"
+    assert [o["error"]["code"] for o in out[5:11]] == [-32600] * 6 and out[11]["result"] == {}
+
+
+def raw(tmp_path, data, role="coder"):
+    p = str(tmp_path / "r.db"); db.init(p).close()
+    r = subprocess.run([sys.executable, str(ROOT / "strata.py"), "mcp", "--role", role, "--db", p], input=data, capture_output=True, timeout=60)
+    return r, [json.loads(l) for l in r.stdout.decode("ascii").splitlines()]
+
+
+def test_bad_utf8_and_huge_line(tmp_path):
+    ping = b'{"jsonrpc":"2.0","id":1,"method":"ping"}\n'
+    r, out = raw(tmp_path, b'\xff\xfe{"id":1}\n' + ping)
+    assert r.returncode == 0 and out[0]["error"]["code"] == -32700 and out[1]["result"] == {}
+    r, out = raw(tmp_path, b'{"x":"' + b"a" * (1 << 20) + b'"}\n' + ping + b'\xc3"\n')
+    assert out[0]["error"]["code"] == -32600 and out[1]["result"] == {}
+    assert out[2]["error"]["code"] == -32700 and r.returncode == 0
+    r, out = raw(tmp_path, b"x" * (3 << 20))  # no newline at all: one error, clean exit
+    assert out[0]["error"]["code"] == -32600 and len(out) == 1
+
+
+def test_pipe_coder_denied_and_allowed(tmp_path):
+    p = seeded(tmp_path)
+    r, out = run(tmp_path, "coder", [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25"}},
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        call(3, "add_item", project="p", kind="task", title="not allowed"),
+        call(4, "item_claim", id=1, actor="bot"), call(5, "item_submit", id=1, note="done it", actor="bot")], p)
+    assert out[0]["result"]["serverInfo"]["name"] == "strata-coder" and len(out) == 5
+    assert "item_claim" in [t["name"] for t in out[1]["result"]["tools"]]
+    assert out[2]["result"]["isError"] and out[3]["result"]["isError"] is False and out[4]["result"]["isError"] is False
+    c = db.connect(p)
+    assert c.execute("SELECT count(*) FROM audit WHERE tool LIKE 'denied:%' AND actor_role='coder'").fetchone()[0] == 1
+    assert tuple(c.execute("SELECT status,owner FROM item WHERE id=1").fetchone()) == ("review", "bot")
+
+
+def test_mcp_json():
+    cfg = json.loads((ROOT / ".mcp.json").read_text())["mcpServers"]
+    assert {k: v["args"][-1] for k, v in cfg.items()} == {"strata": "main", "strata-coder": "coder", "strata-reviewer": "reviewer"}
+    assert all(v["command"] == "python3" and v["args"][0].endswith("/strata.py") and v["args"][1] == "mcp" for v in cfg.values())
