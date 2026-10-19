@@ -49,6 +49,7 @@ def handle(c, role, msg):
         if not isinstance(a, dict): return err(-32602, "arguments must be an object")
         if name not in TOOLS: return err(-32602, f"unknown tool {name}")
         try: text, bad = json.dumps(call(c, role, name, a), ensure_ascii=False), False
+        except KeyError as e: text, bad = f"error: {e.args[0]}", True
         except Exception as e:  # never crash the server on a bad call
             traceback.print_exc(file=sys.stderr); text, bad = f"{type(e).__name__}: {e}", True
         return ok({"content": [{"type": "text", "text": text}], "isError": bad})

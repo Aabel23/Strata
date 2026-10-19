@@ -1,6 +1,6 @@
 import datetime, html.parser, json, os, pathlib, re, sqlite3
 
-DEFAULT_DB = "/home/abel/project/tools/strata/strata.db"
+DEFAULT_DB = str(pathlib.Path(__file__).resolve().parent.parent / "strata.db")
 SCHEMA = pathlib.Path(__file__).with_name("schema.sql")
 
 def db_path(path=None):
@@ -30,7 +30,7 @@ def init(path=None):
 ADDED = [("c4_connection", "description", "TEXT"), ("c4_connection", "feature", "TEXT"), ("c4_connection", "interface", "TEXT"),
          ("c4_connection", "payload", "JSON"), ("c4_connection", "kind", "TEXT"),
          ("c4_object", "responsibilities", "JSON"), ("c4_object", "state", "TEXT"),
-         ("doc", "summary", "TEXT"), ("doc", "code", "JSON")]
+         ("doc", "prev_status", "TEXT"), ("doc", "summary", "TEXT"), ("doc", "code", "JSON")]
 
 def _migrate(c):
     """ALTER old tables up to the current schema. Returns True if c4_object was renamed to c4_object_old
@@ -87,6 +87,7 @@ def add_project(c, id, name, root=None, docs_dir=None, parent=None, description=
     audit(c, id, "project.add", id, None, r); c.commit()
 
 def add_item(c, project, kind, title, body=None, priority=None, status="open", role="cli"):
+    if not c.execute("SELECT 1 FROM project WHERE id=?", (project,)).fetchone(): raise KeyError(f"no project {project}")
     t = now()
     cur = c.execute("INSERT INTO item(project,kind,title,body,status,priority,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
                     (project, kind, title, body, status, priority, role, t, t))
@@ -125,7 +126,7 @@ def docs_stamp(base):
     """Cheap fingerprint of docs_dir: changes when a doc is added, removed or edited."""
     return tuple((str(f), f.stat().st_mtime_ns, f.stat().st_size) for f in doc_files(base))
 
-def scan_docs(c, project):
+def scan_docs(c, project, audit_row=True):
     """Walk docs_dir for *.yaml (the default doc format), *.html and *.md; upsert changed docs, mark vanished ones missing. Returns (found, missing)."""
     r = c.execute("SELECT docs_dir FROM project WHERE id=?", (project,)).fetchone()
     if not r or not r["docs_dir"] or not os.path.isdir(r["docs_dir"]): raise ValueError(f"project {project}: docs_dir not set or not a directory")
@@ -155,10 +156,11 @@ def scan_docs(c, project):
         changed += 1
         c.execute("INSERT INTO doc(project,path,title,kind,text,updated_at,summary,code) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(project,path) DO UPDATE SET "
                   "title=excluded.title,kind=excluded.kind,text=excluded.text,updated_at=excluded.updated_at,summary=excluded.summary,code=excluded.code,"
-                  "status=CASE WHEN doc.status='missing' THEN 'current' ELSE doc.status END", (project, path, title, kind, text, now(), summary, cj))
+                  "status=CASE WHEN doc.status='missing' THEN coalesce(doc.prev_status,'current') ELSE doc.status END,"
+                  "prev_status=CASE WHEN doc.status='missing' THEN NULL ELSE doc.prev_status END", (project, path, title, kind, text, now(), summary, cj))
     gone = [x["path"] for x in c.execute("SELECT path FROM doc WHERE project=? AND status!='missing'", (project,)) if x["path"] not in seen]
-    for path in gone: c.execute("UPDATE doc SET status='missing',updated_at=? WHERE project=? AND path=?", (now(), project, path))
-    if changed or gone: audit(c, project, "doc.scan", project, None, {"found": len(seen), "changed": changed, "missing": len(gone)})
+    for path in gone: c.execute("UPDATE doc SET prev_status=status,status='missing',updated_at=? WHERE project=? AND path=?", (now(), project, path))
+    if audit_row and (changed or gone): audit(c, project, "doc.scan", project, None, {"found": len(seen), "changed": changed, "missing": len(gone)})
     c.commit()
     return len(seen), len(gone)
 

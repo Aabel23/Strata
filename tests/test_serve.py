@@ -70,3 +70,49 @@ def test_api_c4_issues(srv):
     d = json.loads(get(srv, "/api/c4?project=p")[1])
     assert isinstance(d["issues"], dict) and "root" not in d
     assert all(c in ("dead_link", "no_link", "no_desc") for v in d["issues"].values() for c in v)
+
+
+def raw(port, host, path="/api/projects"):
+    import http.client
+    c = http.client.HTTPConnection("127.0.0.1", port); c.putrequest("GET", path, skip_host=True)
+    if host is not None: c.putheader("Host", host)
+    c.endheaders(); return c.getresponse().status
+
+
+def test_search_params(srv):
+    assert get(srv, "/api/search?q=a&src=foo")[0] == 400
+    assert get(srv, "/api/search?q=a&limit=abc")[0] == 400
+    assert get(srv, "/api/search?q=a&limit=1000&src=item&project=p")[0] == 200
+    assert get(srv, "/api/search?q=")[0] == 400
+
+
+def test_host_check(dbp):
+    s = server.make_server(dbp, "p", 0, "127.0.0.1", allow_hosts=["Box.ts"], bound_hosts=["127.0.0.1", "100.1.2.3"])
+    threading.Thread(target=s.serve_forever, daemon=True).start()
+    port = s.server_address[1]
+    try:
+        assert raw(port, f"evil.com:{port}") == 403 and raw(port, None) == 403 and raw(port, f"127.0.0.1:{port + 1}") == 403
+        for h in (f"127.0.0.1:{port}", f"LOCALHOST:{port}", f"100.1.2.3:{port}", f"box.ts:{port}", "box.ts"): assert raw(port, h) == 200, h
+    finally: s.shutdown(); s.server_close()
+
+
+def test_bind_all_needs_allow_host(dbp):
+    for h in ("0.0.0.0", "::"):
+        with pytest.raises(ValueError, match="allow-host"): server.make_server(dbp, "p", 0, h)
+
+
+def test_autoscan_no_audit_and_keeps_doc_state(dbp, tmp_path):
+    d = tmp_path / "docs"; d.mkdir(); (d / "a.md").write_text("# A\nx")
+    c = db.connect(dbp); db.add_project(c, "q", "Q", docs_dir=str(d))
+    s = server.make_server(dbp, "p", 0); threading.Thread(target=s.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{s.server_address[1]}"
+    try:
+        assert get(base, "/api/docs?project=q")[0] == 200
+        assert c.execute("SELECT count(*) FROM audit WHERE tool='doc.scan'").fetchone()[0] == 0
+        db.set_doc(c, "q", "a.md", feature="f", status="draft", ord=3)
+        get(base, "/api/docs?project=q")
+        (d / "a.md").unlink(); get(base, "/api/docs?project=q")
+        assert c.execute("SELECT status FROM doc WHERE path='a.md'").fetchone()[0] == "missing"
+        (d / "a.md").write_text("# A\nx"); get(base, "/api/docs?project=q")
+        assert tuple(c.execute("SELECT feature,status,ord FROM doc WHERE path='a.md'").fetchone()) == ("f", "draft", 3)
+    finally: s.shutdown(); s.server_close()

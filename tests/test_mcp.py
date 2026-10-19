@@ -75,3 +75,9 @@ def test_malformed_input_never_crashes(tmp_path):
     assert [o["error"]["code"] for o in out[1:4]] == [-32602] * 3
     assert all(o["result"]["isError"] for o in out[0:1] + out[4:9])
     assert out[9]["error"]["code"] == -32600 and out[10]["error"]["code"] == -32700 and out[11]["result"] == {}
+
+
+def test_missing_project_clean_error(tmp_path):
+    r, out = run(tmp_path, "main", [call(1, "add_item", project="zz", kind="task", title="t")])
+    res = out[0]["result"]
+    assert res["isError"] and res["content"][0]["text"] == "error: no project zz" and "Traceback" not in r.stderr

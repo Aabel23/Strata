@@ -7,6 +7,7 @@ from test_c4 import EX, run
 def dbp(tmp_path):
     p = tmp_path / "t.db"
     run(p, "import-yaml", str(EX), "--project", "p")
+    run(p, "project", "add", "p", "--name", "P")
     run(p, "item", "add", "--project", "p", "--kind", "issue", "--title", "Lỗi relay")
     run(p, "c4", "link", "--project", "p", "--object", "relay", "--item", "1")
     return p

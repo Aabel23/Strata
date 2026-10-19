@@ -1,5 +1,5 @@
 """HTTP server: C4 viewer, pages and their JSON APIs. All data comes from the DB."""
-import http.server, json, mimetypes, pathlib, re, sqlite3, threading
+import http.server, json, mimetypes, pathlib, re, socket, sqlite3, threading
 from urllib.parse import parse_qs, unquote, urlsplit
 from strata import blocks, c4, db, service
 
@@ -12,7 +12,12 @@ ITEM_STATUS = ("proposed", "approved", "open", "doing", "done", "rejected")
 CLOSED = "('done','rejected')"
 
 
-def make_server(db_path=None, project=None, port=0, host="127.0.0.1"):
+def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_hosts=(), bound_hosts=None):
+    """allow_hosts: extra Host names (with or without port). bound_hosts: every address strata binds (default just host)."""
+    if host in ("0.0.0.0", "::") and not allow_hosts:
+        raise ValueError(f"binding {host} needs at least one --allow-host NAME")
+    bound = [h.lower() for h in (bound_hosts or [host])]
+    extra = {h.lower() for h in allow_hosts}
     db.init(db_path).close()
     conn = sqlite3.connect(db.db_path(db_path), check_same_thread=False)  # one long-lived conn: data_version needs it
     conn.row_factory = sqlite3.Row
@@ -31,7 +36,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1"):
                 if not base.is_dir(): continue
                 st = db.docs_stamp(base)
                 if stamps.get(r["id"]) != st:
-                    db.scan_docs(conn, r["id"]); stamps[r["id"]] = st
+                    db.scan_docs(conn, r["id"], audit_row=False); stamps[r["id"]] = st
 
     def default_project():
         ps = rows("SELECT project FROM c4_meta")
@@ -40,7 +45,8 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1"):
     class H(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
             port = self.server.server_address[1]
-            if host in ("127.0.0.1", "localhost") and self.headers.get("Host") not in (f"127.0.0.1:{port}", f"localhost:{port}"):
+            ok = {f"[{h}]:{port}" if ":" in h else f"{h}:{port}" for h in bound} | {f"localhost:{port}", f"127.0.0.1:{port}"} | extra | {f"{h}:{port}" for h in extra}
+            if (self.headers.get("Host") or "").lower() not in ok:
                 return self.send_error(403)  # DNS rebinding guard
             u = urlsplit(self.path)
             q = {k: v[-1] for k, v in parse_qs(u.query, keep_blank_values=True).items()}
@@ -170,8 +176,8 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1"):
 
         def search(self, q):
             try:
-                with lock: hits = service.search(conn, q.get("q", ""), q.get("project"))
-            except ValueError: return self.send_error(400, "empty q")
+                with lock: hits = service.search(conn, q.get("q", ""), q.get("project"), q.get("src"), q.get("limit", 30))
+            except ValueError as e: return self.send_error(400, str(e))
             self.json(hits)
 
         def file(self, f, ctype=None):
@@ -196,4 +202,6 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1"):
 
         def log_message(self, *a): pass
 
-    return http.server.ThreadingHTTPServer((host, port), H)
+    class S(http.server.ThreadingHTTPServer):
+        address_family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    return S((host, port), H)

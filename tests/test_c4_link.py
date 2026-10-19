@@ -8,6 +8,7 @@ from test_c4 import EX, run
 def dbp(tmp_path):
     p = tmp_path / "t.db"
     assert run(p, "import-yaml", str(EX), "--project", "p")[0] == 0
+    run(p, "project", "add", "p", "--name", "P")
     run(p, "item", "add", "--project", "p", "--kind", "issue", "--title", "Lỗi relay")   # item 1
     run(p, "item", "add", "--project", "p", "--kind", "task", "--title", "Làm mail")      # item 2
     c = db.connect(p)

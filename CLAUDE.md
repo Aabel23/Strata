@@ -12,6 +12,7 @@ Luật chung (HIEN_PHAP, luồng 6 bước) đã nạp qua `agent/BOOTSTRAP.md`.
 ## Luật cứng
 
 1. **Ghi qua CLI, đọc qua web.** Server chỉ `GET`. Không thêm endpoint ghi.
+   Ngoại lệ: bảng `doc` là chỉ mục dẫn xuất từ file; server autoscan được làm mới nó, không ghi audit.
 2. **Không phụ thuộc nặng.** Python stdlib + PyYAML; JS thuần, không build, không CDN.
 3. **Tài liệu chỉ nội dung.** Agent viết YAML theo `doc-format.yaml`; không tự viết HTML/CSS/JS cho tài liệu. Framework lo trình bày.
 4. **Thiết kế giao diện phải nạp skill design trước** (`artifact-design` hoặc skill design user chỉ định), không tự làm.

@@ -4,7 +4,7 @@
   strata.py init [--db]
   strata.py import-yaml FILE --project P [--db]   load a C4 YAML model into the DB
   strata.py validate FILE | --project P [--db]    check structure and code links
-  strata.py serve [--db] [--project P] [--port] [--host] viewer on http://127.0.0.1:PORT
+  strata.py serve [--db] [--project P] [--port] [--host A,B] [--allow-host NAME]... viewer on http://127.0.0.1:PORT
   strata.py page put|validate FILE | list [--project]
   strata.py project add ID --name N [--root --docs-dir --parent --description] | list
   strata.py doc scan --project P | set --project P PATH [--feature --status --ord]
@@ -71,7 +71,7 @@ def cmd_write(a):
         else:
             service.set_item(c, "main", a.id, a.status, a.priority); print("ok")
     except (sqlite3.DatabaseError, ValueError, KeyError, PermissionError) as e:
-        print("ERROR", e); return 1
+        print("ERROR", e.args[0] if isinstance(e, KeyError) else e); return 1
     return 0
 
 
@@ -88,7 +88,7 @@ def main(argv=None):
     add("init")
     add("import-yaml", (["file"], {}), (["--project"], {"required": True}))
     add("validate", (["file"], {"nargs": "?"}), (["--project"], {}))
-    add("serve", (["--project"], {}), (["--port"], {"type": int, "default": 8740}), (["--host"], {"default": "127.0.0.1"}))
+    add("serve", (["--project"], {}), (["--port"], {"type": int, "default": 8740}), (["--host"], {"default": "127.0.0.1"}), (["--allow-host"], {"action": "append", "default": []}))
     pg = sub.add_parser("page"); ps = pg.add_subparsers(dest="action", required=True)
     for n in ("put", "validate"):
         p = ps.add_parser(n); p.add_argument("file"); p.add_argument("--db")
@@ -133,9 +133,12 @@ def main(argv=None):
     if a.cmd == "page": return cmd_page(a)
     from strata import server
     hosts = a.host.split(",")  # vd "127.0.0.1,100.107.55.40": nghe nhiều địa chỉ
-    srv = server.make_server(a.db, a.project, a.port, hosts[0])
-    for h in hosts[1:]:
-        threading.Thread(target=server.make_server(a.db, a.project, a.port, h).serve_forever, daemon=True).start()
+    mk = lambda h: server.make_server(a.db, a.project, a.port, h, a.allow_host, hosts)
+    try:
+        srv = mk(hosts[0])
+        others = [mk(h) for h in hosts[1:]]
+    except ValueError as e: print("ERROR", e); return 1
+    for o in others: threading.Thread(target=o.serve_forever, daemon=True).start()
     url = f"http://{hosts[0]}:{srv.server_address[1]}/"
     print(f"Strata: {url}  (db: {db.db_path(a.db)})")
     webbrowser.open(url)

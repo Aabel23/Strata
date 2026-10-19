@@ -126,3 +126,49 @@ def test_non_main_status_rules(c):
     assert c.execute("SELECT status FROM item WHERE id=?", (i,)).fetchone()[0] == "open"
     j = service.add_item(c, "main", "p", "issue", "J", status="done")
     assert c.execute("SELECT status FROM item WHERE id=?", (j,)).fetchone()[0] == "done"
+
+
+def denied(c): return [dict(r) for r in c.execute("SELECT * FROM audit WHERE tool LIKE 'denied:%' ORDER BY id")]
+
+
+def test_denials_audited_without_body(c):
+    with pytest.raises(PermissionError): service.add_item(c, "coder", "p", "task", "T" * 200, body="SECRET-BODY")
+    with pytest.raises(PermissionError): service.add_item(c, "hacker", "p", "issue", "x", body="SECRET-BODY")
+    i = service.add_item(c, "main", "p", "task", "t")
+    with pytest.raises(PermissionError): service.set_item(c, "reviewer", i, status="done")
+    with pytest.raises(PermissionError): service.set_item(c, "coder", 999, priority="p1")
+    with pytest.raises(PermissionError): service.add_decision(c, "coder", "p", "D", "SECRET-CTX", "d", "c", '["x"]', supersedes=1)
+    with pytest.raises(PermissionError): service.set_decision_status(c, "coder", 1, "accepted")
+    d = denied(c)
+    assert [(r["tool"], r["actor_role"]) for r in d] == [
+        ("denied:item.add", "coder"), ("denied:item.add", "invalid"), ("denied:item.set", "reviewer"),
+        ("denied:item.set", "coder"), ("denied:decision.add", "coder"), ("denied:decision.set", "coder")]
+    assert d[0]["project"] == "p" and d[2]["project"] == "p" and d[3]["project"] == "-"
+    assert "SECRET" not in str(d) and ("T" * 81) not in str(d)
+
+
+def test_missing_project_keyerror(c):
+    for p in ("nope", ""):
+        with pytest.raises(KeyError): service.add_item(c, "main", p, "task", "t")
+        with pytest.raises(KeyError): service.add_decision(c, "main", p, "t", "c", "d", "q", '["x"]')
+        with pytest.raises(KeyError): db.add_item(c, p, "task", "t")
+    assert c.execute("SELECT count(*) FROM audit WHERE tool IN ('item.add','decision.add')").fetchone()[0] == 0
+
+
+def test_cli_missing_project_clean(tmp_path):
+    import subprocess, sys
+    r = subprocess.run([sys.executable, "strata.py", "item", "add", "--project", "zz", "--kind", "task", "--title", "t", "--db", str(tmp_path / "x.db")], capture_output=True, text=True)
+    assert r.stdout.strip() == "ERROR no project zz" and "Traceback" not in r.stderr
+
+
+def test_search_validation(c):
+    service.add_item(c, "main", "p", "task", "alpha")
+    with pytest.raises(ValueError, match="unknown src"): service.search(c, "alpha", src="foo")
+    with pytest.raises(ValueError, match="bad limit"): service.search(c, "alpha", limit="abc")
+    assert len(service.search(c, "alpha", limit=1000, src="item", project="p")) == 1
+    assert len(service.search(c, "alpha", limit=-5)) == 1
+
+
+def test_default_db_absolute():
+    import pathlib
+    assert pathlib.Path(db.DEFAULT_DB).is_absolute() and db.DEFAULT_DB.endswith("strata.db")

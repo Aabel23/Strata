@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS doc(
   project TEXT NOT NULL, path TEXT NOT NULL, title TEXT NOT NULL, feature TEXT,
   kind TEXT NOT NULL DEFAULT 'other' CHECK(kind IN ('research','architect','review','plan','other')),
   status TEXT NOT NULL DEFAULT 'current' CHECK(status IN ('current','draft','outdated','missing')),
-  ord INT NOT NULL DEFAULT 0, text TEXT, updated_at TEXT, summary TEXT, code JSON,
+  ord INT NOT NULL DEFAULT 0, text TEXT, updated_at TEXT, summary TEXT, code JSON, prev_status TEXT,
   PRIMARY KEY(project,path));
 
 CREATE TRIGGER IF NOT EXISTS doc_ai AFTER INSERT ON doc BEGIN

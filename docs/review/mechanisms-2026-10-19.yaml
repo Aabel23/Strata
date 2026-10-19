@@ -1,0 +1,65 @@
+title: Review cơ chế Strata và agent/ (19/10/2026)
+summary: Review 12 nhóm cơ chế, 19 lỗi thành issue #21–#39, đề xuất cải tiến xếp ưu tiên. Chỉ review, không sửa code trong đợt này.
+code: [strata/service.py, strata/db.py, strata/mcp.py, strata/server.py, strata/c4.py, strata/blocks.py, strata/schema.sql, agent/HIEN_PHAP.md, agent/hooks, agent/skills, viewer]
+
+blocks:
+  - md: |
+      ## Cách làm
+      Bốn reviewer (Sonnet medium) chạy song song, mỗi người 2–3 nhóm, phân tích tĩnh và thử trên DB tạm; bảo mật theo skill `security-audit` mức hướng dẫn. Nhóm 4 (vault RAM/OPEN) do chat chính làm vì subagent không được đọc vault. Test lúc review: **149 passed**.
+
+      **Lỗi** = sai, hỏng hoặc mâu thuẫn, đã ghi thành issue. **Đề xuất** = cải tiến, chưa thành issue.
+
+  - table:
+      head: [Nhóm, Lỗi (issue), Mức cao nhất]
+      rows:
+        - ["1. Luật và luồng (HIEN_PHAP, BOOTSTRAP, CLAUDE.md)", "#28", trung]
+        - ["2. Skill tự giữ", "#26 #27 #29", trung]
+        - ["3. Hook + settings.json", "#25 #31", cao]
+        - ["4. Vault RAM/OPEN vs Strata", "#23 #24", trung]
+        - ["5. Service + quyền + audit", "#32 #35 (+ #5 #6 đã có)", trung]
+        - ["6. MCP", "#33 #36", trung]
+        - ["7. Decision append-only, FTS", "#34", thấp]
+        - ["8. C4 import/validate/context/flow", "#37 #38", cao]
+        - ["9. Tài liệu YAML", "#39", thấp]
+        - ["10. Server GET + bảo mật", "#21 #22 (+ #7 #8 #9 đã có)", cao]
+        - ["11. Viewer", "(xem đề xuất)", "—"]
+        - ["12. Test", "(xem lỗ hổng phủ test)", "—"]
+
+  - md: |
+      ## Lỗi nổi bật
+      - **#21 (cao):** `/code/strata.db-wal` trả 200, 2 MB nội dung DB; server nghe cả IP Tailscale. Bộ lọc là danh sách cấm, `-wal/-shm`, `.env`, khoá riêng đều lọt. Đã kiểm lại bằng curl.
+      - **#9 (cao, đã có):** service thật chạy `--host 127.0.0.1,100.107.55.40` nên kiểm Host bị bỏ hẳn.
+      - **#37 (cao):** parent vòng lọt `validate`, `c4 context --object` treo vô hạn.
+      - **#25 (cao):** hook chặn vault không bao giờ kích hoạt với `general-purpose`, vòng được bằng glob Bash; fail-open khi JSON hỏng.
+      - **#32 (trung):** `db.set_item` cho mọi chuyển trạng thái, coder qua MCP đưa task `rejected` về `done`.
+      - **#33 (trung):** một dòng UTF-8 hỏng làm sập MCP server.
+
+  - table:
+      head: [Đề xuất, Nhóm, Công, Ưu tiên]
+      rows:
+        - ["Tạo định nghĩa agent `agent/agents/<vai>.md` (model, tools allowlist; reviewer chỉ đọc) thay cho lời dặn trong prompt", "1, 3", M, cao]
+        - ["Lọc file phục vụ bằng danh sách đuôi cho phép, một helper chung cho /code và /docs", "10", S, cao]
+        - ["`import_yaml` chạy `check` và dừng khi lỗi (`--force` để bỏ qua); kiểm vòng parent", "8", S, cao]
+        - ["Máy trạng thái item + điều kiện `WHERE status=?` (gộp với task cải tiến item)", "5", M, cao]
+        - ["`item list/show/edit` CLI để agent khỏi curl", "2, 5", S, trung]
+        - ["Trigger chặn UPDATE/DELETE trên `audit`; thống nhất actor `cli` vs `main`", "5", S, trung]
+        - ["CSP + `sandbox` cho iframe doc HTML; mermaid `securityLevel: strict`", "10, 11", M, trung]
+        - ["Dừng poll khi tab ẩn, giãn chu kỳ, autoscan có khoảng tối thiểu", "11", S, trung]
+        - ["Cảnh báo khoá lạ trong block; validate `caption`", "9", S, trung]
+        - ["Dọn link C4 mồ côi khi import; id connection ổn định", "8", M, trung]
+        - ["Snippet tìm kiếm hiện chữ gốc (không bỏ dấu); FTS external-content", "7", M, thấp]
+        - ["Một file tokens.css chung; iframe /c4 theo theme khi đổi", "11", M, thấp]
+        - ["Xoá `viewer/workspace.html` (không route nào dùng)", "11", S, thấp]
+        - ["MCP: `structuredContent`, giới hạn độ dài dòng, `additionalProperties:false`", "6", S, thấp]
+
+  - md: |
+      ## Lỗ hổng phủ test
+      Không có test cho: vòng/parent treo trong C4; section null; id connection/flow/step trùng; import xoá object còn được flow/link tham chiếu; `c4_link` sau reimport; `load_doc` thiếu `blocks`; JS viewer (chỉ có grep "không chèn HTML"); đồng thời/WAL.
+
+      ## Vai trò không phải ranh giới bảo mật
+      Ai chạy được `strata.py` hay mở được file DB là `main`. Vai chỉ giữ agent làm đúng phần mình, không chống kẻ xấu. Đã ghi vào quyết định của task MCP.
+
+  - question:
+      q: "Sửa ~/.claude/settings.json (#31: allow sai tên, rác, model: opus) — ai làm?"
+      options: [{label: "User tự sửa", note: "file quyền của máy, agent không tự đổi"}, {label: Agent sửa}]
+      recommend: User tự sửa
