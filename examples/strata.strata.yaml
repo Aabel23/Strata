@@ -61,6 +61,21 @@ objects:
   - {id: f_svc_search, type: function, parent: service, name: search, status: future, links: [strata/service.py], description: "THIẾT KẾ: FTS5 BM25 + lọc cột project, src; dùng chung CLI search và /api/search"}
   - {id: f_svc_perm, type: function, parent: service, name: check_perm, status: future, links: [strata/service.py], description: "THIẾT KẾ: bảng quyền: main = tất cả; coder = đổi status mọi task + thêm issue; reviewer = thêm issue"}
 
+  # Lộ trình theo phase (decision 33)
+  - {id: plan_yaml, type: store, parent: repo, name: "Roadmap YAML (docs/plan)", links: [docs/plan], description: "THIẾT KẾ: <docs_dir>/plan/*.yaml, một file mỗi major version; phase gồm goal, level, blocks, criteria; agent soạn, CLI import"}
+  - {id: roadmapmod, type: component, parent: cli, name: roadmap, links: [strata/roadmap.py], responsibilities: ["Tạo roadmap từ template 5 phase (skeleton, demo, hardened, staging, release)", "Import và validate phase, block C4, criteria", "Tính coverage và cho gate qua khi đủ điều kiện"], state: stateless, description: "Lộ trình dài hạn theo phase: import, check, gate; template và block là thiết kế mới"}
+  - {id: f_rm_template, type: function, parent: roadmapmod, name: "roadmap init --template", status: future, links: [strata/roadmap.py], description: "THIẾT KẾ: ghi khung 5 phase dùng chung vào docs/plan, sửa được theo project"}
+  - {id: f_rm_import, type: function, parent: roadmapmod, name: import_plan, links: [strata/roadmap.py], description: "Nạp roadmap YAML vào DB (hiện đọc plan.json), upsert phase"}
+  - {id: f_rm_validate, type: function, parent: roadmapmod, name: validate_phases, status: future, links: [strata/roadmap.py], description: "THIẾT KẾ: level hợp lệ, intent build|extend|harden|encrypt, gate khai báo, block trỏ object C4 có thật"}
+  - {id: f_rm_blocks, type: function, parent: roadmapmod, name: link_blocks, status: future, links: [strata/roadmap.py], description: "THIẾT KẾ: ghi phase_block (phase, object C4, intent), tạo task cho mỗi block của phase hiện tại, gắn c4_link"}
+  - {id: f_rm_check, type: function, parent: roadmapmod, name: check, links: [strata/roadmap.py], description: "Đếm step xong, criteria đã xác nhận, task của block xong; ra coverage mỗi phase"}
+  - {id: f_rm_confirm, type: function, parent: roadmapmod, name: confirm_criterion, status: future, links: [strata/roadmap.py], description: "THIẾT KẾ: đánh dấu criterion đã xác nhận bởi user (qua main), ghi audit"}
+  - {id: f_rm_gate, type: function, parent: roadmapmod, name: gate_pass, links: [strata/roadmap.py], description: "Gate cuối phase: chỉ qua khi step done + criteria confirmed + task của block done; thiếu thì từ chối"}
+  - {id: f_rm_api, type: function, parent: roadmapmod, name: api, links: [strata/roadmap.py], description: "Dữ liệu /api/roadmap: phase, block, criteria, coverage"}
+  - {id: f_svc_phase, type: function, parent: service, name: resolve_phase, status: future, links: [strata/service.py], description: "THIẾT KẾ: item.phase; bug mặc định phase hiện tại; ngoài phase hiện tại thì gắn cờ ngoài lộ trình, không chặn"}
+  - {id: rview, type: component, parent: viewer, name: "tab Lộ trình", links: [viewer/roadmap.js], responsibilities: ["Thẻ phase: goal, level, block C4, criteria", "Hiện coverage và trạng thái gate", "Cờ ngoài lộ trình trên item"], description: Trang Lộ trình trong app shell}
+  - {id: f_rv_cards, type: function, parent: rview, name: render phase cards, links: [viewer/roadmap.js], description: "Vẽ thẻ phase với block, criteria, coverage"}
+
 interfaces:
   - {id: i_import, object: f_import, kind: function, name: import_yaml, signature: "import_yaml(c, path, project) -> dict counts", purpose: Thay model của project bằng YAML, errors: [ValueError khi validate có lỗi]}
   - {id: i_api, object: f_get, kind: http, name: /api/c4, signature: "GET /api/c4?project=P", output: "{meta, objects, connections, flows, issues, links, open_issues}", errors: [403 Host lạ, 404 không có model]}
@@ -69,6 +84,8 @@ interfaces:
   - {id: i_svc_search, object: f_svc_search, kind: function, name: search, signature: "search(c, role, q, project=None, src=None, limit=20) -> list", purpose: "FTS5 BM25, lọc cột project/src", output: "[{src, id, project, title, snippet, rank}]"}
   - {id: i_mcp_rec, object: f_mcp_rec, kind: function, name: add_decision (MCP tool), signature: "tools/call add_decision {title, context, decision, consequences, rejected, supersedes}", errors: [PermissionError]}
   - {id: i_mcp_search, object: f_mcp_search, kind: function, name: search (MCP tool), signature: "tools/call search {q, project, src, limit}"}
+  - {id: i_rm_api, object: f_rm_api, kind: function, name: roadmap api, signature: "api(c, project, roadmap=None) -> dict", output: "{phases:[{goal, level, blocks, criteria, coverage, gate}]}", purpose: "Nguồn cho GET /api/roadmap"}
+  - {id: i_rm_gate, object: f_rm_gate, kind: function, name: gate_pass, signature: "gate_pass(c, project, roadmap, gate, actor, evidence=None)", errors: [ValueError khi chưa đủ điều kiện]}
 
 connections:
   - {id: u_browse, from: user, to: viewer, name: Mở trang, technology: trình duyệt}
@@ -118,6 +135,34 @@ connections:
   - {id: cs_set_item, from: f_main, to: f_svc_set_item, name: set_item, kind: call, technology: in-process, status: future}
   - {id: cs_set_dec, from: f_main, to: f_svc_set_dec, name: set_decision_status, kind: call, technology: in-process, status: future}
   - {id: svc_db, from: service, to: sqlite, name: Ghi/đọc, technology: sqlite3, status: future}
+
+  # Lộ trình theo phase
+  - {id: a_rm_tpl, from: agent, to: f_rm_template, name: "roadmap init --template", kind: call, technology: shell, status: future}
+  - {id: rm_tpl_w, from: f_rm_template, to: plan_yaml, name: Ghi khung 5 phase, kind: call, technology: file, status: future}
+  - {id: a_plan_edit, from: agent, to: plan_yaml, name: Sửa YAML theo project, technology: file, status: future}
+  - {id: a_rm_import, from: agent, to: f_rm_import, name: "roadmap import FILE", kind: call, technology: shell}
+  - {id: rm_imp_load, from: f_rm_import, to: plan_yaml, name: Đọc roadmap YAML, kind: call, technology: PyYAML, status: future}
+  - {id: rm_imp_val, from: f_rm_import, to: f_rm_validate, name: validate_phases, kind: call, technology: in-process, status: future}
+  - {id: rm_val_c4, from: f_rm_validate, to: f_read, name: Kiểm object C4 có thật, kind: call, technology: in-process, status: future}
+  - {id: rm_imp_blk, from: f_rm_import, to: f_rm_blocks, name: link_blocks, kind: call, technology: in-process, status: future}
+  - {id: rm_blk_db, from: f_rm_blocks, to: sqlite, name: "INSERT phase, phase_block, c4_link", kind: call, technology: sqlite3 transaction, status: future}
+  - {id: rm_blk_task, from: f_rm_blocks, to: f_svc_add_item, name: "add_item cho từng block", kind: call, technology: in-process, status: future}
+  - {id: a_cli_set, from: agent, to: f_main, name: "set TASK --status", kind: call, technology: shell, status: future}
+  - {id: a_cli_add, from: agent, to: f_main, name: "add issue/task", kind: call, technology: shell, status: future}
+  - {id: svc_phase, from: f_svc_add_item, to: f_svc_phase, name: resolve_phase, kind: call, technology: in-process, status: future}
+  - {id: u_confirm, from: agent, to: user, name: Đưa criteria cho user xác nhận, technology: chat, status: future}
+  - {id: a_cli_confirm, from: agent, to: f_main, name: "roadmap confirm CRITERION", kind: call, technology: shell, status: future}
+  - {id: cs_confirm, from: f_main, to: f_rm_confirm, name: confirm_criterion, kind: call, technology: in-process, status: future}
+  - {id: rm_conf_db, from: f_rm_confirm, to: sqlite, name: "UPDATE criterion + audit", kind: call, technology: sqlite3, status: future}
+  - {id: a_cli_gate, from: agent, to: f_main, name: "roadmap gate pass", kind: call, technology: shell}
+  - {id: cs_gate, from: f_main, to: f_rm_gate, name: gate_pass, kind: call, technology: in-process, interface: i_rm_gate}
+  - {id: rm_gate_chk, from: f_rm_gate, to: f_rm_check, name: check, kind: call, technology: in-process}
+  - {id: rm_chk_db, from: f_rm_check, to: sqlite, name: "SELECT step, criterion, item theo block", kind: call, technology: sqlite3}
+  - {id: rm_gate_db, from: f_rm_gate, to: sqlite, name: "Ghi gate, sang phase kế", kind: call, technology: sqlite3}
+  - {id: u_roadmap, from: user, to: f_rv_cards, name: "Mở tab Lộ trình", technology: UI, status: future}
+  - {id: rv_api, from: f_rv_cards, to: f_get, name: fetch /api/roadmap, kind: network, technology: HTTP, status: future}
+  - {id: g_rm, from: f_get, to: f_rm_api, name: api, kind: call, technology: in-process, interface: i_rm_api, status: future}
+  - {id: rm_api_chk, from: f_rm_api, to: f_rm_check, name: check, kind: call, technology: in-process, status: future}
 
 flows:
   - id: import_map
@@ -181,3 +226,67 @@ flows:
       - {connection: svc_fts, reverse: true, text: hàng đã xếp hạng}
       - {connection: ms_svc, reverse: true, text: "danh sách kết quả"}
       - {connection: a_mcp_search, reverse: true, text: kết quả tool}
+  - id: phase_roadmap
+    name: Định hướng theo phase
+    steps:
+      - {connection: a_rm_tpl, text: "main dựng roadmap từ template"}
+      - {connection: rm_tpl_w, text: "ghi khung 5 phase vào docs/plan"}
+      - {connection: rm_tpl_w, reverse: true}
+      - {connection: a_rm_tpl, reverse: true, text: khung sẵn sàng}
+      - {connection: a_plan_edit, text: "sửa goal, level, block C4, criteria"}
+      - {connection: a_plan_edit, reverse: true}
+      - {connection: a_rm_import, text: nạp roadmap}
+      - {connection: rm_imp_load, text: đọc YAML}
+      - {connection: rm_imp_load, reverse: true}
+      - {connection: rm_imp_val}
+      - {connection: rm_val_c4, text: "block phải trỏ object C4 có thật"}
+      - {connection: rm_val_c4, reverse: true}
+      - {connection: rm_imp_val, reverse: true, text: "hợp lệ, gate đã khai báo"}
+      - {connection: rm_imp_blk}
+      - {connection: rm_blk_db, text: "lưu phase, block, liên kết C4"}
+      - {connection: rm_blk_db, reverse: true}
+      - {connection: rm_blk_task, text: "tạo task cho mỗi block của phase hiện tại"}
+      - {connection: rm_blk_task, reverse: true}
+      - {connection: rm_imp_blk, reverse: true}
+      - {connection: a_rm_import, reverse: true, text: "in số phase, số task"}
+      - {connection: a_cli_set, text: "coder làm xong, đặt task done; reviewer duyệt"}
+      - {connection: cs_set_item}
+      - {at: f_svc_set_item, text: "coder đổi status task; reviewer thêm issue nếu có lỗi"}
+      - {connection: cs_set_item, reverse: true}
+      - {connection: a_cli_set, reverse: true}
+      - {connection: a_cli_add, text: "add issue/task mới"}
+      - {connection: cs_add_item}
+      - {connection: svc_phase, text: "xác định phase của item"}
+      - {at: f_svc_phase, text: "bug: phase hiện tại; ngoài phase hiện tại: gắn cờ ngoài lộ trình, không chặn"}
+      - {connection: svc_phase, reverse: true}
+      - {connection: cs_add_item, reverse: true}
+      - {connection: a_cli_add, reverse: true, text: "in id, cờ ngoài lộ trình nếu có"}
+      - {connection: u_confirm, text: "main đưa criteria cần xác nhận"}
+      - {connection: u_confirm, reverse: true, text: "user xác nhận từng criterion"}
+      - {connection: a_cli_confirm, text: ghi xác nhận}
+      - {connection: cs_confirm}
+      - {connection: rm_conf_db, text: cập nhật criterion kèm audit}
+      - {connection: rm_conf_db, reverse: true}
+      - {connection: cs_confirm, reverse: true}
+      - {connection: a_cli_confirm, reverse: true}
+      - {connection: a_cli_gate, text: "main xin qua gate cuối phase"}
+      - {connection: cs_gate, interface: i_rm_gate}
+      - {connection: rm_gate_chk, text: "step done, criteria confirmed, task block done?"}
+      - {connection: rm_chk_db}
+      - {connection: rm_chk_db, reverse: true}
+      - {connection: rm_gate_chk, reverse: true, text: coverage}
+      - {at: f_rm_gate, text: "thiếu một điều kiện thì từ chối, giữ phase"}
+      - {connection: rm_gate_db, text: "ghi gate pass, chuyển phase kế"}
+      - {connection: rm_gate_db, reverse: true}
+      - {connection: cs_gate, reverse: true}
+      - {connection: a_cli_gate, reverse: true, text: "phase kế thành hiện tại"}
+      - {connection: u_confirm, text: báo user gate đã qua}
+      - {connection: u_roadmap, text: "xem tiến độ phase"}
+      - {connection: rv_api, text: tải roadmap}
+      - {at: f_get, text: "kiểm Host, định tuyến /api/roadmap"}
+      - {connection: g_rm, interface: i_rm_api}
+      - {connection: rm_api_chk, text: tính coverage}
+      - {connection: rm_api_chk, reverse: true}
+      - {connection: g_rm, reverse: true}
+      - {connection: rv_api, reverse: true, text: JSON phase}
+      - {at: f_rv_cards, text: "vẽ thẻ phase: block, criteria, coverage"}
