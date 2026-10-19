@@ -1,0 +1,86 @@
+<title>Strata Task Board</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: ready strip on top, 5-column status board left, detail pane right (stacks on phone). Tokens copied from viewer/page.css. */
+:root{--bg-0:#09080c;--bg:#100e14;--card:#15131a;--raised:#1b1922;--sel:#241f2b;--fg:#ebe5db;--muted:#a59d93;--faint:#7a7480;--line:#2a2630;
+--accent:#d3a67c;--accent-soft:rgba(211,166,124,.14);--st-todo:#a59d93;--st-doing:#d9a24e;--st-done:#6fa595;--st-block:#c06464;--st-info:#8a9bc4;--st-review:#b08fc4;
+--display:"Cormorant Garamond",Georgia,serif;--body:"Segoe UI",Inter,system-ui,sans-serif;--mono:"JetBrains Mono",ui-monospace,Menlo,monospace;color-scheme:dark}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg-0:#f6f2e8;--bg:#fbfaf5;--card:#fff;--raised:#fff;--sel:#e9f2ef;--fg:#294342;--muted:#55625f;--faint:#677371;--line:#e6dec9;--accent:#07807d;--accent-soft:rgba(7,128,125,.1);--st-todo:#55625f;--st-doing:#a8701c;--st-done:#15806a;--st-block:#cd3c35;--st-info:#2d75b2;--st-review:#7b4fa0;color-scheme:light}}
+:root[data-theme="light"]{--bg-0:#f6f2e8;--bg:#fbfaf5;--card:#fff;--raised:#fff;--sel:#e9f2ef;--fg:#294342;--muted:#55625f;--faint:#677371;--line:#e6dec9;--accent:#07807d;--accent-soft:rgba(7,128,125,.1);--st-todo:#55625f;--st-doing:#a8701c;--st-done:#15806a;--st-block:#cd3c35;--st-info:#2d75b2;--st-review:#7b4fa0;color-scheme:light}
+body{background:var(--bg-0);color:var(--fg);font-family:var(--body);font-size:14px;line-height:1.5;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px}
+h1{font-family:var(--display);font-size:2rem;font-weight:600;margin:0;text-wrap:balance}
+h2{font-family:var(--display);font-size:1.3rem;margin:0}
+.mono{font-family:var(--mono);font-size:.78rem;color:var(--faint)}
+.top{display:flex;flex-wrap:wrap;gap:12px;align-items:baseline;justify-content:space-between;margin-bottom:14px}
+.filters{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--line);border-radius:999px;padding:2px 10px;font-size:.8rem;color:var(--muted);background:var(--card)}
+.chip.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.ready{border:1px solid var(--accent);background:var(--accent-soft);border-radius:8px;padding:10px 12px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:16px}
+.ready b{font-family:var(--display);font-size:1.1rem;color:var(--accent);margin-right:6px}
+.main{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px}
+@media (max-width:900px){.main{grid-template-columns:1fr}}
+.board{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:10px;overflow-x:auto}
+.col h3{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px;display:flex;gap:6px;align-items:center}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.cards{display:flex;flex-direction:column;gap:8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;gap:4px}
+.card.sel{background:var(--sel);border-color:var(--accent)}
+.card .t{font-size:.86rem}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.tag{font-family:var(--mono);font-size:.68rem;padding:0 6px;border-radius:3px;border:1px solid var(--line);color:var(--muted)}
+.tag.block{color:var(--st-block);border-color:var(--st-block)}
+.tag.stale{color:var(--st-doing);border-color:var(--st-doing)}
+.detail{background:var(--raised);border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.detail h4{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin:0 0 4px}
+ul{margin:0;padding-left:18px}
+.ac li{list-style:none;margin-left:-18px;display:flex;gap:6px}
+pre{font-family:var(--mono);font-size:.76rem;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:6px 8px;overflow-x:auto;margin:0}
+.tl{display:flex;flex-direction:column;gap:4px;font-size:.8rem}
+.tl div{display:grid;grid-template-columns:86px 64px 1fr;gap:6px;font-variant-numeric:tabular-nums}
+</style>
+
+<div class="top">
+  <div><span class="mono">strata › Việc</span><h1>Bảng việc</h1></div>
+  <div class="filters"><span class="chip on">project: strata</span><span class="chip on">task</span><span class="chip">issue</span><span class="chip">owner: coder</span><span class="chip">p: high</span><span class="chip">🔍 tìm…</span></div>
+</div>
+
+<div class="ready"><b>Sẵn sàng · 2</b>
+  <span class="chip">#44 Viewer bảng việc</span><span class="chip">#45 MCP tool đọc</span>
+  <span class="mono">· 1 đã duyệt nhưng bị chặn bởi #43</span></div>
+
+<div class="main">
+  <div class="board">
+    <div class="col"><h3><span class="dot" style="background:var(--st-todo)"></span>Đề xuất · 2</h3><div class="cards">
+      <div class="card"><span class="mono">#39 issue</span><span class="t">load_doc chấp nhận doc thiếu blocks</span><div class="row"><span class="tag">thấp</span><span class="tag">reviewer</span></div></div>
+      <div class="card"><span class="mono">#18</span><span class="t">Cải tiến tính năng task</span><div class="row"><span class="tag">high</span></div></div></div></div>
+    <div class="col"><h3><span class="dot" style="background:var(--st-info)"></span>Đã duyệt · 3</h3><div class="cards">
+      <div class="card"><span class="mono">#44</span><span class="t">Viewer bảng việc</span><div class="row"><span class="tag">high</span><span class="tag">AC 0/6</span></div></div>
+      <div class="card"><span class="mono">#46</span><span class="t">Import plan project1_app</span><div class="row"><span class="tag block">chặn bởi #43</span></div></div>
+      <div class="card"><span class="mono">#45</span><span class="t">MCP tool đọc</span><div class="row"><span class="tag">medium</span></div></div></div></div>
+    <div class="col"><h3><span class="dot" style="background:var(--st-doing)"></span>Đang làm · 1</h3><div class="cards">
+      <div class="card sel"><span class="mono">#43 · coder · 42 phút</span><span class="t">Mô hình item: spec, dep, máy trạng thái</span><div class="row"><span class="tag">high</span><span class="tag">AC 3/7</span></div></div></div></div>
+    <div class="col"><h3><span class="dot" style="background:var(--st-review)"></span>Chờ duyệt · 1</h3><div class="cards">
+      <div class="card"><span class="mono">#41 · vòng 1</span><span class="t">Sửa C4/blocks #37–#39</span><div class="row"><span class="tag">AC 6/6</span><span class="tag stale">spec đổi</span></div></div></div></div>
+    <div class="col"><h3><span class="dot" style="background:var(--st-done)"></span>Xong · 4</h3><div class="cards">
+      <div class="card"><span class="mono">#20</span><span class="t">Review cơ chế</span></div>
+      <div class="card"><span class="mono">#10</span><span class="t">DEFAULT_DB tương đối</span></div></div></div>
+  </div>
+
+  <aside class="detail">
+    <div><span class="mono">#43 task · doing · owner coder · claim 14:02</span><h2>Mô hình item: spec, dep, máy trạng thái</h2></div>
+    <div><h4>Mục tiêu</h4>Mỗi chuyển trạng thái đi qua một bảng luật, ghi đồng thời không đè nhau.</div>
+    <div><h4>Tiêu chí · 3/7</h4><ul class="ac">
+      <li>☑ WHEN hai claim cùng lúc THE hệ SHALL chỉ cho một thắng</li>
+      <li>☑ WHEN owner tự approve THE hệ SHALL từ chối</li>
+      <li>☑ WHEN done → todo THE hệ SHALL từ chối</li>
+      <li>☐ Migration giữ nguyên số dòng và kết quả tìm kiếm</li></ul></div>
+    <div><h4>Kiểm</h4><pre>/tmp/claude-1000/v/bin/python -m pytest -q</pre></div>
+    <div><h4>Phạm vi</h4><span class="mono">sửa: strata/db.py strata/service.py strata/schema.sql · cấm: viewer/**</span></div>
+    <div><h4>Phụ thuộc</h4><span class="mono">chặn: #44 #46 · cần: —</span></div>
+    <div><h4>Liên kết</h4><span class="mono">C4: strata.db, strata.service · decision #24 #25</span></div>
+    <div><h4>Lịch sử</h4><div class="tl">
+      <div><span class="mono">19/10 14:02</span><span>coder</span><span>approved → doing</span></div>
+      <div><span class="mono">19/10 13:40</span><span>main</span><span>proposed → approved</span></div>
+      <div><span class="mono">19/10 13:31</span><span>main</span><span>tạo</span></div></div></div>
+  </aside>
+</div>

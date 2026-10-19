@@ -1,0 +1,54 @@
+title: Việc (task/issue) thành công cụ làm việc
+summary: Mô hình item mới (spec JSON, phụ thuộc, trạng thái review, claim), lệnh CLI/MCP và bảng việc trên viewer. Chốt ngày 19/10/2026, decision 24–28.
+code: [strata/schema.sql, strata/db.py, strata/service.py, strata.py, strata/mcp.py, viewer/app.js]
+blocks:
+  - md: |
+      ## Vì sao
+      Item hiện chỉ có tiêu đề, nội dung, trạng thái tự do. `set_item` cho mọi chuyển trạng thái (#32), không có người nhận, phụ thuộc hay tiêu chí. Agent phải `curl` để đọc.
+  - table:
+      head: [Sản phẩm, Lấy, Không lấy]
+      rows:
+        - ["[beads](https://github.com/gastownhall/beads)", "`ready` = không còn blocker; claim nguyên tử", "Dolt, đồng bộ, federation"]
+        - ["[Backlog.md](https://github.com/MrLesk/Backlog.md)", "Tiêu chí dạng checklist trong task; mọi lệnh đọc có `--json`", "File là nguồn sự thật (lệch với SQLite)"]
+        - ["[claude-task-master](https://github.com/eyaltoledano/claude-task-master)", "`testStrategy` cạnh task; trạng thái `review`; `next`", "Gọi LLM trong công cụ; 36 tool MCP (~21k token)"]
+        - ["[Vibe Kanban](https://github.com/BloopAI/vibe-kanban)", "Cột review; mỗi lần thử một worktree", "Tự điều phối agent"]
+        - ["[Linear](https://linear.app/docs)", "Nhóm trạng thái cố định; ưu tiên số để sắp", "Cycle, estimate, team"]
+        - ["[Plane](https://github.com/makeplane/plane)", "Quan hệ blocks/blocked_by trong bảng riêng", "Module, cycle, workspace"]
+        - ["[GitHub Issues](https://docs.github.com/en/issues)", "`state_reason` (completed/not_planned) ≈ done/rejected", "Custom field tổng quát"]
+        - ["[Taskwarrior](https://taskwarrior.org/docs/)", "READY/BLOCKED tính khi đọc", "ID số đổi theo ngữ cảnh"]
+  - statemachine:
+      caption: Chuyển trạng thái hợp lệ (một bảng trong service, dùng chung CLI và MCP)
+      initial: proposed
+      states:
+        - {id: proposed, text: Đề xuất, tone: muted}
+        - {id: approved, text: Đã duyệt}
+        - {id: open, text: Mở (issue)}
+        - {id: doing, text: Đang làm, tone: warn}
+        - {id: review, text: Chờ duyệt, tone: warn}
+        - {id: done, text: Xong, tone: ok}
+        - {id: rejected, text: Bỏ, tone: bad}
+      transitions:
+        - [proposed, approved, "main duyệt"]
+        - [approved, doing, "claim: dep xong, không blocked"]
+        - [doing, review, "owner nộp + bằng chứng"]
+        - [review, done, "main, ≠ owner, version không đổi"]
+        - [review, doing, "làm lại + lý do"]
+        - [doing, approved, "release (main)"]
+        - [open, doing, claim]
+        - [open, done, "main + lý do"]
+        - [proposed, rejected, "lý do"]
+        - [rejected, proposed, "main mở lại"]
+  - md: |
+      ## Dữ liệu
+      - Cột mới `claimed_at`, `spec` (JSON: goal, acceptance, verify, scope{touch,forbid}, open_questions; bước roadmap thêm roadmap, phase, step_key, proof); cột `scope` cũ gộp vào `spec`.
+      - Bảng `item_dep(item_id, depends_on)`, kiểm vòng trong cùng transaction.
+      - Mọi chuyển trạng thái: `UPDATE … WHERE status=? AND version=?`. Lịch sử và số vòng làm lại lấy từ `audit`.
+      - Migration: sao lưu DB, dựng lại bảng `item` (CHECK có thêm `review`, kind thêm `step`/`gate`), dựng lại trigger FTS, `integrity_check`.
+
+      ## Lệnh
+      `item list|show|edit|ready|claim|submit|approve|reject|release`, `item dep add|rm`; MCP cùng tập, lọc theo vai.
+
+      ## Giao diện
+      ![Bảng việc](task-board-mockup.png)
+
+      Dải **Sẵn sàng** ở trên; cột theo trạng thái; chi tiết bên phải: mục tiêu, tiêu chí, lệnh kiểm, phạm vi, phụ thuộc hai chiều, liên kết C4/decision, lịch sử. Bản HTML mẫu: `design/task-board-mockup.html`. Chỉ GET, không kéo-thả.
