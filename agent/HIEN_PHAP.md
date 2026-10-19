@@ -23,7 +23,7 @@
 | 2. Sơ đồ | chat chính giao agent | Sonnet medium | object + flow trong C4 YAML của project (`docs/AGENT_C4.md`) | user |
 | 3. Research | researcher song song (skill `research-stage`) | Sonnet medium | note MD trong vault `research/<project>/` (chat chính ghi) + câu hỏi cần quyết | user chốt từng câu |
 | 3b. Mổ xẻ (chỉ khi user gọi) | agent REA hoặc đọc repo mở | Opus low | cơ chế + bản viết lại theo hệ của ta | user |
-| 4. Task | tasker | Sonnet low | danh sách task: object/file liên quan, tiêu chí đạt kiểm được, thứ tự, phụ thuộc | user duyệt → chat chính ghi `item add --kind task` |
+| 4. Task | tasker | Sonnet low | danh sách task: object/file liên quan, tiêu chí đạt kiểm được, thứ tự, phụ thuộc | user duyệt → chat chính ghi `item add --kind task`. Tasker do chat chính hoặc agent general-purpose làm theo định dạng ticket, không có file agent |
 | 5. Thực thi | coder | Sonnet medium | code bước nhỏ, test ngay theo tiêu chí | — |
 | 6. Review | reviewer | Sonnet medium | (a) tiến độ: task đạt tiêu chí chưa, diff có chạm ngoài phạm vi không; (b) bảo mật: skill `security-audit` guidance mode, chỉ trên diff của luồng | user duyệt → lỗi thành `item add --kind issue`, đóng luồng |
 
@@ -47,7 +47,7 @@ Strata (`/home/abel/project/tools/strata`, DB `/home/abel/project/tools/strata/s
 - **Research (bước 3):** note Markdown trong vault `research/<project>/`, chỉ chat chính ghi qua Obsidian MCP; đặt tên + frontmatter theo skill `research-stage` để tra được bằng `search_notes`/tag. Không ghi research vào Strata.
 - **Tài liệu đã chốt (sau bước 3):** YAML chỉ nội dung theo `docs/architect/doc-format.yaml`, đặt trong `docs_dir` của project (`architect/`, `plan/`, `review/`). Không viết HTML/CSS/JS cho tài liệu.
 - **Quyết định:** user chốt xong thì `decision add` (kèm phương án đã loại). Note research chỉ giữ câu hỏi và phương án.
-- **Task (bước 4) / lỗi (bước 6):** `item add --kind task|issue`, gắn object C4 bằng `c4 link` khi có object tương ứng. Coder đổi trạng thái qua chat chính (`item set`).
+- **Task (bước 4) / lỗi (bước 6):** `item add --kind task|issue`, gắn object C4 bằng `c4 link` khi có object tương ứng. Coder tự nhận/nộp qua MCP/CLI (`item claim`/`item submit`); chỉ chat chính đặt `done`.
 - **Ngoại lệ:** `project1_app` giữ `documentation/plan/plan.json` tới hết luồng đang chạy; luồng mới mới dùng Strata.
 - RAM.md và OPEN.md vẫn ở vault tới khi Strata thay được. Coder/reviewer nhận gói `task context` (khi có) thay vì đọc vault.
 

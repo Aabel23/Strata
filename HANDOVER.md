@@ -1,4 +1,4 @@
-# Bàn giao Strata (18/10/2026)
+# Bàn giao Strata (19/10/2026)
 
 ## Strata là gì
 
@@ -17,7 +17,7 @@ python3 -m venv /tmp/claude-1000/v && /tmp/claude-1000/v/bin/pip install pytest 
 /tmp/claude-1000/v/bin/python -m pytest -q        # chạy để biết số pass/fail hiện tại
 ```
 
-Lúc bàn giao, server đang chạy nền trên DB mẫu. Tắt bằng cách kill PID đang giữ cổng 8740 (`ss -ltnp 'sport = :8740'`). Sau khi sửa CSS/JS, bấm Ctrl+Shift+R trong trình duyệt. Sửa Python thì phải khởi động lại server.
+Tắt server bằng cách kill PID đang giữ cổng 8740 (`ss -ltnp 'sport = :8740'`). Sau khi sửa CSS/JS, bấm Ctrl+Shift+R trong trình duyệt. Sửa Python thì phải khởi động lại server.
 
 ## Lệnh CLI chính
 
