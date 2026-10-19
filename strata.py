@@ -15,7 +15,9 @@
   strata.py search Q [--project P --src item|decision|page|doc --limit N]
   strata.py decision add --project P --title T --context C --decision D --consequences Q --rejected R [--supersedes N] | set N --status S
   strata.py mcp --role main|coder|reviewer [--db]   MCP server on stdio
-  strata.py item add --project P --kind task|issue --title T [--body --priority --status] | set ID [--status --priority]
+  strata.py item add --project P --kind task|issue|step|gate --title T [--body --priority --status --spec FILE|-] | set ID [--status --priority]
+  strata.py item list [--project --kind --status --owner --ready] | show ID | edit ID [--title --body --spec FILE|- --priority] | ready [--project]
+  strata.py item claim ID --as NAME | submit ID --note N [--as NAME] | approve ID [--note --as] | reject ID --note N | release ID | dep add|rm ID DEP   (all: --json)
 """
 import argparse, json, pathlib, sqlite3, sys, threading, webbrowser
 from strata import blocks, c4, db, service
@@ -44,6 +46,41 @@ def cmd_doc_validate(a):
     for e in errs: print("ERROR", e, file=sys.stderr)
     if not errs: print("ok")
     return 1 if errs else 0
+
+
+def _spec_arg(f):
+    if f is None: return None
+    try: return json.loads(sys.stdin.read() if f == "-" else pathlib.Path(f).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e: raise ValueError(f"--spec: {e}") from None
+
+
+def _item_line(i): return f"#{i['id']} {i['project']} {i['kind']} [{i['status']}] {i['priority'] or '-'} {i['owner'] or '-'}  {i['title']}"
+
+
+def cmd_item(c, a):
+    out = lambda v, text: print(json.dumps(v, ensure_ascii=False) if a.json else text)
+    act, who = a.action, getattr(a, "as_", None) or "main"
+    if act == "add":
+        i = service.add_item(c, "main", a.project, a.kind, a.title, a.body, a.priority, a.status, _spec_arg(a.spec)); out({"id": i}, f"ok: item {i}")
+    elif act == "set":
+        service.set_item(c, "main", a.id, a.status, a.priority); out({"ok": True}, "ok")
+    elif act in ("list", "ready"):
+        rows = service.list_items(c, a.project, getattr(a, "kind", None), getattr(a, "status", None), getattr(a, "owner", None), act == "ready" or a.ready)
+        out(rows, "\n".join(map(_item_line, rows)))
+    elif act == "show":
+        i = service.get_item(c, a.id)
+        out(i, _item_line(i) + "".join(f"\n  depends on #{d['id']} [{d['status']}] {d['title']}" for d in i["depends_on"])
+            + "".join(f"\n  blocks #{d['id']} [{d['status']}] {d['title']}" for d in i["blocks"]) + (f"\n{i['body']}" if i["body"] else "")
+            + (f"\nspec: {json.dumps(i['spec'], ensure_ascii=False, indent=2)}" if i["spec"] else ""))
+    elif act == "edit":
+        service.edit_item(c, "main", a.id, a.title, a.body, _spec_arg(a.spec), a.priority); out({"ok": True}, "ok")
+    elif act == "dep":
+        ch = service.dep(c, "main", a.id, a.dep, a.op == "add"); out({"changed": ch}, "ok" if ch else "no change")
+    else:  # status verbs
+        cur = c.execute("SELECT status FROM item WHERE id=?", (a.id,)).fetchone()
+        if not cur: raise KeyError(f"no item {a.id}")
+        to = {"claim": "doing", "submit": "review", "reject": "rejected", "release": "approved"}.get(act) or ("done" if cur["status"] == "review" else "approved")
+        service.transition(c, "main", a.id, to, who, getattr(a, "note", None)); out({"ok": True, "status": to}, f"ok: {to}")
 
 
 def cmd_write(a):
@@ -75,16 +112,14 @@ def cmd_write(a):
             print("ok")
         elif a.cmd == "doc":
             db.set_doc(c, a.project, a.path, a.feature, a.status, a.ord); print("ok")
-        elif a.action == "add":
-            print("ok: item", service.add_item(c, "main", a.project, a.kind, a.title, a.body, a.priority, a.status))
         else:
-            service.set_item(c, "main", a.id, a.status, a.priority); print("ok")
+            cmd_item(c, a)
     except (sqlite3.DatabaseError, ValueError, KeyError, PermissionError) as e:
         print("ERROR", e.args[0] if isinstance(e, KeyError) else e); return 1
     return 0
 
 
-ITEM_STATUS = ["proposed", "approved", "open", "doing", "done", "rejected"]
+ITEM_STATUS = ["proposed", "approved", "open", "doing", "review", "done", "rejected"]
 
 
 def main(argv=None):
@@ -111,9 +146,17 @@ def main(argv=None):
     group("project", {"add": [(["id"], {}), (["--name"], req), (["--root"], {}), (["--docs-dir"], {}), (["--parent"], {}), (["--description"], {})], "list": []})
     group("doc", {"validate": [(["file"], {})], "scan": [(["--project"], req)],
                   "set": [(["--project"], req), (["path"], {}), (["--feature"], {}), (["--status"], {"choices": ["current", "draft", "outdated", "missing"]}), (["--ord"], {"type": int})]})
-    group("item", {"add": [(["--project"], req), (["--kind"], {"required": True, "choices": ["task", "issue"]}), (["--title"], req), (["--body"], {}),
-                           (["--priority"], {}), (["--status"], {"choices": ITEM_STATUS, "default": "open"})],
-                   "set": [(["id"], {"type": int}), (["--status"], {"choices": ITEM_STATUS}), (["--priority"], {})]})
+    idp, asp, notep = (["id"], {"type": int}), (["--as"], {"dest": "as_"}), (["--note"], {})
+    js = (["--json"], {"action": "store_true"})
+    filt = [(["--project"], {}), (["--kind"], {}), (["--status"], {}), (["--owner"], {})]
+    group("item", {"add": [(["--project"], req), (["--kind"], {"required": True, "choices": ["task", "issue", "step", "gate"]}), (["--title"], req), (["--body"], {}),
+                           (["--priority"], {}), (["--status"], {"choices": ITEM_STATUS, "default": "open"}), (["--spec"], {}), js],
+                   "set": [idp, (["--status"], {"choices": ITEM_STATUS}), (["--priority"], {}), js],
+                   "list": [*filt, (["--ready"], {"action": "store_true"}), js], "ready": [(["--project"], {}), js], "show": [idp, js],
+                   "edit": [idp, (["--title"], {}), (["--body"], {}), (["--spec"], {}), (["--priority"], {}), js],
+                   "claim": [idp, (["--as"], {"dest": "as_", "required": True}), js], "submit": [idp, (["--note"], req), asp, js],
+                   "approve": [idp, notep, asp, js], "reject": [idp, (["--note"], req), js], "release": [idp, js],
+                   "dep": [(["op"], {"choices": ["add", "rm"]}), idp, (["dep"], {"type": int}), js]})
     p = sub.add_parser("search"); p.add_argument("q"); p.add_argument("--db"); p.add_argument("--project"); p.add_argument("--limit", type=int, default=30)
     p.add_argument("--src", choices=["item", "decision", "page", "doc"])
     group("decision", {"add": [(["--project"], req), (["--title"], req), (["--context"], req), (["--decision"], req), (["--consequences"], req),

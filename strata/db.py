@@ -19,12 +19,24 @@ def init(path=None):
         raise RuntimeError("table research is not empty: move rows to page(kind='research') first")
     rebuild = _migrate(c)
     c.executescript(SCHEMA.read_text())
+    _finish_item(c)
     if rebuild:  # copy rows from the old-CHECK table into the new one
         cols = ",".join(r["name"] for r in c.execute("PRAGMA table_info(c4_object_old)"))
         c.execute(f"INSERT INTO c4_object({cols}) SELECT {cols} FROM c4_object_old")
         c.execute("DROP TABLE c4_object_old")
     c.commit()
     return c
+
+def _finish_item(c):
+    """Copy item_old into the rebuilt item table (old `scope` text becomes spec.scope), reindex, integrity-check."""
+    if not c.execute("SELECT 1 FROM sqlite_master WHERE name='item_old'").fetchone(): return
+    cols = ",".join(r["name"] for r in c.execute("PRAGMA table_info(item_old)") if r["name"] != "scope")
+    c.execute("DELETE FROM search WHERE src='item'")  # item_ai refills it row by row
+    c.execute(f"INSERT INTO item({cols},spec) SELECT {cols}, CASE WHEN scope IS NULL THEN NULL "
+              "WHEN json_valid(scope) THEN json_object('scope',json(scope)) ELSE json_object('scope',scope) END FROM item_old")
+    c.execute("DROP TABLE item_old"); c.commit()
+    c.execute("PRAGMA foreign_keys=ON")
+    if (r := c.execute("PRAGMA integrity_check").fetchone()[0]) != "ok": raise RuntimeError(f"integrity_check: {r}")
 
 # columns added after a table was first created: (table, column, type)
 ADDED = [("c4_connection", "description", "TEXT"), ("c4_connection", "feature", "TEXT"), ("c4_connection", "interface", "TEXT"),
@@ -42,6 +54,10 @@ def _migrate(c):
     if t and "rejected_options" not in t["sql"]:  # old index body lacks rejected options: schema.sql recreates the trigger, reindex here
         c.execute("DROP TRIGGER decision_ai"); c.execute("DELETE FROM search WHERE src='decision'")
         c.execute("INSERT INTO search SELECT replace(replace(title,'đ','d'),'Đ','D'), replace(replace(trim(coalesce(context,'')||' '||coalesce(decision,'')||' '||coalesce(consequences,'')||' '||coalesce(rejected_options,'')),'đ','d'),'Đ','D'), 'decision', id, project FROM decision")
+    if "spec" not in [r["name"] for r in c.execute("PRAGMA table_info(item)")] and c.execute("SELECT 1 FROM sqlite_master WHERE name='item'").fetchone():
+        c.commit(); c.execute("PRAGMA foreign_keys=OFF")  # no-op inside a transaction, hence the commit
+        for t in ("item_ai", "item_au", "item_ad"): c.execute(f"DROP TRIGGER IF EXISTS {t}")
+        c.execute("ALTER TABLE item RENAME TO item_old")  # init's schema script makes the new table, _finish_item copies
     r = c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='c4_object'").fetchone()
     if r and "'function'" not in r["sql"]:
         c.execute("ALTER TABLE c4_object RENAME TO c4_object_old"); return True
@@ -88,11 +104,11 @@ def add_project(c, id, name, root=None, docs_dir=None, parent=None, description=
     c.execute("INSERT INTO project(id,name,description,root,docs_dir,parent) VALUES(:id,:name,:description,:root,:docs_dir,:parent)", r)
     audit(c, id, "project.add", id, None, r); c.commit()
 
-def add_item(c, project, kind, title, body=None, priority=None, status="open", role="cli"):
+def add_item(c, project, kind, title, body=None, priority=None, status="open", role="cli", spec=None):
     if not c.execute("SELECT 1 FROM project WHERE id=?", (project,)).fetchone(): raise KeyError(f"no project {project}")
     t = now()
-    cur = c.execute("INSERT INTO item(project,kind,title,body,status,priority,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                    (project, kind, title, body, status, priority, role, t, t))
+    cur = c.execute("INSERT INTO item(project,kind,title,body,status,priority,spec,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (project, kind, title, body, status, priority, None if spec is None else json.dumps(spec, ensure_ascii=False), role, t, t))
     audit(c, project, "item.add", f"item:{cur.lastrowid}", None, {"kind": kind, "title": title, "status": status}, role)
     c.commit(); return cur.lastrowid
 
