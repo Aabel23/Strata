@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "strata": {
+      "command": "python3",
+      "args": [
+        "/home/abel/project/tools/strata/strata.py",
+        "mcp",
+        "--role",
+        "main"
+      ]
+    },
+    "strata-coder": {
+      "command": "python3",
+      "args": [
+        "/home/abel/project/tools/strata/strata.py",
+        "mcp",
+        "--role",
+        "coder"
+      ]
+    },
+    "strata-reviewer": {
+      "command": "python3",
+      "args": [
+        "/home/abel/project/tools/strata/strata.py",
+        "mcp",
+        "--role",
+        "reviewer"
+      ]
+    }
+  }
+}
