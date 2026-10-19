@@ -1,0 +1,145 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Strata Lộ trình</title>
+<style>
+/* Layout: horizontal phase rail (arc at a glance) → one phase detail (two columns) → out-of-roadmap band → legend. Tokens from viewer/page.css; dark-first. */
+:root{--bg-0:#09080c;--bg:#100e14;--card:#15131a;--raised:#1b1922;--fg:#ebe5db;--muted:#a59d93;--faint:#7a7480;--line:#2a2630;
+--gold:#d3a67c;--gold-soft:rgba(211,166,124,.14);--doing:#6fb3b0;--todo:#5d5864;--bad:#c06464;--warn:#d9a24e;--done:#d3a67c;
+--display:"Cormorant Garamond","EB Garamond",Georgia,serif;--body:"Segoe UI",Inter,system-ui,sans-serif;--mono:"JetBrains Mono",ui-monospace,Menlo,monospace;color-scheme:dark}
+:root[data-theme="light"]{--bg-0:#f6f2e8;--bg:#fbfaf5;--card:#fff;--raised:#fff;--fg:#294342;--muted:#55625f;--faint:#677371;--line:#e6dec9;
+--gold:#936b0d;--gold-soft:rgba(147,107,13,.1);--doing:#07807d;--todo:#a7afac;--bad:#cd3c35;--warn:#a8701c;--done:#936b0d;color-scheme:light}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg-0:#f6f2e8;--bg:#fbfaf5;--card:#fff;--raised:#fff;--fg:#294342;--muted:#55625f;--faint:#677371;--line:#e6dec9;--gold:#936b0d;--gold-soft:rgba(147,107,13,.1);--doing:#07807d;--todo:#a7afac;--bad:#cd3c35;--warn:#a8701c;--done:#936b0d;color-scheme:light}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg-0);color:var(--fg);font:14px/1.55 var(--body);padding-block:24px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+.mono{font-family:var(--mono);font-size:.76rem;color:var(--faint)}
+h1{font-family:var(--display);font-weight:600;font-size:2.3rem;margin:0;text-wrap:balance}
+h2{font-family:var(--display);font-weight:600;font-size:1.55rem;margin:0}
+h3{font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin:0 0 8px;font-weight:600}
+.head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:end;gap:12px}
+.head p{margin:4px 0 0;color:var(--muted);max-width:62ch}
+.chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:999px;padding:1px 9px;font-size:.74rem;color:var(--muted);white-space:nowrap}
+.chip.lv{font-family:var(--mono);text-transform:lowercase}
+.chip.now{border-color:var(--gold);color:var(--gold);background:var(--gold-soft)}
+.chip.warn{border-color:var(--warn);color:var(--warn)}
+/* rail */
+.rail{position:relative;display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:0;overflow-x:auto;padding-bottom:4px}
+.ph{position:relative;display:flex;flex-direction:column;gap:6px;padding:0 12px 0 0;background:none;border:0;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.ph:focus-visible{outline:2px solid var(--gold);outline-offset:4px;border-radius:6px}
+.track{position:relative;height:28px;display:flex;align-items:center}
+.track::after{content:"";position:absolute;left:28px;right:0;top:50%;height:2px;background:var(--line)}
+.ph.done .track::after{background:var(--done)}
+.ph.cur .track::after{background:linear-gradient(90deg,var(--doing) 62%,var(--line) 62%)}
+.ph:last-child .track::after{display:none}
+.node{position:relative;z-index:1;width:22px;height:22px;border-radius:50%;border:2px dashed var(--todo);background:var(--bg-0);display:grid;place-items:center;font:600 .7rem var(--mono);color:var(--faint)}
+.ph.done .node{border:2px solid var(--done);background:var(--done);color:var(--bg-0)}
+.ph.cur .node{width:28px;height:28px;border:3px solid var(--doing);color:var(--doing)}
+.gate{position:absolute;right:4px;top:50%;width:11px;height:11px;transform:translate(0,-50%) rotate(45deg);border:2px solid var(--todo);background:var(--bg-0);z-index:1}
+.ph.done .gate{background:var(--done);border-color:var(--done)}
+.ph:last-child .gate{display:none}
+.ph .nm{font-family:var(--display);font-size:1.12rem;font-weight:600;line-height:1.2}
+.ph.cur .nm{color:var(--doing)}
+.ph.fut .nm{color:var(--muted)}
+.sum{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;font-size:.76rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.here{font:600 .66rem var(--mono);letter-spacing:.08em;color:var(--doing);text-transform:uppercase}
+/* detail */
+.detail{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:18px}
+.dtop{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;justify-content:space-between}
+.goal{margin:6px 0 0;color:var(--muted);max-width:70ch}
+.pbar{display:flex;align-items:center;gap:10px;min-width:220px;font-variant-numeric:tabular-nums}
+.bar{flex:1;height:6px;background:var(--line);border-radius:3px;overflow:hidden;display:flex}
+.bar i{display:block;height:100%}
+.bar .d{background:var(--done)} .bar .g{background:repeating-linear-gradient(135deg,var(--doing) 0 4px,transparent 4px 7px)}
+.cols{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:22px}
+@media (max-width:820px){.cols{grid-template-columns:1fr}}
+.blk{display:grid;grid-template-columns:minmax(0,1fr) 110px 70px;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--line)}
+.blk:first-of-type{border-top:0}
+.blk .n{display:flex;gap:6px;align-items:baseline;min-width:0;flex-wrap:wrap}
+.blk .n b{font-weight:600}
+.intent{font:.68rem var(--mono);color:var(--faint)}
+.blk.pulled .n b::before{content:"↩ ";color:var(--warn)}
+.blk.ghost{opacity:.5}
+.blk .pc{font:.76rem var(--mono);color:var(--muted);text-align:right}
+.crit{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px}
+.crit li{display:grid;grid-template-columns:18px 1fr;gap:6px}
+.cb{width:14px;height:14px;margin-top:3px;border:1.5px solid var(--todo);border-radius:3px;display:grid;place-items:center;font-size:.6rem}
+.cb.ok{background:var(--done);border-color:var(--done);color:var(--bg-0)}
+.crit small{display:block;font:.7rem var(--mono);color:var(--faint)}
+table{width:100%;border-collapse:collapse;font-size:.86rem}
+th{font:600 .66rem var(--body);letter-spacing:.08em;text-transform:uppercase;color:var(--faint);text-align:left;padding:4px 8px 6px 0}
+td{border-top:1px solid var(--line);padding:7px 8px 7px 0;vertical-align:top}
+td.k{font-family:var(--mono);color:var(--faint);width:44px}
+.st{display:inline-flex;align-items:center;gap:5px;font-size:.78rem}
+.st::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--todo)}
+.st.done::before{background:var(--done)} .st.doing::before{background:var(--doing)} .st.review::before{background:var(--doing);box-shadow:0 0 0 2px var(--bg-0),0 0 0 3px var(--doing)}
+.ev{font:.74rem var(--mono);color:var(--muted)}
+.gatebox{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;border:1px dashed var(--line);border-radius:8px;padding:10px 14px}
+.gatebox .dm{width:12px;height:12px;transform:rotate(45deg);border:2px solid var(--warn)}
+.gatebox b{font-weight:600}
+.out{display:flex;flex-wrap:wrap;gap:8px;align-items:center;border-left:3px solid var(--warn);padding:8px 14px;background:var(--card);border-radius:0 8px 8px 0}
+.out a{color:var(--fg);text-decoration:none;border-bottom:1px solid var(--line)}
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:.74rem;color:var(--faint);align-items:center}
+.legend span{display:inline-flex;gap:6px;align-items:center}
+.lnode{width:12px;height:12px;border-radius:50%;border:2px dashed var(--todo)}
+.lnode.d{border:2px solid var(--done);background:var(--done)} .lnode.c{border:2px solid var(--doing)}
+@media (prefers-reduced-motion:no-preference){.ph.cur .node{animation:pulse 2.4s ease-in-out infinite}@keyframes pulse{50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--doing) 25%,transparent)}}}
+</style>
+
+<div class="wrap">
+  <div class="head">
+    <div><span class="mono">strata › Lộ trình › mvp</span><h1>Lộ trình Strata v1</h1>
+      <p>Đi từ khung tối giản tới phát hành. Mỗi phase có mục tiêu, khối cần làm và tiêu chí; cổng cuối phase chỉ user cho qua.</p></div>
+    <div class="sum"><span class="chip">cập nhật 20/10 09:12</span><span class="chip warn">3 việc ngoài lộ trình</span></div>
+  </div>
+
+  <nav class="rail" aria-label="Các phase">
+    <button class="ph done"><div class="track"><span class="node">✓</span><span class="gate" title="Cổng G1 đã qua"></span></div>
+      <span class="nm">Skeleton</span><span class="sum"><span class="chip lv">skeleton</span>100% · ◇ đã qua · 4/4</span></button>
+    <button class="ph cur" aria-current="step"><div class="track"><span class="node">2</span><span class="gate"></span></div>
+      <span class="here">▲ Đang ở đây</span><span class="nm">Tính năng liên quan</span><span class="sum"><span class="chip lv now">demo</span>62% · ◇ 2/3</span></button>
+    <button class="ph fut"><div class="track"><span class="node">3</span><span class="gate"></span></div>
+      <span class="nm">Gia cố bảo mật</span><span class="sum"><span class="chip lv">hardened</span>0% · 0/5 · 1 khối đã kéo</span></button>
+    <button class="ph fut"><div class="track"><span class="node">4</span><span class="gate"></span></div>
+      <span class="nm">Tính năng con + staging</span><span class="sum"><span class="chip lv">staging</span>0% · 0/4</span></button>
+    <button class="ph fut"><div class="track"><span class="node">5</span></div>
+      <span class="nm">Deploy</span><span class="sum"><span class="chip lv">release</span>0% · 0/3</span></button>
+  </nav>
+
+  <section class="detail" aria-label="Phase 2">
+    <div class="dtop">
+      <div><span class="mono">PHASE 2 · cổng G2 · từ 14/10</span><h2>Tính năng liên quan</h2>
+        <p class="goal">Mọi luồng chính chạy hết đầu cuối trên dữ liệu mẫu, đủ để trình diễn cho người ngoài xem, chưa cần bảo mật thật.</p></div>
+      <div class="pbar"><span class="chip lv now">demo</span><div class="bar"><i class="d" style="width:50%"></i><i class="g" style="width:12%"></i></div><b>62%</b></div>
+    </div>
+
+    <div class="cols">
+      <div><h3>Khối cần làm (C4)</h3>
+        <div class="blk"><span class="n"><b>Viewer</b><span class="intent">build · 4 task</span></span><div class="bar"><i class="d" style="width:75%"></i><i class="g" style="width:10%"></i></div><span class="pc">3/4</span></div>
+        <div class="blk"><span class="n"><b>CLI item</b><span class="intent">extend · 6 task</span></span><div class="bar"><i class="d" style="width:100%"></i></div><span class="pc">xong</span></div>
+        <div class="blk"><span class="n"><b>Trang Lộ trình</b><span class="intent">build · 3 task</span></span><div class="bar"><i class="d" style="width:33%"></i><i class="g" style="width:20%"></i></div><span class="pc">1/3</span></div>
+        <div class="blk pulled"><span class="n"><b>MCP server</b><span class="intent">harden · kéo từ phase 3</span></span><div class="bar"><i class="g" style="width:30%"></i></div><span class="pc">0/2</span></div>
+      </div>
+      <div><h3>Tiêu chí đánh giá · 2/3</h3>
+        <ul class="crit">
+          <li><span class="cb ok">✓</span><span>Kịch bản demo chạy dưới 5 phút, không sửa DB tay<small>user xác nhận 18/10</small></span></li>
+          <li><span class="cb ok">✓</span><span>Agent đọc/ghi việc chỉ qua MCP<small>user xác nhận 19/10</small></span></li>
+          <li><span class="cb"></span><span>Hai project mở song song không lẫn dữ liệu<small>kiểm: pytest -k multi_project</small></span></li>
+        </ul>
+      </div>
+    </div>
+
+    <div><h3>Bước</h3>
+      <table><thead><tr><th></th><th>Bước</th><th>Trạng thái</th><th>Người làm</th><th>Bằng chứng</th></tr></thead><tbody>
+        <tr><td class="k">2.1</td><td>Bảng việc theo trạng thái</td><td><span class="st done">xong</span></td><td>coder</td><td class="ev">dfb5ea6 · 215 pass</td></tr>
+        <tr><td class="k">2.2</td><td>MCP đủ tool đọc</td><td><span class="st done">xong</span></td><td>coder</td><td class="ev">a714584</td></tr>
+        <tr><td class="k">2.3</td><td>Trang Lộ trình theo phase</td><td><span class="st doing">đang làm</span></td><td>coder</td><td class="ev">—</td></tr>
+        <tr><td class="k">2.4</td><td>Chạy thử demo với user</td><td><span class="st">chưa làm</span></td><td>user</td><td class="ev">—</td></tr>
+      </tbody></table>
+    </div>
+
+    <div class="gatebox"><span class="dm"></span><b>Cổng G2</b><span>2/3 tiêu chí · 2/4 bước · 1 khối chưa xong</span><span class="chip warn">chưa qua</span><span class="mono">chỉ user cho qua: roadmap gate pass G2 --as user</span></div>
+  </section>
+
+  <div class="out"><b>Ngoài lộ trình (3)</b><a href="#">#151 Sửa tooltip C4</a><a href="#">#160 Đổi tên cờ --db</a><a href="#">#162 Ảnh nền hero</a><span class="mono">phase hiện tại: 2</span></div>
+
+  <div class="legend"><span><i class="lnode d"></i>phase xong</span><span><i class="lnode c"></i>đang làm</span><span><i class="lnode"></i>chưa tới</span><span>◇ cổng</span><span>↩ khối kéo về sớm</span><span>▨ phần đang làm</span></div>
+</div>
