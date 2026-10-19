@@ -18,8 +18,8 @@ VIEWER = pathlib.Path(__file__).resolve().parent.parent / "viewer"
 STATIC = {"/": "app.html", "/app.js": "app.js", "/app.css": "app.css", "/c4": "index.html", "/index.html": "index.html", "/page.js": "page.js", "/swimlane.js": "swimlane.js", "/roadmap.js": "roadmap.js", "/page.css": "page.css"}
 TYPES = {".html": "text/html", ".md": "text/plain", ".yaml": "text/plain", ".js": "application/javascript", ".css": "text/css", ".json": "application/json"}
 SHOW = {"item": "id,project,kind,title,status,priority,owner", "decision": "id,project,title,status"}
-ITEM_KINDS = ("rule", "task", "issue", "knowledge", "draft", "note")
-ITEM_STATUS = ("proposed", "approved", "open", "doing", "done", "rejected")
+ITEM_KINDS = ("rule", "task", "issue", "knowledge", "draft", "note", "step", "gate")
+ITEM_STATUS = ("proposed", "approved", "open", "doing", "review", "done", "rejected")
 CLOSED = "('done','rejected')"
 
 
@@ -156,16 +156,31 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             return out
 
         def items(self, q):
-            sql, args = ["SELECT id,project,kind,title,body,status,priority,owner,created_at,updated_at FROM item WHERE 1=1"], []
+            """List (filters kind/status/owner/project/ready, id order; ready: priority order) or, with id, the item plus deps, links and history."""
             for k, ok in (("kind", ITEM_KINDS), ("status", ITEM_STATUS)):
-                if k in q:
-                    if q[k] not in ok: return self.send_error(400, f"bad {k}")
-                    sql.append(f"AND {k}=?"); args.append(q[k])
-            if "id" in q:
-                if not q["id"].isdigit(): return self.send_error(400, "bad id")
-                sql.append("AND id=?"); args.append(int(q["id"]))
-            if q.get("project"): sql.append("AND project=?"); args.append(q["project"])
-            self.json(rows(" ".join(sql) + " ORDER BY id", args))
+                if k in q and q[k] not in ok: return self.send_error(400, f"bad {k}")
+            if "id" in q and not q["id"].isdigit(): return self.send_error(400, "bad id")
+            ready = q.get("ready") == "1"
+            with lock:
+                out = service.list_items(conn, q.get("project") or None, q.get("kind"), q.get("status"), q.get("owner") or None, ready)
+                if "id" in q: out = [r for r in out if r["id"] == int(q["id"])]
+                if not ready: out.sort(key=lambda r: r["id"])
+                if "id" in q and out: out[0].update(self.detail(out[0]))
+            self.json(out)
+
+        def detail(self, it):
+            """deps both ways, C4 objects + decisions linked to them, audit history for one item."""
+            d = service.get_item(conn, it["id"])
+            objs = [r["object_id"] for r in conn.execute("SELECT object_id FROM c4_link WHERE project=? AND ref_kind='item' AND ref_id=? ORDER BY object_id", (it["project"], it["id"]))]
+            decs = [dict(r) for r in conn.execute(
+                "SELECT DISTINCT t.id,t.title,t.status FROM c4_link l JOIN c4_link m ON m.project=l.project AND m.object_id=l.object_id AND m.ref_kind='decision' "
+                "JOIN decision t ON t.id=m.ref_id WHERE l.project=? AND l.ref_kind='item' AND l.ref_id=? ORDER BY t.id", (it["project"], it["id"]))]
+            hist = []
+            for r in conn.execute("SELECT ts,actor_role,tool,before,after FROM audit WHERE target=? ORDER BY id DESC", (f"item:{it['id']}",)):
+                b, a = (json.loads(r[k]) if r[k] else None for k in ("before", "after"))
+                b, a = b if isinstance(b, dict) else {}, a if isinstance(a, dict) else {}
+                hist.append({"time": r["ts"], "actor": a.get("actor") or r["actor_role"], "tool": r["tool"], "from": b.get("status"), "to": a.get("status"), "note": a.get("note")})
+            return {"deps": {"needs": d["depends_on"], "blocks": d["blocks"]}, "links": {"c4": objs, "decisions": decs}, "history": hist}
 
         def audit(self, q):
             limit = q.get("limit", "100")
