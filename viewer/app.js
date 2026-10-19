@@ -365,7 +365,7 @@ function docReader(box,p,id,docs){
   r.append(f);
 }
 
-/* ---------- task board (read-only): ready strip, status columns, detail pane. Filters live in the hash query. ---------- */
+/* ---------- task board (read-only): status columns, detail pane. Filters live in the hash query. ---------- */
 const COLS=["proposed","approved","doing","review","done"], FOLD=["open","rejected"];
 const PRI_TAG={p0:"P0",p1:"P1",p2:"P2",p3:"P3"};
 const BKIND=["task","issue","step"];
@@ -398,11 +398,7 @@ function chipRow(label,opts,cur,set){
 async function boardView(box,p,id){
   const qs=hq(), f={kind:qs.get("kind")||"",status:qs.get("status")||"",owner:qs.get("owner")||"",q:qs.get("q")||""};
   const go=patch=>{const n=new URLSearchParams(qs);Object.entries(patch).forEach(([k,v])=>v?n.set(k,v):n.delete(k));location.hash=boardHref(p,id,n)};
-  const [all,ready]=await Promise.all([get("/api/items?project="+enc(p)),get("/api/items?ready=1&project="+enc(p))]);
-  const rd=new Set(ready.map(x=>x.id));
-  const wait=all.filter(x=>x.status==="approved"&&["task","step"].includes(x.kind)&&!rd.has(x.id));
-  const need={};
-  await Promise.all(wait.map(x=>get("/api/items?id="+x.id).then(r=>{need[x.id]=(r[0]&&r[0].deps?r[0].deps.needs:[]).filter(d=>d.status!=="done").map(d=>d.id)}).catch(()=>{need[x.id]=[]})));
+  const all=await get("/api/items?project="+enc(p));
   const owners=[...new Set(all.map(x=>x.owner).filter(Boolean))].sort();
   const needle=f.q.toLowerCase();
   const vis=all.filter(x=>(!f.kind||x.kind===f.kind)&&(!f.status||x.status===f.status)&&(!f.owner||x.owner===f.owner)&&(!needle||(x.title+" #"+x.id).toLowerCase().includes(needle)));
@@ -415,15 +411,7 @@ async function boardView(box,p,id){
   bar.append(search);box.append(bar);
   const act=[...Object.entries(f)].filter(([,v])=>v);
   if(act.length){const c=el("div","tactive");act.forEach(([k,v])=>{const b=el("button","chipx",k+": "+v+" ×");b.onclick=()=>go({[k]:""});c.append(b)});box.append(c)}
-  // ready strip
-  const rs=el("div","tready"), vs=new Set(vis.map(x=>x.id)), rv=ready.filter(x=>vs.has(x.id));
-  rs.append(el("b","","Sẵn sàng · "+rv.length));
-  rv.forEach(x=>{const a=link("#"+x.id+" "+x.title,boardHref(p,x.id,qs),"chip"+(String(x.id)===id?" on":""));rs.append(a)});
-  const blocked=wait.filter(x=>need[x.id]&&need[x.id].length);
-  if(blocked.length){const by=[...new Set(blocked.flatMap(x=>need[x.id]))];rs.append(el("span","mono",(rv.length?"· ":"")+blocked.length+" đã duyệt nhưng bị chặn bởi "+by.map(i=>"#"+i).join(" ")))}
-  else if(!rv.length)rs.append(el("span","mono","Chưa có việc nào sẵn sàng"));
-  box.append(rs);
-  const main=el("div","tmain"), board=el("div","tboard"), mk=x=>itemCard(x,p,qs,id,need[x.id]);
+  const main=el("div","tmain"), board=el("div","tboard"), mk=x=>itemCard(x,p,qs,id);
   COLS.forEach(st=>{
     const its=vis.filter(x=>x.status===st), col=el("section","tcol"), h=el("h3");
     h.append(statusIcon(st),st+" · "+its.length);col.append(h);

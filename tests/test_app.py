@@ -269,4 +269,4 @@ def test_no_write_endpoint():
 
 def test_board_ui_filters_in_url():
     js = (ROOT / "viewer/app.js").read_text()
-    assert "ready=1" in js and "URLSearchParams" in js
+    assert "URLSearchParams" in js and "Sẵn sàng" not in js
