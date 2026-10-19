@@ -26,46 +26,70 @@ def load(path):
         mk = getattr(e, "problem_mark", None)
         raise ValueError(f"YAML sai cú pháp{f' dòng {mk.line + 1} cột {mk.column + 1}' if mk else ''}: "
                          f"{getattr(e, 'problem', e)} (chuỗi có : ? # {{ }} , thì bọc \"...\")") from None
+    if not isinstance(model, dict): raise ValueError("YAML phải là mapping ở top level")
     root = (pathlib.Path(path).resolve().parent / model.get("root", ".")).resolve()
     return model, root
+
+
+def ancestors(byid, id):
+    """(parent ids above `id`, bad): bad is the id where the chain hits a cycle or a missing id, else None."""
+    seen, out, p = {id}, [], (byid.get(id) or {}).get("parent")
+    while p is not None:
+        if p in seen or p not in byid: return out, p
+        seen.add(p); out.append(p); p = byid[p].get("parent")
+    return out, None
+
+
+def _dups(errs, kind, rows):
+    seen = set()
+    for r in rows:
+        if r.get("id") in seen: errs.append(f"trùng id {kind}: {r.get('id')}")
+        seen.add(r.get("id"))
 
 
 def check(m, root):
     """Return (errors, warnings, n_objects, n_connections) for a model dict."""
     errs, warns = [], []
+    if not isinstance(m, dict): return ["YAML phải là mapping ở top level"], warns, 0, 0
     # Unquoted ", " inside a flow mapping silently becomes an extra key: flag any unknown key.
     for sec, keys in KEYS.items():
         rows = m.get(sec) or []
-        if sec == "steps": rows = [(f"flow {f.get('id')} bước {i}", st) for f in m.get("flows") or [] for i, st in enumerate(f.get("steps") or [], 1)]
+        if sec == "steps": rows = [(f"flow {f.get('id')} bước {i}", st) for f in m.get("flows") or [] for i, st in enumerate(f.get("steps") or [], 1) if isinstance(st, dict)]
         else: rows = [(f"{sec} {r.get('id')}", r) for r in rows if isinstance(r, dict)]
         for where, r in rows:
             bad = [k for k in r if k not in keys]
             if bad: warns.append(f"{where}: key lạ {bad} (chuỗi có dấu phẩy thì bọc \"...\")")
     objs = {}
-    for o in m.get("objects", []):
+    ol = [o for o in m.get("objects") or [] if isinstance(o, dict)]
+    for o in ol:
         if o.get("id") in objs: errs.append(f"trùng id: {o.get('id')}")
         objs[o.get("id")] = o
     for o in objs.values():
         t, p = o.get("type"), o.get("parent")
+        if not o.get("name"): errs.append(f"{o.get('id')}: thiếu name")
+        bad = ancestors(objs, o.get("id"))[1]
+        if bad in objs: errs.append(f"{o.get('id')}: chuỗi parent bị vòng tại '{bad}'")
         if t not in TYPES: errs.append(f"{o['id']}: type '{t}' không hợp lệ")
         if p is not None and p not in objs: errs.append(f"{o['id']}: parent '{p}' không tồn tại")
-        elif t in PARENTS and (objs[p]["type"] if p else None) not in PARENTS[t]:
+        elif bad is None and t in PARENTS and (objs[p]["type"] if p else None) not in PARENTS[t]:
             errs.append(f"{o['id']}: {t} không được nằm trong {objs[p]['type'] if p else 'top level'}")
         if o.get("status", "live") not in STATUS: errs.append(f"{o['id']}: status sai")
-        for t2 in o.get("tags", []):
+        for t2 in o.get("tags") or []:
             if t2 not in (m.get("tags") or {}): warns.append(f"{o['id']}: tag '{t2}' chưa khai báo")
-        for link in o.get("links", []):
+        for link in o.get("links") or []:
             if not link.startswith("http") and not (root / link).exists():
                 errs.append(f"{o['id']}: link chết '{link}'")
         if not o.get("description"): warns.append(f"{o['id']}: thiếu description")
     ifaces = {}
-    for i in m.get("interfaces") or []:
+    for i in [i for i in m.get("interfaces") or [] if isinstance(i, dict)]:
         if i.get("id") in ifaces: errs.append(f"trùng id interface: {i.get('id')}")
         ifaces[i.get("id")] = i
         if i.get("object") not in objs: errs.append(f"interface {i.get('id')}: object '{i.get('object')}' không tồn tại")
         if i.get("kind") is not None and i["kind"] not in IFACE_KINDS: errs.append(f"interface {i.get('id')}: kind '{i['kind']}' không hợp lệ")
     used = set()
-    conns = {c.get("id", f"c{i}"): c for i, c in enumerate(m.get("connections", []))}
+    cl = [c for c in m.get("connections") or [] if isinstance(c, dict)]
+    _dups(errs, "connection", [c for c in cl if "id" in c])
+    conns = {c.get("id", f"c{i}"): c for i, c in enumerate(cl)}
     for cid, c in conns.items():
         for end in ("from", "to"):
             if c.get(end) not in objs: errs.append(f"connection {cid}: {end} '{c.get(end)}' không tồn tại")
@@ -76,9 +100,13 @@ def check(m, root):
             elif i.get("object") != c.get("to"): errs.append(f"connection {cid}: interface '{c['interface']}' không thuộc '{c.get('to')}'")
         if c.get("kind") is not None and c["kind"] not in CONN_KINDS: errs.append(f"connection {cid}: kind '{c['kind']}' không hợp lệ")
         if not c.get("technology"): warns.append(f"connection {cid} ({c.get('from')}→{c.get('to')}): thiếu technology")
-    for f in m.get("flows", []):
+    fl = [f for f in m.get("flows") or [] if isinstance(f, dict)]
+    _dups(errs, "flow", fl)
+    for f in fl:
         prev = None
-        for i, s in enumerate(f.get("steps", []), 1):
+        steps = [s for s in f.get("steps") or [] if isinstance(s, dict)]
+        _dups(errs, f"step (flow {f.get('id')})", [s for s in steps if "id" in s])
+        for i, s in enumerate(steps, 1):
             where = f"flow {f.get('id')} bước {i}"
             ends, err = step_ends(s, conns, objs)
             if err: errs.append(f"{where}: {err}")
@@ -163,9 +191,11 @@ def _counts(c, project):
             for t in ("object", "connection", "flow")}
 
 
-def import_yaml(c, path, project):
+def import_yaml(c, path, project, force=False):
     """Upsert the YAML model into project `project`; rows absent from the YAML are deleted. Atomic."""
     m, root = load(path)
+    errs = check(m, root)[0]
+    if errs and not force: raise ValueError("model có lỗi, không ghi gì (--force để bỏ qua):\n" + "\n".join(errs))
     objs = m.get("objects") or []
     conns = [{**x, "id": x.get("id", f"c{i}")} for i, x in enumerate(m.get("connections") or [])]
     flows = m.get("flows") or []
@@ -251,15 +281,11 @@ def read_model(c, project):
 
 # ---- text context for agents (port of lift/view in viewer/index.html) ----
 def _lift(byid, id, F):
-    chain = set()
-    o = byid.get(F)
-    while o: chain.add(o["id"]); o = byid.get(o.get("parent"))
-    o = byid.get(id)
-    while o:
-        p = o.get("parent")
-        if p == F: return o["id"], False
-        if p is None or p in chain: return o["id"], True
-        o = byid.get(p)
+    chain = {F, *ancestors(byid, F)[0]} if F in byid else set()
+    for i in [id, *ancestors(byid, id)[0]] if id in byid else []:
+        p = byid[i].get("parent")
+        if p == F: return i, False
+        if p is None or p in chain: return i, True
     return None
 
 
@@ -323,12 +349,8 @@ def context_text(c, project, object=None, max_tokens=2000):
         if desc(limit): s += f"\nMô tả: {desc(limit)}"
         if o.get("links"): s += "\nLink: " + ", ".join(o["links"])
         return s
-    chain = []
-    p = o.get("parent")
-    while p: chain.append(p); p = byid[p].get("parent")
-    def under(i):
-        while i and i != object: i = byid[i].get("parent")
-        return i == object
+    chain = ancestors(byid, object)[0]
+    under = lambda i: i == object or object in ancestors(byid, i)[0]
     sub = {i for i in byid if under(i)}
     edges = _edges(m, o.get("parent"))
     conn = []

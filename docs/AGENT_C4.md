@@ -30,7 +30,7 @@ python3 strata.py c4 flow --project P --id F             # trace từng bước,
 ## 3. Quy ước YAML
 
 - Mỗi thực thể một dòng flow-style `{...}`; chuỗi có `:` `?` `{` `}` `,` `#` thì **bắt buộc** bọc `"..."` (dấu phẩy không bọc sẽ cắt chuỗi, `validate` báo `key lạ`).
-- id ngắn, snake_case, ổn định (đổi id = mất link/issue gắn với nó). Tên hiển thị để ở `name`.
+- id ngắn, snake_case, ổn định (đổi id = mất link/issue gắn với nó). Tên hiển thị để ở `name` (object bắt buộc có `name`).
 - Không lặp dữ liệu: shape request/response để ở interface (`input/output`) hoặc connection (`payload`);
   `payload` của step chỉ ghi khi khác hoặc cụ thể hơn (giá trị thật của lần gọi này).
 - `links` trỏ file thật, tương đối với `root`; `validate` báo link chết. Bắt buộc với app/component/file/function (thiếu → dấu "!" trên map); actor/system/store/group không bắt buộc (store nên trỏ migrations/schema).
@@ -78,13 +78,13 @@ python3 strata.py c4 flow --project <p> --id <flow>   # đọc lại trace
 ```
 
 Dữ liệu đổi thì chỉ cần reload trang viewer; không cần `systemctl --user restart strata` (chỉ cần khi sửa Python).
-`import-yaml` là upsert và xoá phần không còn trong YAML, nên YAML là nguồn sự thật của map.
+`import-yaml` là upsert và xoá phần không còn trong YAML, nên YAML là nguồn sự thật của map. Có lỗi từ `validate` (thiếu name, id trùng, parent vòng/không tồn tại...) thì không ghi gì; `--force` để bỏ qua.
 
 ## 6. Tham chiếu trường
 
 | Thực thể | Trường bắt buộc | Trường tuỳ chọn |
 |---|---|---|
-| object | `id`, `type` (actor/system/app/store/component/group/file/function) | `name`, `parent`, `technology`, `description`, `tags`, `links`, `status` (live/future/deprecated/removed), `responsibilities`, `state` |
+| object | `id`, `type` (actor/system/app/store/component/group/file/function), `name` | `parent`, `technology`, `description`, `tags`, `links`, `status` (live/future/deprecated/removed), `responsibilities`, `state` |
 | connection | `id`, `from`, `to` | `name`, `kind` (network/call/queue), `technology`, `interface` (thuộc `to`), `payload {request, response}`, `direction`, `feature`, `description`, `status`, `tags` |
 | interface | `id`, `object` | `kind` (http/function/queue/event), `name`, `signature`, `purpose`, `input`, `output`, `errors` |
 | flow | `id`, `steps` | `name` |

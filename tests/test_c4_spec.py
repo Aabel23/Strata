@@ -44,13 +44,13 @@ def test_import_spec_fields(tmp_path):
     y = yaml.safe_load(EX.read_text()); y.pop("interfaces")
     for c in y["connections"]: c.pop("interface", None)
     f = tmp_path / "m.yaml"; f.write_text(yaml.safe_dump(y, allow_unicode=True))
-    assert run(p, "import-yaml", str(f), "--project", "p")[0] == 0
+    assert run(p, "import-yaml", str(f), "--project", "p", "--force")[0] == 0
     assert db.connect(p).execute("SELECT count(*) FROM c4_interface").fetchone()[0] == 0
 
 
 def base():
-    return {"objects": [{"id": "app", "type": "app", "parent": "s"}, {"id": "s", "type": "system"},
-                        {"id": "a", "type": "component", "parent": "app"}, {"id": "b", "type": "component", "parent": "app"}],
+    return {"objects": [{"name": "n", "id": "app", "type": "app", "parent": "s"}, {"name": "n", "id": "s", "type": "system"},
+                        {"name": "n", "id": "a", "type": "component", "parent": "app"}, {"name": "n", "id": "b", "type": "component", "parent": "app"}],
             "interfaces": [{"id": "ib", "object": "b", "kind": "function"}],
             "connections": [{"id": "x", "from": "a", "to": "b", "interface": "ib", "kind": "call"}]}
 
@@ -59,14 +59,14 @@ def base():
     (lambda m: m["interfaces"][0].update(object="nope"), "object 'nope'"),
     (lambda m: m["connections"][0].update(interface="nope"), "interface 'nope' không tồn tại"),
     (lambda m: m["connections"][0].update(to="a"), "không thuộc"),
-    (lambda m: m["objects"].append({"id": "f", "type": "file", "parent": "app"}), "file không được nằm trong app"),
-    (lambda m: m["objects"].append({"id": "g", "type": "function", "parent": "s"}), "function không được nằm trong system"),
+    (lambda m: m["objects"].append({"name": "n", "id": "f", "type": "file", "parent": "app"}), "file không được nằm trong app"),
+    (lambda m: m["objects"].append({"name": "n", "id": "g", "type": "function", "parent": "s"}), "function không được nằm trong system"),
     (lambda m: m["connections"][0].update(kind="rpc"), "kind 'rpc'"),
 ])
 def test_spec_validation(tmp_path, edit, msg):
     m = base()
     assert c4.check(m, tmp_path)[0] == []
-    m["objects"] += [{"id": "f1", "type": "file", "parent": "a"}, {"id": "fn", "type": "function", "parent": "f1"}]
+    m["objects"] += [{"name": "n", "id": "f1", "type": "file", "parent": "a"}, {"name": "n", "id": "fn", "type": "function", "parent": "f1"}]
     assert c4.check(m, tmp_path)[0] == []
     edit(m)
     assert any(msg in e for e in c4.check(m, tmp_path)[0])

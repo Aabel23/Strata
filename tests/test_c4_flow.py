@@ -4,8 +4,8 @@ from strata import c4
 from test_c4 import EX, run
 
 ROOT = pathlib.Path(".")
-OBJS = [{"id": "a", "type": "system", "description": "x"}, {"id": "b", "type": "system", "description": "x"},
-        {"id": "c", "type": "system", "description": "x"}, {"id": "b1", "type": "app", "parent": "b", "description": "x"}]
+OBJS = [{"id": "a", "type": "system", "description": "x", "name": "n"}, {"id": "b", "type": "system", "description": "x", "name": "n"},
+        {"id": "c", "type": "system", "description": "x", "name": "n"}, {"id": "b1", "type": "app", "parent": "b", "description": "x", "name": "n"}]
 CONNS = [{"id": "ab", "from": "a", "to": "b", "technology": "t"}, {"id": "bc", "from": "b", "to": "c", "technology": "t"},
          {"id": "b1c", "from": "b1", "to": "c", "technology": "t"}]
 IFS = [{"id": "i1", "object": "b"}]

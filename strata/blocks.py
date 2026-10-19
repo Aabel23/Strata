@@ -214,6 +214,7 @@ def load_doc(src):
     code = [code] if isinstance(code, str) else code
     doc = {"title": d.get("title"), "summary": d.get("summary"), "code": code, "blocks": normalize(d.get("blocks"))}
     errs = [] if _isstr(doc["title"]) else ["missing 'title'"]
+    if not _list(d.get("blocks")): errs.append("missing 'blocks' (must be a list)")
     if not (_list(code) and all(_isstr(c) for c in code)): errs.append("'code' must be a path or a list of paths")
     if "summary" in d and not isinstance(d["summary"], str): errs.append("'summary' must be text")
     e2, _ = validate(doc["blocks"]); return doc, errs + e2

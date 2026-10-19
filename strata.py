@@ -2,11 +2,12 @@
 """Strata: project knowledge in SQLite, with a C4 viewer and block pages.
 
   strata.py init [--db]
-  strata.py import-yaml FILE --project P [--db]   load a C4 YAML model into the DB
+  strata.py import-yaml FILE --project P [--force] [--db]   load a C4 YAML model into the DB
   strata.py validate FILE | --project P [--db]    check structure and code links
   strata.py serve [--db] [--project P] [--port] [--host A,B] [--allow-host NAME]... viewer on http://127.0.0.1:PORT
   strata.py page put|validate FILE | list [--project]
   strata.py project add ID --name N [--root --docs-dir --parent --description] | list
+  strata.py doc validate FILE                     check a doc YAML (no DB)
   strata.py doc scan --project P | set --project P PATH [--feature --status --ord]
   strata.py c4 link|unlink|links --project P --object X [--item ID | --decision ID]   (links: list only)
   strata.py c4 context --project P [--object X] [--max-tokens N]
@@ -34,6 +35,14 @@ def cmd_page(a):
         db.put_page(conn, doc["project"], doc["slug"], doc["title"], doc["kind"], doc["blocks"])
         print(f"ok: {doc['project']}/{doc['slug']}")
     elif not errs: print("ok")
+    return 1 if errs else 0
+
+
+def cmd_doc_validate(a):
+    try: errs = blocks.load_doc(pathlib.Path(a.file).read_text(encoding="utf-8"))[1]
+    except (OSError, UnicodeDecodeError) as e: errs = [str(e)]
+    for e in errs: print("ERROR", e, file=sys.stderr)
+    if not errs: print("ok")
     return 1 if errs else 0
 
 
@@ -86,7 +95,7 @@ def main(argv=None):
         for x in args: p.add_argument(*x[0], **x[1])
         return p
     add("init")
-    add("import-yaml", (["file"], {}), (["--project"], {"required": True}))
+    add("import-yaml", (["file"], {}), (["--project"], {"required": True}), (["--force"], {"action": "store_true"}))
     add("validate", (["file"], {"nargs": "?"}), (["--project"], {}))
     add("serve", (["--project"], {}), (["--port"], {"type": int, "default": 8740}), (["--host"], {"default": "127.0.0.1"}), (["--allow-host"], {"action": "append", "default": []}))
     pg = sub.add_parser("page"); ps = pg.add_subparsers(dest="action", required=True)
@@ -100,7 +109,7 @@ def main(argv=None):
             for x in args: p.add_argument(*x[0], **x[1])
     req = {"required": True}
     group("project", {"add": [(["id"], {}), (["--name"], req), (["--root"], {}), (["--docs-dir"], {}), (["--parent"], {}), (["--description"], {})], "list": []})
-    group("doc", {"scan": [(["--project"], req)],
+    group("doc", {"validate": [(["file"], {})], "scan": [(["--project"], req)],
                   "set": [(["--project"], req), (["path"], {}), (["--feature"], {}), (["--status"], {"choices": ["current", "draft", "outdated", "missing"]}), (["--ord"], {"type": int})]})
     group("item", {"add": [(["--project"], req), (["--kind"], {"required": True, "choices": ["task", "issue"]}), (["--title"], req), (["--body"], {}),
                            (["--priority"], {}), (["--status"], {"choices": ITEM_STATUS, "default": "open"})],
@@ -116,6 +125,7 @@ def main(argv=None):
                  "context": [(["--project"], req), (["--object"], {}), (["--max-tokens"], {"type": int, "default": 2000})],
                  "flow": [(["--project"], req), (["--id"], {})]})
     a = ap.parse_args(argv)
+    if a.cmd == "doc" and a.action == "validate": return cmd_doc_validate(a)
     if a.cmd in ("project", "doc", "item", "c4", "search", "decision"): return cmd_write(a)
     if a.cmd == "mcp":
         from strata import mcp
@@ -123,7 +133,7 @@ def main(argv=None):
     if a.cmd == "init":
         db.init(a.db).close(); print("ok:", db.db_path(a.db)); return 0
     if a.cmd == "import-yaml":
-        try: n = c4.import_yaml(db.init(a.db), a.file, a.project)
+        try: n = c4.import_yaml(db.init(a.db), a.file, a.project, a.force)
         except (OSError, ValueError, TypeError, AttributeError, sqlite3.IntegrityError) as e: print("ERROR import:", e); return 1
         print(f"imported {a.project}: {n['object']} object, {n['connection']} connection, {n['flow']} flow"); return 0
     if a.cmd == "validate":

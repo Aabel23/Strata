@@ -98,3 +98,28 @@ def test_cli_page_put_validate_list(tmp_path):
 def test_example_page_validates():
     doc = json.loads((ROOT / "examples/strata-design.page.json").read_text())
     assert blocks.validate_doc(doc) == ([], [])
+
+
+# ---- task #41: doc YAML needs blocks; doc validate ----
+import pytest, subprocess, sys, pathlib as _pl
+
+
+@pytest.mark.parametrize("tail", ["", "blocks:\n", "blocks: {}\n", "blocks: text\n"])
+def test_load_doc_requires_blocks(tail):
+    assert any("blocks" in e for e in blocks.load_doc("title: T\n" + tail)[1])
+
+
+def _validate(tmp_path, content=None):
+    f = tmp_path / "d.yaml"
+    f.unlink(missing_ok=True)
+    if content is not None: f.write_text(content)
+    r = subprocess.run([sys.executable, str(_pl.Path(__file__).resolve().parent.parent / "strata.py"), "doc", "validate", str(f)],
+                       capture_output=True, text=True)
+    return r.returncode, r.stderr
+
+
+def test_doc_validate_cli(tmp_path):
+    assert _validate(tmp_path, "title: T\nblocks:\n  - {md: hi}\n")[0] == 0
+    for bad in (None, "a: [", "- 1\n", "title: T\nblocks: x\n", "title: T\nblocks:\n  - {type: nope}\n"):
+        code, err = _validate(tmp_path, bad)
+        assert code == 1 and "ERROR" in err
