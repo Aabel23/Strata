@@ -9,7 +9,7 @@
 /* Astra: lộ trình là đường leo trên các lớp núi vẽ nét vàng lá (foil), giống ảnh nền chính của Strata.
    Lớp xa mờ, lớp gần đậm; sóng ngang dưới chân núi; sao nhỏ trên bầu trời haze. Trại nằm trên sống núi,
    cổng là mốc đá tam giác, đỉnh là bản phát hành. Một chuyển động: ánh sáng chạy dọc đoạn đã đi.
-   Màu lấy từ token của viewer (page.css): tối là chính, sáng = teal + vàng. */
+   Màu lấy từ token của viewer (page.css): tối là chính, sáng = vàng cổ trên nền kem; một họ màu ấm, không teal. */
 :root {
   --bg-0:#09080c; --bg:#100e14; --card:#15131a; --raised:#1b1922;
   --fg:#ebe5db; --muted:#a59d93; --faint:#7a7480; --line:#2a2630; --line-soft:#1d1a22;
@@ -18,7 +18,7 @@
   --foil:linear-gradient(90deg,#b98a62,#e2b88f); --foil-line:linear-gradient(90deg,transparent,rgba(214,170,128,.55),transparent); --glow:rgba(240,214,180,.7);
   --haze:radial-gradient(120% 70% at 75% -10%,#1e1b26 0%,#100e14 55%,#09080c 100%);
   --edge:linear-gradient(160deg,#f0d6b4,#c9966c 22%,transparent 50%,transparent 78%,#7a5634);
-  --st-todo:#a59d93; --st-doing:#d9a24e; --st-done:#6fa595; --st-block:#c06464;
+  --st-todo:#a59d93; --st-doing:#d9a24e; --st-done:#f0d6b4; --st-block:#c06464; --st-miss:#c98a6a;
   --display:"Cormorant Garamond","EB Garamond","Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
   --body:"Segoe UI Variable Text","Segoe UI",Inter,system-ui,-apple-system,Roboto,"Noto Sans",sans-serif;
   --mono:"Cascadia Code","JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
@@ -28,22 +28,22 @@
 @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
   --bg-0:#f6f2e8; --bg:#fbfaf5; --card:#ffffff; --raised:#ffffff;
   --fg:#294342; --muted:#55625f; --faint:#677371; --line:#e6dec9; --line-soft:#f1ebdc;
-  --gold-0:#8a6410; --gold:#936b0d; --gold-3:#ac840d; --accent:#07807d; --accent-soft:rgba(7,128,125,.1);
-  --trail:#07807d; --sheen:#e8c25a;
-  --foil:linear-gradient(90deg,#06716d,#0a8f8a); --foil-line:linear-gradient(90deg,transparent,rgba(7,128,125,.42),transparent); --glow:rgba(10,143,138,.45);
+  --gold-0:#8a6410; --gold:#936b0d; --gold-3:#ac840d; --accent:#936b0d; --accent-soft:rgba(147,107,13,.1);
+  --trail:#8a6410; --sheen:#f3d77a;
+  --foil:linear-gradient(90deg,#8a6410,#b8902a); --foil-line:linear-gradient(90deg,transparent,rgba(147,107,13,.42),transparent); --glow:rgba(184,144,42,.45);
   --haze:radial-gradient(120% 70% at 75% -10%,#ffffff 0%,#fbfaf5 55%,#f6f2e8 100%);
-  --edge:linear-gradient(160deg,#089a96,#07807d 22%,transparent 50%,transparent 78%,#ac840d);
-  --st-todo:#55625f; --st-doing:#a8701c; --st-done:#15806a; --st-block:#cd3c35;
+  --edge:linear-gradient(160deg,#b8902a,#936b0d 22%,transparent 50%,transparent 78%,#ac840d);
+  --st-todo:#55625f; --st-doing:#a8701c; --st-done:#6e5210; --st-block:#cd3c35; --st-miss:#a4532c;
   color-scheme: light; } }
 :root[data-theme="light"] {
   --bg-0:#f6f2e8; --bg:#fbfaf5; --card:#ffffff; --raised:#ffffff;
   --fg:#294342; --muted:#55625f; --faint:#677371; --line:#e6dec9; --line-soft:#f1ebdc;
-  --gold-0:#8a6410; --gold:#936b0d; --gold-3:#ac840d; --accent:#07807d; --accent-soft:rgba(7,128,125,.1);
-  --trail:#07807d; --sheen:#e8c25a;
-  --foil:linear-gradient(90deg,#06716d,#0a8f8a); --foil-line:linear-gradient(90deg,transparent,rgba(7,128,125,.42),transparent); --glow:rgba(10,143,138,.45);
+  --gold-0:#8a6410; --gold:#936b0d; --gold-3:#ac840d; --accent:#936b0d; --accent-soft:rgba(147,107,13,.1);
+  --trail:#8a6410; --sheen:#f3d77a;
+  --foil:linear-gradient(90deg,#8a6410,#b8902a); --foil-line:linear-gradient(90deg,transparent,rgba(147,107,13,.42),transparent); --glow:rgba(184,144,42,.45);
   --haze:radial-gradient(120% 70% at 75% -10%,#ffffff 0%,#fbfaf5 55%,#f6f2e8 100%);
-  --edge:linear-gradient(160deg,#089a96,#07807d 22%,transparent 50%,transparent 78%,#ac840d);
-  --st-todo:#55625f; --st-doing:#a8701c; --st-done:#15806a; --st-block:#cd3c35;
+  --edge:linear-gradient(160deg,#b8902a,#936b0d 22%,transparent 50%,transparent 78%,#ac840d);
+  --st-todo:#55625f; --st-doing:#a8701c; --st-done:#6e5210; --st-block:#cd3c35; --st-miss:#a4532c;
   color-scheme: light; }
 
 * { box-sizing: border-box; }
@@ -112,7 +112,7 @@ h3 { margin: 0; font: 500 34px/1.08 var(--display); color: var(--gold-3); text-w
 .pct { font: italic 400 30px/1 var(--display); color: var(--gold-3); font-variant-numeric: oldstyle-nums; }
 .st { font: 500 11px/1 var(--body); letter-spacing: .14em; text-transform: uppercase; font-variant: normal; white-space: nowrap; display: inline-flex; align-items: center; gap: 7px; }
 .st::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
-.st.done { color: var(--st-done); } .st.doing { color: var(--st-doing); } .st.todo { color: var(--faint); }
+.st.done { color: var(--st-done); } .st.miss { color: var(--st-miss); } .st.doing { color: var(--st-doing); } .st.todo { color: var(--faint); }
 .st.todo::before { background: transparent; box-shadow: inset 0 0 0 1px currentColor; }
 .goal { margin: 0; max-width: 58ch; color: var(--muted); font-weight: 400; text-wrap: pretty; }
 .blocks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 18px; }
@@ -149,7 +149,7 @@ details[open] summary::after { transform: rotate(-135deg); margin-top: 3px; }
 .crit::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--foil-line); opacity: .45; }
 .crit .what { min-width: 0; font-weight: 400; color: var(--muted); }
 .crit.miss-row .what { color: var(--fg); }
-.crit.miss-row::before { content: ""; position: absolute; left: 0; top: 50%; width: 7px; height: 1px; background: var(--st-doing); }
+.crit.miss-row::before { content: ""; position: absolute; left: 0; top: 50%; width: 7px; height: 1px; background: var(--st-miss); }
 .crit .st { justify-content: flex-end; }
 code { font: 12.5px var(--mono); color: var(--muted); }
 .empty { margin: 0; color: var(--muted); font: italic 400 17px var(--display); }
@@ -333,7 +333,7 @@ function renderDetail() {
   const miss = all.filter(r => !r[2]);
   const crit = p.crit ? p.crit.map(([g, rows]) =>
     `<div class="grp"><span class="lab">${esc(g)}</span>${rows.map(r =>
-      `<div class="crit ${r[2] ? "" : "miss-row"}"><span class="what">${fmt(r[0])}</span><span class="who">${esc(r[1])}</span><span class="st ${r[2] ? "done" : "doing"}">${esc(r[3])}</span></div>`).join("")}</div>`).join("")
+      `<div class="crit ${r[2] ? "" : "miss-row"}"><span class="what">${fmt(r[0])}</span><span class="who">${esc(r[1])}</span><span class="st ${r[2] ? "done" : "miss"}">${esc(r[3])}</span></div>`).join("")}</div>`).join("")
     : `<p class="empty">Tiêu chí đánh giá của phase này chưa được lập. Sẽ viết khi phase trước qua cổng.</p>`;
   const steps = p.steps.length ? `<details open><summary class="lab">Các bước của phase · ${p.steps.length}</summary><ul class="steps">${p.steps.map(s =>
     `<li><span class="id">${s[0]}</span><span>${esc(s[1])}</span><span class="st ${s[2]}">${lbl[s[2]]}</span></li>`).join("")}</ul></details>` : "";
