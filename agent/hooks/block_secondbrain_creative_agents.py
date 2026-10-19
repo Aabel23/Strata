@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
-"""PreToolUse: chặn subagent architect/researcher chạm vào ~/.secondbrain.
+"""PreToolUse: subagent không được chạm vault secondbrain.
 
-User yêu cầu (10/10/2026): architect và researcher không được truy cập secondbrain
-để giữ sáng tạo và tìm kiến trúc ngoài vùng hiểu biết sẵn có của user.
+Best-effort: khớp chuỗi và tên tool, vòng được bằng glob/symlink. Kiểm soát thật là
+allowlist `tools` trong agent/agents/*.md (subagent không có mcp__obsidian__*).
+Subagent = payload có agent_id hoặc agent_type; chat chính (không có cả hai) được phép.
 """
 import json
 import re
 import sys
 
-BLOCKED_ROLE = re.compile(r"architect|research", re.I)
-VAULT = re.compile(r"secondbrain|second[\s_-]brain", re.I)
+VAULT = re.compile(r"secondbrain|second[\s_-]brain", re.I)  # gồm /home/abel/.secondbrain, ~/.secondbrain, $HOME/.secondbrain
+VAULT_TOOL = re.compile(r"^mcp__obsidian", re.I)
 
 try:
     data = json.load(sys.stdin)
-except Exception:
+except Exception as e:
+    print(f"block_secondbrain hook: JSON hỏng, cho qua ({e})", file=sys.stderr)
     sys.exit(0)
 
-agent_type = str(data.get("agent_type") or "")
-if not BLOCKED_ROLE.search(agent_type):
+if not isinstance(data, dict) or not (data.get("agent_id") or data.get("agent_type")):
     sys.exit(0)
 
-VAULT_TOOL = re.compile(r"obsidian|mcpvault", re.I)  # MCP vault không mang đường dẫn trong input
-
-if not (VAULT.search(json.dumps(data.get("tool_input") or {}, ensure_ascii=False))
-        or VAULT_TOOL.search(str(data.get("tool_name") or ""))):
+tool_input = data.get("tool_input")
+if not (VAULT_TOOL.search(str(data.get("tool_name") or ""))
+        or VAULT.search(json.dumps(tool_input if tool_input is not None else {}, ensure_ascii=False))):
     sys.exit(0)
 
 print(json.dumps({
@@ -31,9 +31,8 @@ print(json.dumps({
         "hookEventName": "PreToolUse",
         "permissionDecision": "deny",
         "permissionDecisionReason": (
-            f"Agent '{agent_type}' không được truy cập secondbrain (quy tắc của user). "
+            "Subagent không được truy cập secondbrain (quy tắc của user). "
             "Tự nghiên cứu từ code, tài liệu repo và nguồn bên ngoài; không tìm cách vòng qua."
         ),
     }
 }, ensure_ascii=False))
-sys.exit(0)

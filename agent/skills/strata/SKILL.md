@@ -14,7 +14,7 @@ S="python3 /home/abel/project/tools/strata/strata.py"   # dùng $S ở mọi l�
 ```
 
 ## Luật
-- Chỉ **agent chính** ghi. Subagent trả văn bản cho agent chính ghi.
+- Chỉ **agent chính** ghi (ngoại lệ: coder/reviewer qua MCP theo vai, xem mục MCP). Subagent không có MCP thì trả văn bản cho agent chính ghi.
 - Không sửa DB bằng `sqlite3` trực tiếp. Không tự viết HTML cho tài liệu (viết YAML, Strata lo trình bày).
 - Thử lệnh ghi lạ trên DB tạm: `$S init --db /tmp/x/t.db` rồi thêm `--db /tmp/x/t.db`.
 
@@ -35,6 +35,9 @@ Hiện có: `internproj`; `project1_app` (cha internproj, root `/home/abel/proje
 | Tìm kiếm | `curl -s 'localhost:8740/api/search?q=từ+khoá&project=P'` |
 | Thêm task/issue | `$S item add --project P --kind task --title "..." [--body "..." --priority high --status approved]` → in `ok: item N` |
 | Đổi trạng thái | `$S item set N --status doing [--priority ...]` |
+| Thêm decision | `$S decision add --project P --title T --context C --decision D --consequences Q --rejected R [--supersedes N]`; đổi trạng thái: `$S decision set N --status S` |
+| Tìm kiếm (CLI) | `$S search Q [--project P --src item\|decision\|page\|doc --limit N]` |
+| MCP server | `$S mcp --role main\|coder\|reviewer` (stdio) |
 | Gắn item vào object C4 | `$S c4 link --project P --object OBJ --item N` (gỡ: `unlink`; xem: `c4 links --project P --object OBJ`) |
 | Đọc map | `$S c4 context --project P [--object OBJ] [--max-tokens 2000]` |
 | Đọc flow | `$S c4 flow --project P` (liệt kê) / `$S c4 flow --project P --id FLOW` |
@@ -44,7 +47,7 @@ Hiện có: `internproj`; `project1_app` (cha internproj, root `/home/abel/proje
 | Gán feature/status doc | `$S doc set --project P research/x.yaml --feature F --status current\|draft\|outdated\|missing [--ord N]` |
 | Page JSON | `$S page validate F.json` / `$S page put F.json` / `$S page list [--project P]` |
 
-Status item: `proposed|approved|open|doing|done|rejected` (mặc định `open`). Kind: `task|issue`.
+Status item: `proposed|approved|open|doing|review|done|rejected` (mặc định `open`). Kind: `task|issue`. Luồng task: approved → doing → review → done.
 
 ## Ví dụ doc tối thiểu (`<docs_dir>/research/vi-du.yaml`)
 ```yaml
@@ -68,16 +71,18 @@ Kiểm lỗi: mở viewer (trang hiện khung lỗi) hoặc `curl -s 'localhost:
 
 ## Luồng 6 bước → Strata
 - **B2 sơ đồ**: viết/sửa C4 YAML + flow → `validate` → `import-yaml`.
-- **B3 research**: doc YAML trong `research/`; quyết định tạm ghi bằng block `question` (chưa có `decision add`).
+- **B3 research**: mỗi research-stage là một note trong vault `research/<project>/` (chat chính ghi qua Obsidian MCP, theo skill `research-stage`); user chốt xong thì `decision add`.
 - **B4 user duyệt**: `item add --kind task --status approved` + `c4 link` vào object liên quan.
 - **B5 làm**: `item set N --status doing` → `done`.
 - **B6 lỗi**: `item add --kind issue` (+ `c4 link`).
 - Ngoại lệ: `project1_app` vẫn dùng `documentation/plan/plan.json` cho luồng đang chạy.
 
-## Chỗ hổng đã biết
-- Chưa có lệnh kiểm YAML doc (`page validate` chỉ nhận JSON) → dùng viewer hoặc `/api/doc` trường `errors`.
-- Chưa có `decision add` (decision chỉ đọc qua API).
-- Chưa có `item list` CLI → đọc `/api/items`.
+## MCP
+Ba server cùng `strata.py mcp --role ...`, khác nhau ở tập tool theo vai:
+- `strata` (`--role main`): chat chính.
+- `strata-coder` (`--role coder`): coder claim/submit.
+- `strata-reviewer` (`--role reviewer`): reviewer đọc, thêm issue (`proposed`).
+Đăng ký đang chờ user (xem "Cài đặt" trong `agent/BOOTSTRAP.md`). Có MCP thì ưu tiên MCP hơn CLI.
 
 ## Lỗi hay gặp (C4 YAML)
 - Chuỗi có `:` `?` `{` `}` `,` `#` phải bọc `"..."`; dấu phẩy không bọc cắt chuỗi, `validate` báo `key lạ`.
