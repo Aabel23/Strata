@@ -27,8 +27,11 @@
 | 5. Thực thi | coder | Sonnet medium | code bước nhỏ, test ngay theo tiêu chí | — |
 | 6. Review | reviewer | Sonnet medium | (a) tiến độ: task đạt tiêu chí chưa, diff có chạm ngoài phạm vi không; (b) bảo mật: skill `security-audit` guidance mode, chỉ trên diff của luồng | user duyệt → lỗi thành `item add --kind issue`, đóng luồng |
 
-- **Coder:** dòng đầu prompt bắt buộc gọi skill `ponytail` (mức full). Bug nằm trong spec thì sửa và ghi chú.
-- **Reviewer:** chỉ phân tích tĩnh khi chưa có sandbox; cần chạy thử thì ghi `needs_validation`. Full audit (`security-audit` đủ 6 phase) chỉ khi user gọi.
+- **Ticket:** coder và reviewer nhận ticket (goal / acceptance / verify / scope / open_questions) cùng gói `task context` (khi có). Chat chính viết prompt từ ticket, không từ trí nhớ.
+- **Trạng thái task:** approved → doing → review → done. Chỉ chat chính đặt `done`; reviewer khác owner.
+- **Vai:** định nghĩa ở `agent/agents/` (model và tools được ép bằng allowlist, không bằng lời trong prompt).
+- **Coder:** chạy tuần tự mặc định; song song chỉ khi `isolation: worktree`. Dòng đầu prompt bắt buộc gọi skill `ponytail` (mức full). Bug nằm trong spec thì sửa và ghi chú.
+- **Reviewer:** BẮT BUỘC chạy lại `verify` của ticket, báo pass/fail từng tiêu chí. Ngoài ra chỉ phân tích tĩnh khi chưa có sandbox; cần chạy thử thì ghi `needs_validation`. Full audit (`security-audit` đủ 6 phase) chỉ khi user gọi.
 - "Tự động hoàn tất luồng X" nghĩa là chạy bước 5–6 không hỏi từng bước.
 - Không có vai planner/operator: chat chính gợi ý bước tiếp.
 - Skill tự giữ nằm trong `agent/skills/` của Strata; REA và skill điện tử nằm trong `~/.claude/packs/`, bật theo project (xem README ở đó).
@@ -37,15 +40,16 @@
 
 Strata (`/home/abel/project/tools/strata`, DB `/home/abel/project/tools/strata/strata.db`) là nơi lưu kết quả của luồng. Dùng phần CLI đã có, không chờ phần chưa làm. Cách dùng từng lệnh: skill `strata` (nạp trước khi chạm Strata).
 
-- **Chỉ chat chính ghi Strata** (qua `strata.py`). Subagent trả kết quả dạng văn bản; chat chính ghi. Ghi DB qua CLI không tính là "tự code".
+- **Chỉ chat chính ghi Strata** (qua `strata.py` hoặc MCP). Subagent trả kết quả dạng văn bản; chat chính ghi. Ghi DB qua CLI không tính là "tự code". Ngoại lệ: reviewer được `item add` issue (vào trạng thái `proposed`, user duyệt) và đổi trạng thái qua tool MCP của vai reviewer; coder claim/submit qua tool MCP của vai coder.
+- **Agent có MCP thì dùng MCP thay CLI** (khi đã đăng ký); CLI là đường dự phòng của chat chính.
 - Project chưa có trong Strata thì `project add` trước khi vào bước 2.
 - **Sơ đồ (bước 2):** C4 YAML + flow theo `docs/AGENT_C4.md`, `validate` sạch rồi `import-yaml`. Không vẽ sơ đồ rời.
 - **Research (bước 3):** note Markdown trong vault `research/<project>/`, chỉ chat chính ghi qua Obsidian MCP; đặt tên + frontmatter theo skill `research-stage` để tra được bằng `search_notes`/tag. Không ghi research vào Strata.
 - **Tài liệu đã chốt (sau bước 3):** YAML chỉ nội dung theo `docs/architect/doc-format.yaml`, đặt trong `docs_dir` của project (`architect/`, `plan/`, `review/`). Không viết HTML/CSS/JS cho tài liệu.
-- **Quyết định:** tạm ghi trong mục "Câu hỏi cần quyết" của note research (kèm phương án đã chọn và đã loại). Khi CLI có `decision add` (T6) thì ghi vào bảng decision.
+- **Quyết định:** user chốt xong thì `decision add` (kèm phương án đã loại). Note research chỉ giữ câu hỏi và phương án.
 - **Task (bước 4) / lỗi (bước 6):** `item add --kind task|issue`, gắn object C4 bằng `c4 link` khi có object tương ứng. Coder đổi trạng thái qua chat chính (`item set`).
 - **Ngoại lệ:** `project1_app` giữ `documentation/plan/plan.json` tới hết luồng đang chạy; luồng mới mới dùng Strata.
-- RAM.md và OPEN.md vẫn ở vault tới khi Strata có `context(role, task)` (T8).
+- RAM.md và OPEN.md vẫn ở vault tới khi Strata thay được. Coder/reviewer nhận gói `task context` (khi có) thay vì đọc vault.
 
 ## Tài liệu
 
