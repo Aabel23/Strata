@@ -18,6 +18,8 @@
   strata.py task context ID [--budget N] [--db]   ticket + rules + decisions + c4 + paths in one budgeted text
   strata.py item add --project P --kind task|issue|step|gate --title T [--body --priority --status --spec FILE|-] | set ID [--status --priority]
   strata.py item list [--project --kind --status --owner --ready] | show ID | edit ID [--title --body --spec FILE|- --priority] | ready [--project]
+  strata.py roadmap import PLAN.json [--progress PROGRESS.json] --project P --roadmap ID | check --project P --roadmap ID [--json]
+  strata.py roadmap gate pass GATE --project P --roadmap ID --as user [--evidence E] | reaccept STEP ... --as user   (steps use the item verbs)
   strata.py item claim ID --as NAME | submit ID --note N [--as NAME] | rework ID --note N | close ID --note N | approve ID [--note --as] | reject ID --note N | release ID | dep add|rm ID DEP   (all: --json)
 """
 import argparse, json, pathlib, sqlite3, sys, threading, webbrowser
@@ -84,6 +86,24 @@ def cmd_item(c, a):
         if act == "rework" and cur["status"] != "review": raise ValueError(f"rework only from review, item {a.id} is {cur['status']}")
         to = {"claim": "doing", "submit": "review", "reject": "rejected", "release": "approved", "rework": "doing", "close": "done"}.get(act) or ("done" if cur["status"] == "review" else "approved")
         service.transition(c, "main", a.id, to, who, getattr(a, "note", None)); out({"ok": True, "status": to}, f"ok: {to}")
+
+
+def cmd_roadmap(a):
+    from strata import roadmap
+    try:
+        c = db.init(a.db)
+        if a.action == "import":
+            r = roadmap.import_plan(c, a.project, a.roadmap, a.file, a.progress)
+            print("imported {}/{}: {steps} steps ({created} new, {updated} updated, {same} unchanged, {orphan} orphan), {gates} gates changed".format(a.project, a.roadmap, **r))
+        elif a.action == "check":
+            r = roadmap.check(c, a.project, a.roadmap); print(json.dumps(r, ensure_ascii=False) if a.json else roadmap.check_text(r))
+        elif a.action == "gate":
+            roadmap.gate_pass(c, a.project, a.roadmap, a.id, a.as_, a.evidence); print(f"ok: {a.id} passed")
+        else:
+            roadmap.reaccept(c, a.project, a.roadmap, a.id, a.as_); print(f"ok: {a.id} accepted again")
+    except (sqlite3.DatabaseError, ValueError, KeyError, PermissionError, OSError) as e:
+        print("ERROR", e.args[0] if isinstance(e, KeyError) else e); return 1
+    return 0
 
 
 def cmd_write(a):
@@ -164,6 +184,12 @@ def main(argv=None):
                    "approve": [idp, notep, asp, js], "reject": [idp, (["--note"], req), js], "rework": [idp, (["--note"], req), asp, js], "close": [idp, (["--note"], req), js], "release": [idp, js],
                    "dep": [(["op"], {"choices": ["add", "rm"]}), idp, (["dep"], {"type": int}), js]})
     group("task", {"context": [(["id"], {"type": int}), (["--budget"], {"type": int, "default": 12000})]})
+    rm = sub.add_parser("roadmap"); rs = rm.add_subparsers(dest="action", required=True)
+    for n, args in {"import": [(["file"], {}), (["--progress"], {})], "check": [(["--json"], {"action": "store_true"})],
+                    "gate": [(["op"], {"choices": ["pass"]}), (["id"], {}), (["--evidence"], {})], "reaccept": [(["id"], {})]}.items():
+        p = rs.add_parser(n); p.add_argument("--db"); p.add_argument("--project", required=True); p.add_argument("--roadmap", required=True)
+        if n in ("gate", "reaccept"): p.add_argument("--as", dest="as_")
+        for x in args: p.add_argument(*x[0], **x[1])
     p = sub.add_parser("search"); p.add_argument("q"); p.add_argument("--db"); p.add_argument("--project"); p.add_argument("--limit", type=int, default=30)
     p.add_argument("--src", choices=["item", "decision", "page", "doc"])
     group("decision", {"add": [(["--project"], req), (["--title"], req), (["--context"], req), (["--decision"], req), (["--consequences"], req),
@@ -176,6 +202,7 @@ def main(argv=None):
                  "flow": [(["--project"], req), (["--id"], {})]})
     a = ap.parse_args(argv)
     if a.cmd == "doc" and a.action == "validate": return cmd_doc_validate(a)
+    if a.cmd == "roadmap": return cmd_roadmap(a)
     if a.cmd in ("project", "doc", "item", "c4", "search", "decision", "task"): return cmd_write(a)
     if a.cmd == "mcp":
         from strata import mcp

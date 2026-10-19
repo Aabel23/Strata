@@ -17,12 +17,16 @@ def _item_rebuild_due(c):
     return not c.execute("SELECT 1 FROM sqlite_master WHERE name='item_old'").fetchone() and bool(c.execute("SELECT 1 FROM sqlite_master WHERE name='item'").fetchone()) \
         and "spec" not in [r[1] for r in c.execute("PRAGMA table_info(item)")]
 
+def _page_rebuild_due(c):
+    r = c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='page'").fetchone()
+    return bool(r) and "'plan'" not in r[0] and not c.execute("SELECT 1 FROM sqlite_master WHERE name='page_old'").fetchone()  # CHECK predates kind 'plan'
+
 def _backup_if_rebuild(path):
-    """Copy the DB file to <dir>/backups/strata-YYYYmmdd-HHMMSS.db before the destructive item rebuild (before connect() flips it to WAL, so bytes match)."""
+    """Copy the DB file to <dir>/backups/strata-YYYYmmdd-HHMMSS.db before a destructive item/page rebuild (one backup for both) (before connect() flips it to WAL, so bytes match)."""
     p = db_path(path)
     if p == ":memory:" or not os.path.exists(p): return
     k = sqlite3.connect(p)
-    try: due = _item_rebuild_due(k)
+    try: due = _item_rebuild_due(k) or _page_rebuild_due(k)
     finally: k.close()
     if due:
         d = pathlib.Path(p).parent / "backups"; d.mkdir(exist_ok=True)
@@ -34,17 +38,21 @@ def init(path=None):
     if c.execute("SELECT 1 FROM sqlite_master WHERE name='research'").fetchone() and c.execute("SELECT 1 FROM research").fetchone():
         raise RuntimeError("table research is not empty: move rows to page(kind='research') first")
     rebuild = _migrate(c)
-    if _item_rebuild_due(c):  # one transaction: rename + new schema + copy; any error rolls back to the old table
+    items, pages = _item_rebuild_due(c), _page_rebuild_due(c)
+    if items or pages:  # one transaction: rename + new schema + copy; any error rolls back to the old tables
         c.execute("PRAGMA foreign_keys=OFF")  # no-op inside a transaction, so set it first
         try:
-            c.executescript("BEGIN;DROP TRIGGER IF EXISTS item_ai;DROP TRIGGER IF EXISTS item_au;DROP TRIGGER IF EXISTS item_ad;"
-                            "ALTER TABLE item RENAME TO item_old;" + SCHEMA.read_text())
-            _finish_item(c)
+            c.executescript("BEGIN;" + ("DROP TRIGGER IF EXISTS item_ai;DROP TRIGGER IF EXISTS item_au;DROP TRIGGER IF EXISTS item_ad;"
+                                        "ALTER TABLE item RENAME TO item_old;" if items else "")
+                            + ("DROP TRIGGER IF EXISTS page_ai;DROP TRIGGER IF EXISTS page_au;DROP TRIGGER IF EXISTS page_ad;"
+                               "ALTER TABLE page RENAME TO page_old;" if pages else "") + SCHEMA.read_text())
+            _finish_item(c); _finish_page(c)
         except BaseException:
             c.rollback(); raise
         finally: c.execute("PRAGMA foreign_keys=ON")
     c.executescript(SCHEMA.read_text())
     _finish_item(c)
+    _finish_page(c)
     if rebuild:  # copy rows from the old-CHECK table into the new one
         cols = ",".join(r["name"] for r in c.execute("PRAGMA table_info(c4_object_old)"))
         c.execute(f"INSERT INTO c4_object({cols}) SELECT {cols} FROM c4_object_old")
@@ -62,6 +70,15 @@ def _finish_item(c):
     c.execute("DROP TABLE item_old")
     if (r := c.execute("PRAGMA integrity_check").fetchone()[0]) != "ok": raise RuntimeError(f"integrity_check: {r}")
     c.commit()
+
+def _finish_page(c):
+    """Copy page_old (CHECK predates kind 'plan') into the rebuilt page table keeping rowids, so FTS refs stay valid."""
+    if not c.execute("SELECT 1 FROM sqlite_master WHERE name='page_old'").fetchone(): return
+    cols = ",".join(r[1] for r in c.execute("PRAGMA table_info(page_old)"))
+    c.execute("DELETE FROM search WHERE src='page'")  # page_ai refills it row by row
+    c.execute(f"INSERT INTO page(rowid,{cols}) SELECT rowid,{cols} FROM page_old")
+    c.execute("DROP TABLE page_old"); c.commit()
+    if (r := c.execute("PRAGMA integrity_check").fetchone()[0]) != "ok": raise RuntimeError(f"integrity_check: {r}")
 
 # columns added after a table was first created: (table, column, type)
 ADDED = [("c4_connection", "description", "TEXT"), ("c4_connection", "feature", "TEXT"), ("c4_connection", "interface", "TEXT"),
