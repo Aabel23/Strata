@@ -1,0 +1,370 @@
+version: 1
+title: Lộ trình Strata v1
+phases:
+- n: 1
+  title: Skeleton
+  goal: 'Khung chạy đầu–cuối: CLI ghi vào SQLite, server chỉ GET, viewer đọc được;
+    ranh giới khối khớp C4.'
+  level: skeleton
+  blocks:
+  - object: cli
+    intent: build
+  - object: sqlite
+    intent: build
+  - object: server
+    intent: build
+  - object: viewer
+    intent: build
+  steps: []
+  criteria:
+  - id: p1-smoke
+    category: kiểm thử
+    text: Smoke e2e chạy bằng một lệnh
+    verify: make smoke (hoặc lệnh tương đương) thoát 0
+    confirm_by: machine
+    level: core
+  - id: p1-scope
+    category: tài liệu
+    text: SCOPE.md nêu phạm vi và những gì không làm
+    verify: SCOPE.md có mục Phạm vi và Không làm
+    confirm_by: user
+    level: core
+  - id: p1-boundary-test
+    category: kiểm thử
+    text: Mỗi khối C4 có ít nhất một test ranh giới
+    verify: mỗi khối C4 trỏ tới ≥1 test
+    confirm_by: machine
+    level: core
+  - id: p1-lint-ci
+    category: bảo trì
+    text: Lint, format, type-check và CI sạch
+    verify: CI xanh trên nhánh chính
+    confirm_by: machine
+    level: core
+  - id: p1-no-cycle
+    category: bảo trì
+    text: Không phụ thuộc vòng giữa các khối
+    verify: công cụ kiểm phụ thuộc vòng báo 0 chu trình, reviewer đối chiếu với C4
+    confirm_by: reviewer
+    level: core
+  - id: p1-no-secret
+    category: bảo mật
+    text: Không có secret trong git; có .env.example; chạy gitleaks
+    verify: gitleaks detect báo 0 phát hiện; .env.example tồn tại
+    confirm_by: machine
+    level: core
+  - id: p1-readme
+    category: tài liệu
+    text: README quickstart chạy được trong ≤10 phút
+    verify: người ngoài làm theo README, tính giờ
+    confirm_by: reviewer
+    level: core
+  - id: p1-c4-adr
+    category: tài liệu
+    text: C4 context và container khớp code; ADR 0001 ghi lựa chọn stack
+    verify: docs/architect + decision đầu tiên về stack
+    confirm_by: reviewer
+    level: core
+  - id: p1-license
+    category: phát hành
+    text: Có LICENSE và .gitignore
+    verify: hai tệp tồn tại ở gốc repo
+    confirm_by: machine
+    level: optional
+- n: 2
+  title: Demo
+  goal: 'Đủ để trình diễn: agent làm việc qua service + MCP, bảng việc, roadmap theo
+    phase, C4 map tương tác.'
+  level: demo
+  blocks:
+  - object: service
+    intent: extend
+  - object: mcp
+    intent: build
+  - object: roadmapmod
+    intent: build
+  - object: rview
+    intent: build
+  - object: c4view
+    intent: extend
+  steps: []
+  criteria:
+  - id: p2-gwt
+    category: chức năng
+    text: Mỗi tính năng có kịch bản Given/When/Then và test tương ứng
+    verify: mỗi tính năng trỏ tới kịch bản và test
+    confirm_by: reviewer
+    level: core
+  - id: p2-coverage
+    category: kiểm thử
+    text: Độ phủ test khối lõi ≥70%
+    verify: báo cáo coverage khối lõi ≥70%
+    confirm_by: machine
+    level: core
+  - id: p2-errors
+    category: chức năng
+    text: Xử lý lỗi nhất quán (mã lỗi, thông điệp, định dạng)
+    verify: rà soát một quy ước lỗi dùng chung
+    confirm_by: reviewer
+    level: core
+  - id: p2-asvs-l1
+    category: bảo mật
+    text: Đạt OWASP ASVS L1 và đã audit dependency
+    verify: checklist ASVS L1 + pip-audit/npm audit
+    confirm_by: reviewer
+    level: core
+  - id: p2-log-health
+    category: vận hành
+    text: Log có cấu trúc và có endpoint /health
+    verify: GET /health trả 200; log dạng JSON
+    confirm_by: machine
+    level: core
+  - id: p2-baseline-perf
+    category: hiệu năng
+    text: Có baseline p95 độ trễ cho luồng chính
+    verify: số đo p95 ghi trong repo
+    confirm_by: machine
+    level: optional
+  - id: p2-docs-howto-ref
+    category: tài liệu
+    text: Có how-to (Diátaxis) và reference CLI/API
+    verify: docs/ có how-to và reference
+    confirm_by: reviewer
+    level: core
+  - id: p2-docs-tutorial
+    category: tài liệu
+    text: Có tutorial và explanation (Diátaxis)
+    verify: docs/ có tutorial và explanation
+    confirm_by: reviewer
+    level: optional
+  - id: p2-changelog
+    category: phát hành
+    text: CHANGELOG có mục Unreleased
+    verify: CHANGELOG.md có mục Unreleased theo Keep a Changelog
+    confirm_by: machine
+    level: core
+  - id: p2-demo-script
+    category: trình diễn
+    text: Kịch bản demo chạy lại được bằng make demo
+    verify: make demo chạy đủ kịch bản, user xem
+    confirm_by: user
+    level: core
+- n: 3
+  title: Bảo mật
+  goal: 'Gia cố bảo mật: quyền theo vai thật, server và MCP cứng hoá, sao lưu và dữ
+    liệu nhạy cảm được bảo vệ.'
+  level: hardened
+  blocks:
+  - object: handler
+    intent: harden
+  - object: dbmod
+    intent: encrypt
+  - object: mcp_tools
+    intent: harden
+  steps: []
+  criteria:
+  - id: p3-threat-model
+    category: bảo mật
+    text: Threat model STRIDE theo ranh giới tin cậy
+    verify: tài liệu threat model, mỗi ranh giới có mối đe doạ và biện pháp
+    confirm_by: user
+    level: core
+  - id: p3-asvs-l2
+    category: bảo mật
+    text: Đạt ASVS L2 ở các chương liên quan
+    verify: checklist ASVS L2 theo chương
+    confirm_by: reviewer
+    level: core
+  - id: p3-crypto
+    category: bảo mật
+    text: TLS 1.2+, mã hoá at-rest, khoá để ngoài code, có kế hoạch xoay khoá
+    verify: cấu hình TLS, kiểm lưu trữ khoá, tài liệu xoay khoá
+    confirm_by: reviewer
+    level: core
+  - id: p3-ci-scan
+    category: bảo mật
+    text: SAST, dependency scan và secret scan chạy trong CI, 0 lỗi High
+    verify: CI báo 0 High
+    confirm_by: machine
+    level: core
+  - id: p3-sbom
+    category: bảo mật
+    text: Sinh SBOM
+    verify: tệp SBOM (CycloneDX/SPDX) sinh trong CI
+    confirm_by: machine
+    level: optional
+  - id: p3-sec-tests
+    category: kiểm thử
+    text: Test bảo mật kiểm quyền truy cập và fuzz đầu vào
+    verify: bộ test authz + fuzz chạy trong CI
+    confirm_by: machine
+    level: core
+  - id: p3-audit-log
+    category: bảo mật
+    text: Audit log không chứa PII
+    verify: rà soát mẫu log, không có dữ liệu cá nhân
+    confirm_by: reviewer
+    level: core
+  - id: p3-sec-docs
+    category: tài liệu
+    text: Có ADR bảo mật và SECURITY.md
+    verify: SECURITY.md và ADR bảo mật tồn tại
+    confirm_by: reviewer
+    level: core
+  - id: p3-coverage-hold
+    category: kiểm thử
+    text: Độ phủ test không giảm so với Demo
+    verify: coverage ≥ giá trị phase 2
+    confirm_by: machine
+    level: core
+  - id: p3-pentest
+    category: bảo mật
+    text: Pen-test hoặc review bảo mật từ bên ngoài
+    verify: báo cáo bên ngoài
+    confirm_by: user
+    level: optional
+- n: 4
+  title: Staging
+  goal: 'Tính năng con và môi trường thật: chạy trên máy khác qua Tailscale, đồng
+    bộ, MCP đủ tool, viewer hoàn thiện.'
+  level: staging
+  blocks:
+  - object: shell
+    intent: extend
+  - object: blocks
+    intent: extend
+  - object: c4mod
+    intent: extend
+  steps: []
+  criteria:
+  - id: p4-staging-env
+    category: vận hành
+    text: Staging giống production, có domain và TLS hợp lệ
+    verify: curl -I https://staging... hợp lệ; cấu hình khớp prod
+    confirm_by: machine
+    level: core
+  - id: p4-cicd
+    category: vận hành
+    text: CI/CD triển khai staging và chạy e2e
+    verify: pipeline deploy staging xanh kèm e2e
+    confirm_by: machine
+    level: core
+  - id: p4-coverage-contract
+    category: kiểm thử
+    text: Độ phủ ≥80% và có contract test
+    verify: coverage ≥80%; contract test xanh
+    confirm_by: machine
+    level: core
+  - id: p4-slo-load
+    category: hiệu năng
+    text: Có SLO và load test đạt
+    verify: báo cáo load test đạt ngưỡng SLO
+    confirm_by: machine
+    level: core
+  - id: p4-backup-restore
+    category: vận hành
+    text: Backup và diễn tập restore; ghi RPO/RTO
+    verify: biên bản diễn tập restore kèm RPO/RTO
+    confirm_by: user
+    level: core
+  - id: p4-alerts
+    category: vận hành
+    text: Metric và alert trỏ tới runbook
+    verify: mỗi alert có link runbook
+    confirm_by: reviewer
+    level: core
+  - id: p4-runbook
+    category: tài liệu
+    text: Có runbook và hướng dẫn vận hành staging
+    verify: docs/ có runbook và hướng dẫn staging
+    confirm_by: reviewer
+    level: core
+  - id: p4-arc42
+    category: tài liệu
+    text: arc42 rút gọn và C4 mức component (L3)
+    verify: tài liệu arc42 rút gọn; C4 L3 khớp code
+    confirm_by: reviewer
+    level: optional
+  - id: p4-zap
+    category: bảo mật
+    text: ZAP baseline scan 0 lỗi High
+    verify: báo cáo ZAP baseline
+    confirm_by: machine
+    level: core
+  - id: p4-feature-flag
+    category: bảo trì
+    text: Có feature flag cho tính năng rủi ro
+    verify: cơ chế flag và danh sách flag
+    confirm_by: reviewer
+    level: optional
+- n: 5
+  title: Release
+  goal: 'Phát hành: đóng gói, cài một lệnh, tài liệu người dùng, bàn giao vận hành.'
+  level: release
+  blocks:
+  - object: argp
+    intent: extend
+  - object: plan_yaml
+    intent: extend
+  steps: []
+  criteria:
+  - id: p5-semver-tag
+    category: phát hành
+    text: SemVer, tag có chữ ký, CHANGELOG theo phiên bản
+    verify: git tag -v hợp lệ; CHANGELOG có mục phiên bản
+    confirm_by: machine
+    level: core
+  - id: p5-repro-build
+    category: phát hành
+    text: Build lặp lại được, có SBOM và checksum
+    verify: hai lần build cho cùng checksum; SBOM đính kèm
+    confirm_by: machine
+    level: core
+  - id: p5-rollback
+    category: vận hành
+    text: Rollback đã diễn tập
+    verify: biên bản diễn tập rollback
+    confirm_by: user
+    level: core
+  - id: p5-smoke-prod
+    category: kiểm thử
+    text: Smoke test production
+    verify: smoke chạy trên production thoát 0
+    confirm_by: machine
+    level: core
+  - id: p5-alert-fire
+    category: vận hành
+    text: Alert đã thử bắn thật
+    verify: bắn alert thử, nhận được thông báo
+    confirm_by: user
+    level: core
+  - id: p5-sec-final
+    category: bảo mật
+    text: Checklist bảo mật cuối cùng
+    verify: checklist bảo mật phát hành đã tick đủ
+    confirm_by: reviewer
+    level: core
+  - id: p5-license
+    category: phát hành
+    text: Rà soát license của dependency
+    verify: công cụ license check không có vi phạm
+    confirm_by: machine
+    level: optional
+  - id: p5-release-notes
+    category: tài liệu
+    text: Release notes và hướng dẫn nâng cấp
+    verify: release notes + upgrade guide trong docs/
+    confirm_by: reviewer
+    level: core
+  - id: p5-ops-handover
+    category: tài liệu
+    text: Bàn giao vận hành (ops HANDOVER)
+    verify: HANDOVER vận hành cập nhật
+    confirm_by: user
+    level: core
+  - id: p5-retro
+    category: bảo trì
+    text: Retro sau phát hành
+    verify: ghi chú retro lưu trong docs/
+    confirm_by: user
+    level: core
