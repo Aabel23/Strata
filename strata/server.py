@@ -1,7 +1,7 @@
 """HTTP server: C4 viewer, pages and their JSON APIs. All data comes from the DB."""
 import http.server, json, mimetypes, pathlib, re, socket, sqlite3, threading
 from urllib.parse import parse_qs, unquote, urlsplit
-from strata import blocks, c4, db, service
+from strata import blocks, c4, db, roadmap, service
 
 SERVE_EXT = set(".py .js .mjs .ts .tsx .css .html .htm .md .txt .yaml .yml .json .toml .c .h .cpp .hpp .dart .java .kt .go .rs .svg .png .jpg .jpeg .gif .webp".split())
 
@@ -73,6 +73,10 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             if p == "/api/docs":
                 return self.json(rows("SELECT project,path,title,feature,kind,status,ord,updated_at,summary,json(code) code FROM doc" + (" WHERE project=?" if q.get("project") else "")
                                       + " ORDER BY project,ord,path", (q["project"],) if q.get("project") else ()))
+            if p == "/api/roadmap":
+                if not q.get("project"): return self.send_error(400, "project required")
+                with lock: out = roadmap.api(conn, q["project"], q.get("roadmap") or None, q.get("only") == "version")
+                return self.json(out) if out is not None else self.send_error(404)
             if p == "/api/audit": return self.audit(q)
             if p == "/api/search": return self.search(q)
             if parts[1:2] == ["docs"] and len(parts) > 3:

@@ -6,6 +6,9 @@ CREATE TABLE IF NOT EXISTS item(
   priority TEXT, spec JSON CHECK(spec IS NULL OR json_valid(spec)), always_load INT NOT NULL DEFAULT 0, core INT NOT NULL DEFAULT 0,
   owner TEXT, claimed_at TEXT, created_by TEXT, created_at TEXT, updated_at TEXT, version INT NOT NULL DEFAULT 1);
 
+-- roadmap steps/gates are addressed by (roadmap, step_key)
+CREATE UNIQUE INDEX IF NOT EXISTS item_step_key ON item(project, json_extract(spec,'$.roadmap'), json_extract(spec,'$.step_key')) WHERE kind IN ('step','gate');
+
 CREATE TABLE IF NOT EXISTS item_dep(
   item_id INTEGER NOT NULL REFERENCES item(id) ON DELETE CASCADE,
   depends_on INTEGER NOT NULL REFERENCES item(id) ON DELETE CASCADE,
@@ -73,7 +76,7 @@ CREATE TRIGGER IF NOT EXISTS decision_ai AFTER INSERT ON decision BEGIN
 
 CREATE TABLE IF NOT EXISTS page(
   project TEXT NOT NULL, slug TEXT NOT NULL, title TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK(kind IN ('research','discussion','note')),
+  kind TEXT NOT NULL CHECK(kind IN ('research','discussion','note','plan')),
   blocks JSON NOT NULL CHECK(json_valid(blocks)), text TEXT, updated_at TEXT,
   PRIMARY KEY(project,slug));
 

@@ -20,6 +20,7 @@ def init(path=None):
     rebuild = _migrate(c)
     c.executescript(SCHEMA.read_text())
     _finish_item(c)
+    _finish_page(c)
     if rebuild:  # copy rows from the old-CHECK table into the new one
         cols = ",".join(r["name"] for r in c.execute("PRAGMA table_info(c4_object_old)"))
         c.execute(f"INSERT INTO c4_object({cols}) SELECT {cols} FROM c4_object_old")
@@ -36,6 +37,15 @@ def _finish_item(c):
               "WHEN json_valid(scope) THEN json_object('scope',json(scope)) ELSE json_object('scope',scope) END FROM item_old")
     c.execute("DROP TABLE item_old"); c.commit()
     c.execute("PRAGMA foreign_keys=ON")
+    if (r := c.execute("PRAGMA integrity_check").fetchone()[0]) != "ok": raise RuntimeError(f"integrity_check: {r}")
+
+def _finish_page(c):
+    """Copy page_old (CHECK predates kind 'plan') into the rebuilt page table keeping rowids, so FTS refs stay valid."""
+    if not c.execute("SELECT 1 FROM sqlite_master WHERE name='page_old'").fetchone(): return
+    cols = ",".join(r["name"] for r in c.execute("PRAGMA table_info(page_old)"))
+    c.execute("DELETE FROM search WHERE src='page'")  # page_ai refills it row by row
+    c.execute(f"INSERT INTO page(rowid,{cols}) SELECT rowid,{cols} FROM page_old")
+    c.execute("DROP TABLE page_old"); c.commit()
     if (r := c.execute("PRAGMA integrity_check").fetchone()[0]) != "ok": raise RuntimeError(f"integrity_check: {r}")
 
 # columns added after a table was first created: (table, column, type)
@@ -58,6 +68,14 @@ def _migrate(c):
         c.commit(); c.execute("PRAGMA foreign_keys=OFF")  # no-op inside a transaction, hence the commit
         for t in ("item_ai", "item_au", "item_ad"): c.execute(f"DROP TRIGGER IF EXISTS {t}")
         c.execute("ALTER TABLE item RENAME TO item_old")  # init's schema script makes the new table, _finish_item copies
+    r = c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='page'").fetchone()
+    if r and "'plan'" not in r["sql"]:  # SQLite cannot alter a CHECK: back up, rename, schema.sql recreates, _finish_page copies
+        c.commit(); path = c.execute("PRAGMA database_list").fetchone()["file"]
+        if path:
+            import sqlite3
+            b = sqlite3.connect(path + ".pre-plan.bak"); c.backup(b); b.close()
+        for t in ("page_ai", "page_au", "page_ad"): c.execute(f"DROP TRIGGER IF EXISTS {t}")
+        c.execute("ALTER TABLE page RENAME TO page_old")
     r = c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='c4_object'").fetchone()
     if r and "'function'" not in r["sql"]:
         c.execute("ALTER TABLE c4_object RENAME TO c4_object_old"); return True

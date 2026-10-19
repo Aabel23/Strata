@@ -2,7 +2,7 @@
 // App shell. Read-only. All text goes through textContent (el() from page.js); never assigns markup.
 // el, get, enc and renderPage come from page.js (STRATA_SHELL makes it skip its own routing).
 const $=id=>document.getElementById(id);
-const TABS=[["overview","Tổng quan","o"],["task","Task","t"],["issue","Issue","i"],["decision","Decision","d"],["pages","Thảo luận","p"],["docs","Tài liệu","r"],["c4","Kiến trúc","a"],["audit","Nhật ký","l"]];
+const TABS=[["overview","Tổng quan","o"],["task","Task","t"],["roadmap","Lộ trình","m"],["issue","Issue","i"],["decision","Decision","d"],["pages","Thảo luận","p"],["docs","Tài liệu","r"],["c4","Kiến trúc","a"],["audit","Nhật ký","l"]];
 const TAB_LABEL=Object.fromEntries(TABS.map(t=>[t[0],t[1]]));
 const ST_ITEM=["proposed","approved","open","doing","review","done","rejected"];
 const ST_DEC=["proposed","accepted","superseded","rejected"];
@@ -54,7 +54,7 @@ const IC={overview:'<path d="M2.5 13.5h11M4 11V7M8 11V3.5M12 11V6"/>',task:'<cir
   issue:'<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.5M8 10.8v.2"/>',decision:'<path d="M8 2.5v11M3 5.5h10M3 5.5l-1.5 4h3zM13 5.5l-1.5 4h3z"/>',
   pages:'<path d="M3 3.5h10v7H7l-3 2.5v-2.5H3z"/>',docs:'<path d="M4 2.5h5.5L12 5v8.5H4z"/><path d="M6 8h4M6 10.5h4"/>',
   c4:'<rect x="2.5" y="2.5" width="4" height="4" rx="1"/><rect x="9.5" y="9.5" width="4" height="4" rx="1"/><path d="M6.5 4.5h3a2 2 0 0 1 2 2v3"/>',
-  audit:'<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',folder:'<path d="M2.5 4.5h4l1.5 1.5h5.5v6.5h-11z"/>',proj:'<path d="M2 12.5l3.5-6 2.5 3.5 2-2.5 4 5z"/>',
+  roadmap:'<path d="M3.5 14V2.5M3.5 3h8.5l-1.7 2.8L12 8.5H3.5"/>',audit:'<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',folder:'<path d="M2.5 4.5h4l1.5 1.5h5.5v6.5h-11z"/>',proj:'<path d="M2 12.5l3.5-6 2.5 3.5 2-2.5 4 5z"/>',
   chev:'<path d="M6 4l4 4-4 4"/>',prev:'<path d="M10 4L6 8l4 4"/>',reload:'<path d="M13 8a5 5 0 1 1-1.5-3.5M13 3v2.5h-2.5"/>',
   ext:'<path d="M9 3h4v4M13 3L7.5 8.5M11 9.5V13H3V5h3.5"/>',copy:'<rect x="5.5" y="5.5" width="7.5" height="7.5" rx="1.5"/><path d="M10.5 5.5V3H3v7.5h2.5"/>',
   sun:'<circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1"/>'};
@@ -118,7 +118,7 @@ async function render(){
   if(my!==token)return;
   document.title=(r.p?byId[r.p].name+" · "+TAB_LABEL[r.tab]+" · ":"")+"Strata";
   const rd=box.querySelector(":scope>.reader");
-  if(!rd&&!box.className)box.className="page"+(r.tab==="task"?" wide":"");
+  if(!rd&&!box.className)box.className="page"+(r.tab==="task"||r.tab==="roadmap"?" wide":"");
   $("content").replaceChildren(rd||box);
   $("content").scrollTop=0;
 }
@@ -198,6 +198,7 @@ const VIEW={
     box.append(g);
   },
   task:(box,p,id)=>boardView(box,p,id),
+  roadmap:(box,p,id)=>roadmapView(box,p,id),
   issue:(box,p,id)=>itemView(box,p,id,"issue"),
   async decision(box,p,id){
     const ds=await get("/api/decisions?project="+enc(p));
@@ -225,7 +226,7 @@ const VIEW={
       renderPage(await get("/api/page/"+enc(p)+"/"+enc(id)),root);
       return;
     }
-    const ps=await get("/api/pages?project="+enc(p));
+    const ps=(await get("/api/pages?project="+enc(p))).filter(x=>x.kind!=="plan"); // plan pages live under Lộ trình
     box.append(head("Thảo luận",ps.length));
     if(!ps.length)return box.append(empty("Chưa có page nào","Page được ghi bằng CLI hoặc MCP của strata."));
     ps.forEach(x=>{const a=link("",hashFor(p,"pages",x.slug),"row pg");a.append(icon("pages"),el("span","t",x.title),el("span","kind",x.kind),dateCell(x.updated_at));box.append(a)});
@@ -499,6 +500,107 @@ async function itemView(box,p,id,kind){
       a.append(priIcon(x.priority),el("span","id",(kind==="task"?"T-":"I-")+x.id),statusIcon(x.status),el("span","t",x.title),el("span","x",x.owner||""),dateCell(x.updated_at||x.created_at));return a}));
   };
   draw();box.append(chips,body);
+}
+
+/* ---------- Lộ trình (read-only): 6 sections of a roadmap from /api/roadmap. Data only reaches the DOM through textContent / inline(). ---------- */
+const LT_ST={approved:"Chưa làm",doing:"Đang làm",review:"Chờ kiểm",done:"Đạt",blocked:"Bị chặn"};
+const LT_FLAG={have:"done",missing:"block",decision:"doing",proposed:"todo"};
+// markdown subset from html_to_md: **b**, `c`, [t](url), newline. Relative links cannot resolve here, so they show as plain text.
+function ltMd(tag,cls,text){
+  const e=el(tag,cls);String(text==null?"":text).split("\n").forEach((ln,i)=>{if(i)e.append(el("br"));inline(e,ln.replace(/\[([^\]]+)\]\((?!https?:|\/|#)[^)\s]*\)/g,"$1"))});
+  return e;
+}
+const ltPct=(n,m)=>m?Math.round(100*n/m):0;
+function ltGo(root,id){const t=root.querySelector("#lt-"+CSS.escape(id));if(t)t.scrollIntoView({behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth",block:"start"})}
+function ltStatus(s){const x=el("span","lt-st st-"+s.state);x.append(el("i"),LT_ST[s.state]||s.state);return x}
+function ltStep(s,p){
+  const li=el("li","st-"+s.state+(s.orphan?" orphan":"")), body=el("div","lt-sb"), top=el("div","lt-stop");
+  li.append(el("code","",s.key));
+  top.append(el("strong","",s.title),ltStatus(s));
+  if(s.stale)top.append(tag("cần duyệt lại","stale","Tiêu chí đã đổi sau khi đạt"));
+  if(s.orphan)top.append(tag("ngoài kế hoạch","block","Không còn trong plan mới"));
+  top.append(link("#"+s.id,hashFor(p,"task",s.id),"lt-id"));
+  body.append(top);
+  if(s.body)body.append(ltMd("p","lt-body",s.body));
+  if(s.proof){const pr=el("div","lt-proof");pr.append(el("b","","Bằng chứng"),s.proof);body.append(pr)}
+  const rec=el("div","lt-rec");
+  [["người làm",s.owner],["người kiểm",s.reviewer],["bằng chứng",s.evidence],["ghi chú",s.note||s.blocked],["cập nhật",s.updated]].forEach(([k,v])=>{if(v){const r=el("span");r.append(el("b","",k+" "),String(v));rec.append(r)}});
+  if(rec.childNodes.length)body.append(rec);
+  li.append(body);return li;
+}
+function ltPhase(ph,d,p,lastGate){
+  const keys=ph.steps.filter(k=>d.steps.some(s=>s.key===k)), extra=d.steps.filter(s=>s.phase===ph.n&&!ph.steps.includes(s.key));
+  const ss=[...keys.map(k=>d.steps.find(s=>s.key===k)),...extra], live=ss.filter(s=>!s.orphan), n=live.filter(s=>s.status==="done"&&!s.stale).length;
+  const a=el("article","lt-phase");a.id="lt-"+ph.anchor;
+  const h=el("div","lt-phead"), t=el("div");t.append(el("h3","",ph.title),ltMd("p","lt-intro",ph.intro),el("span","lt-mark",ph.mark));
+  const ring=el("div","lt-ring");ring.style.setProperty("--pct",ltPct(n,live.length)+"%");ring.title=n+"/"+live.length+" bước đạt";ring.append(el("span","",n+"/"+live.length));
+  h.append(t,ring);a.append(h);
+  const ol=el("ol","lt-steps");ss.forEach(s=>ol.append(ltStep(s,p)));a.append(ol);
+  const g=el("div","lt-gate"+(lastGate&&lastGate.status==="done"?" passed":""));
+  g.append(el("b","",ph.gate.label),ltMd("span","",ph.gate.body));
+  if(lastGate)g.append(ltGateTag(lastGate));
+  a.append(g);return a;
+}
+function ltGateTag(g){
+  const x=el("span","lt-gtag"+(g.status==="done"?" passed":g.ready?" ready":""));
+  x.textContent=g.key+" · "+(g.status==="done"?"đã qua":g.ready?"đủ bước, chờ user duyệt":g.done+"/"+g.total+" bước");return x;
+}
+function ltSection(sec,d,p,root){
+  const s=el("section","lt-sec");s.id="lt-"+sec.id;s.append(el("h2","",sec.title));
+  if(sec.intro)s.append(ltMd("p","lt-intro",sec.intro));
+  const gate=Object.fromEntries(d.gates.map(g=>[g.key,g]));
+  if(sec.facts){const g=el("div","lt-facts");sec.facts.forEach(f=>{const a=el("article","lt-fact");a.append(el("span","lt-flag f-"+(LT_FLAG[f.flagClass]||"todo"),f.flag),el("h3","",f.title),ltMd("p","",f.body));g.append(a)});s.append(g)}
+  if(sec.route){const g=el("div","lt-route");sec.route.forEach(r=>{
+      const id=(/^G\d+/.exec(r.code)||[""])[0], gt=gate[id], b=el("button","lt-gate-card"+(gt&&gt.status==="done"?" passed":gt&&gt.ready?" ready":""));
+      b.append(el("b","",r.code),el("strong","",r.title),el("small","",r.detail));if(gt)b.append(ltGateTag(gt));
+      b.onclick=()=>ltGo(root,String(r.href||"").replace(/^#/,""));g.append(b)});s.append(g)}
+  if(sec.table){const w=el("div","lt-table"), t=el("table"), hr=el("tr");
+    [...sec.table.headers,"Tiến độ"].forEach(x=>hr.append(el("th","",x)));const th=el("thead");th.append(hr);t.append(th);const tb=el("tbody");
+    sec.table.rows.forEach(r=>{const tr=el("tr");r.forEach(x=>tr.append(el("td","",x)));const pp=d.progress.phases.find(x=>String(x.phase)===r[0]);tr.append(el("td","",pp?pp.done+"/"+pp.total:"-"));tb.append(tr)});
+    t.append(tb);w.append(t);s.append(w)}
+  if(sec.callout)s.append(ltMd("div","lt-callout",sec.callout));
+  if(sec.phases){const last={};d.gates.forEach(g=>last[Math.max(...g.phases)]=g);sec.phases.forEach(ph=>s.append(ltPhase(ph,d,p,last[ph.n])))}
+  if(sec.workstreams){const g=el("div","lt-ws");sec.workstreams.forEach(w=>{const a=el("article","lt-card");a.append(el("h3","",w.title));const ul=el("ul");w.items.forEach(i=>ul.append(ltMd("li","",i)));a.append(ul);g.append(a)});s.append(g)}
+  if(sec.decisions){const g=el("div","lt-dec");sec.decisions.forEach(x=>{const a=el("article");a.append(el("b","",x.label),ltMd("p","",x.body));g.append(a)});s.append(g)}
+  if(sec.sources){const ol=el("ol","lt-src");sec.sources.forEach(x=>ol.append(ltMd("li","",x)));s.append(ol)}
+  return s;
+}
+function roadmapDoc(d,p){
+  const pl=d.plan, root=el("div","lt"), c={};d.steps.forEach(s=>{if(!s.orphan)c[s.state]=(c[s.state]||0)+(s.state==="done"&&s.stale?0:1)});
+  const hd=el("header","lt-head");hd.append(el("div","eyebrow",pl.header.eyebrow),el("h1","foil",pl.header.title),ltMd("p","lt-lead",pl.header.lead));
+  const meta=el("div","lt-meta");pl.header.meta.forEach(m=>{const s=el("span");s.append(el("b","",m.label+" "),m.value);meta.append(s)});hd.append(meta);
+  root.append(hd);
+  if(pl.banner)root.append(el("p","lt-banner",pl.banner));
+  const top=el("div","lt-top");pl.summary.forEach(x=>{const a=el("article","lt-card");a.append(el("b","",x.label),ltMd("p","",x.body));top.append(a)});root.append(top);
+  const pr=el("section","lt-prog"), ph=el("div","lt-ptop"), tx=el("div"), done=d.progress.done, tot=d.progress.total;
+  tx.append(el("h2","",pl.progress.title),ltMd("p","lt-intro",pl.progress.intro));
+  const cnt=el("div","lt-count",done+"/"+tot);cnt.append(el("small","","bước đạt"));ph.append(tx,cnt);
+  const bar=el("div","bar lt-bar"), b1=el("i","b-done"), b2=el("i","b-doing");b1.style.width=ltPct(done,tot)+"%";b2.style.width=ltPct((c.doing||0)+(c.review||0),tot)+"%";bar.append(b1,b2);
+  const st=el("div","lt-stats");["done","review","doing","approved","blocked"].forEach(k=>{if(c[k]){const x=ltStatus({state:k});x.append(" "+c[k]);st.append(x)}});
+  const nst=d.steps.filter(s=>s.stale).length, nor=d.steps.filter(s=>s.orphan).length;
+  if(nst)st.append(tag(nst+" cần duyệt lại","stale"));if(nor)st.append(tag(nor+" ngoài kế hoạch","block"));
+  pr.append(ph,bar,st,ltMd("p","lt-guide",pl.progress.guide));root.append(pr);
+  const nav=el("nav","lt-nav");nav.setAttribute("aria-label","Các phần của lộ trình");
+  pl.sections.forEach(s=>{const b=el("button","",s.title);b.onclick=()=>ltGo(root,s.id);nav.append(b)});root.append(nav);
+  pl.sections.forEach(s=>root.append(ltSection(s,d,p,root)));
+  return root;
+}
+async function roadmapView(box,p,id){
+  box.className="page wide";
+  const list=await get("/api/roadmap?project="+enc(p));
+  if(!list.length){box.append(head("Lộ trình",0),empty("Chưa có lộ trình","Nạp bằng:","strata.py roadmap import PLAN.json --project "+p+" --roadmap ID"));return}
+  const cur=list.find(x=>x.roadmap===id)||list[0], url="/api/roadmap?project="+enc(p)+"&roadmap="+enc(cur.roadmap), host=el("div");
+  if(list.length>1){const r=el("div","tchips");r.append(el("span","lbl","Lộ trình"));list.forEach(x=>{const a=link(x.title,hashFor(p,"roadmap",x.roadmap),x===cur?"on":"");r.append(a)});box.append(r)}
+  box.append(host);
+  let ver=null;
+  const load=async()=>{const d=await get(url);if(d.version===ver)return;ver=d.version;const sc=$("content").scrollTop;host.replaceChildren(roadmapDoc(d,p));$("content").scrollTop=sc};
+  await load();
+  const tick=async()=>{
+    if(!host.isConnected){clearInterval(t);document.removeEventListener("visibilitychange",tick);return}
+    if(document.hidden)return;
+    try{const v=await get(url+"&only=version");if(v.version!==ver)await load()}catch{}
+  };
+  const t=setInterval(tick,3000);document.addEventListener("visibilitychange",tick);
 }
 
 /* ---------- command palette ---------- */
