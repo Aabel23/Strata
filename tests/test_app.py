@@ -236,3 +236,37 @@ def test_details_validate():
     assert load_doc(ok)[1] == []
     for old, new in (("[[k, v `c`]]", "[k, v]"), ("[[k, v `c`]]", "[[k]]"), ("[[k, v]]", "[[k, 1]]"), ("details_title: X", "details_title: 1")):
         assert load_doc(ok.replace(old, new, 1))[1], (old, new)
+
+
+def test_api_items_board_fields(env):
+    base, p, _ = env
+    SPEC = '{"goal":"g","acceptance":["a","b"],"verify":"v","scope":{"touch":["x"]}}'
+    c = db.connect(p)
+    c.execute("INSERT INTO item(project,kind,title,status,priority,spec) VALUES('a','task','nền','approved','high',?)", (SPEC,))  # id 3
+    c.execute("INSERT INTO item(project,kind,title,status,spec) VALUES('a','task','phụ','approved',?)", (SPEC,))  # id 4
+    c.execute("INSERT INTO item_dep VALUES(4,3)")
+    c.execute("INSERT INTO c4_object(id,project,type,name) VALUES('o1','a','system','O1')")
+    c.execute("INSERT INTO c4_link VALUES('a','o1','item',3)"); c.execute("INSERT INTO c4_link VALUES('a','o1','decision',1)")
+    c.commit()
+    assert [x["id"] for x in J(env, "/api/items?project=a&ready=1")] == [3]  # 4 waits on 3
+    assert [x["id"] for x in J(env, "/api/items?project=a&owner=nobody")] == []
+    assert cli(p, "item", "claim", "3", "--as", "coder")[0] == 0
+    assert [x["id"] for x in J(env, "/api/items?owner=coder")] == [3]
+    d = J(env, "/api/items?id=3")[0]
+    assert d["spec"]["acceptance"] == ["a", "b"] and d["claimed_at"]
+    assert d["deps"] == {"needs": [], "blocks": [{"id": 4, "title": "phụ", "status": "approved"}]}
+    assert d["links"]["c4"] == ["o1"] and [x["title"] for x in d["links"]["decisions"]] == ["Chọn SQLite"]
+    assert d["history"][0]["to"] == "doing" and d["history"][0]["actor"] == "coder"
+    assert J(env, "/api/items?id=4")[0]["deps"]["needs"][0]["id"] == 3
+    assert "deps" not in J(env, "/api/items?project=a")[0]
+    assert get(base, "/api/items?status=review")[0] == 200 and get(base, "/api/items?ready=1&status=bogus")[0] == 400
+
+
+def test_no_write_endpoint():
+    src = (ROOT / "strata/server.py").read_text()
+    assert not any(m in src for m in ("do_POST", "do_PUT", "do_DELETE", "do_PATCH"))
+
+
+def test_board_ui_filters_in_url():
+    js = (ROOT / "viewer/app.js").read_text()
+    assert "ready=1" in js and "URLSearchParams" in js
