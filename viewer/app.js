@@ -376,10 +376,11 @@ function claimAge(x){return x.status==="doing"&&x.claimed_at?rel(x.claimed_at):"
 const stale=x=>x.status==="doing"&&x.claimed_at&&Date.now()-Date.parse(x.claimed_at)>DAY;
 function boardHref(p,id,qs){const s=qs.toString();return hashFor(p,"task",id)+(s?"?"+s:"")}
 function itemCard(x,p,qs,sel,blockedBy){
-  const a=link("",boardHref(p,x.id,qs),"tcard"+(String(x.id)===sel?" sel":""));
+  const a=link("",boardHref(p,x.id,qs),"tcard"+(String(x.id)===sel?" sel":"")+(x.off_roadmap?" offrm":""));
   const m=el("span","mono","#"+x.id+(x.kind!=="task"?" "+x.kind:"")+(x.owner?" · "+x.owner:"")+(claimAge(x)?" · "+claimAge(x):""));
   const row=el("span","trow");
   if(x.priority)row.append(tag(PRI_TAG[String(x.priority).toLowerCase()]||x.priority,"pri-"+String(x.priority).toLowerCase()));
+  if(x.phase!=null)row.append(tag("P"+x.phase,x.off_roadmap?"offrm":"phase",x.off_roadmap?"Phase "+x.phase+", ngoài phase đang chạy của lộ trình":"Phase "+x.phase+" của lộ trình"));
   if(acN(x))row.append(tag("AC "+acN(x)));
   if(blockedBy&&blockedBy.length)row.append(tag("chặn bởi "+blockedBy.map(i=>"#"+i).join(" "),"block"));
   else if(x.spec&&x.spec.blocked)row.append(tag("bị chặn","block"));
@@ -523,12 +524,42 @@ function ltPhase(ph,d,p,lastGate){
   const h=el("div","lt-phead"), t=el("div");t.append(el("h3","",ph.title));if(ph.intro)t.append(ltMd("p","lt-intro",ph.intro));if(ph.mark)t.append(el("span","lt-mark",ph.mark));
   const ring=el("div","lt-ring");ring.style.setProperty("--pct",ltPct(n,live.length)+"%");ring.title=n+"/"+live.length+" bước đạt";ring.append(el("span","",n+"/"+live.length));
   h.append(t,ring);a.append(h);
-  const ol=el("ol","lt-steps");ss.forEach(s=>ol.append(ltStep(s,p)));a.append(ol);
+  const def=(d.phases||[]).find(x=>x.n===ph.n);if(def)a.append(ltMeaning(def,p));
+  const ol=el("ol","lt-steps");ss.forEach(s=>ol.append(ltStep(s,p)));if(ss.length||!def)a.append(ol);
   if(ph.gate||lastGate){const g=el("div","lt-gate"+(lastGate&&lastGate.status==="done"?" passed":""));
     if(ph.gate)g.append(el("b","",ph.gate.label),ltMd("span","",ph.gate.body));
     if(lastGate)g.append(ltGateTag(lastGate));
+    const miss=def&&def.gate&&def.gate.status!=="done"?def.gate.missing||[]:[];
+    if(miss.length){const ul=el("ul","lt-gaps"), cr=Object.fromEntries(def.criteria.map(c=>[c.id,c.text]));ul.append(el("li","lt-glab","Còn thiếu để qua cổng"));
+      miss.forEach(m=>{const k=/^criterion (.+)$/.exec(m);ul.append(el("li","",k?cr[k[1]]||k[1]:/^\d+\.\d+$/.test(m)?"bước "+m:m))});g.append(ul)}
     a.append(g)}
   return a;
+}
+const LT_LEVEL={skeleton:"khung",demo:"trình diễn",hardened:"gia cố",staging:"staging",release:"phát hành"};
+const LT_INTENT={build:"dựng mới",extend:"mở rộng",harden:"gia cố",encrypt:"mã hoá"};
+const LT_WHO={machine:"máy",reviewer:"reviewer",user:"user"};
+// R1 phase definition (goal, level, blocks, criteria) inside the existing phase card; absent for plan.json roadmaps
+function ltMeaning(def,p){
+  const m=el("div","lt-mean"), g=el("p","lt-goal");
+  g.append(el("span","lt-lvl","Mức "+(LT_LEVEL[def.level]||def.level)),def.goal||"");m.append(g);
+  if(def.blocks.length){const ul=el("ul","lt-blk");ul.append(el("li","lt-glab","Khối cần làm"));
+    def.blocks.forEach(b=>{const li=el("li"), a=link(b.object,hashFor(p,"c4",b.object),"lt-obj"), bar=el("span","bar"), i=el("i","b-done");
+      i.style.width=ltPct(b.done,b.total)+"%";bar.append(i);
+      li.append(a,el("span","lt-int",LT_INTENT[b.intent]||b.intent),bar,el("span","lt-n",b.total?b.done+"/"+b.total:"chưa có task"));
+      if(b.pulled_from!=null)li.append(el("span","lt-pull","kéo từ phase "+b.pulled_from));ul.append(li)});m.append(ul)}
+  if(def.criteria.length){
+    const ok=c=>c.result&&["pass","waived"].includes(c.result.result), n=def.criteria.filter(ok).length;
+    const dt=el("details","lt-crit"), sm=el("summary");sm.append(el("span","lt-glab","Tiêu chí chuyên nghiệp"),el("span","lt-n",n+"/"+def.criteria.length+" đạt"));dt.append(sm);
+    if(def.current)dt.open=true;
+    [...new Set(def.criteria.map(c=>c.category))].forEach(cat=>{const grp=el("div","lt-cgrp");grp.append(el("h4","",cat));
+      def.criteria.filter(c=>c.category===cat).forEach(c=>{const r=c.result||{}, row=el("div","lt-cr"+(ok(c)?" ok":r.result==="fail"?" fail":""));
+        const tx=el("div","lt-ct");tx.append(el("span","",c.text+(c.level==="optional"?" (tuỳ chọn)":"")),el("small","",c.verify));
+        const st=el("span","lt-st "+(ok(c)?"st-done":r.result==="fail"?"st-doing":""));st.append(el("i"),r.result==="pass"?"đạt":r.result==="waived"?"miễn":r.result==="fail"?"chưa đạt":"chưa đánh giá");
+        if(r.value)st.append(" · "+r.value);
+        row.append(tx,el("span","lt-who",LT_WHO[c.confirm_by]||c.confirm_by),st);grp.append(row)});
+      dt.append(grp)});
+    m.append(dt)}
+  return m;
 }
 function ltGateTag(g){
   const x=el("span","lt-gtag"+(g.status==="done"?" passed":g.ready?" ready":""));
@@ -554,7 +585,26 @@ function ltSection(sec,d,p,root){
   if(sec.sources){const ol=el("ol","lt-src");sec.sources.forEach(x=>ol.append(ltMd("li","",x)));s.append(ol)}
   return s;
 }
-function roadmapDoc(d,p){
+// camps for the map: phases of the plan's sections (both roadmap kinds), gate cairn after the last phase a gate covers
+function ltCamps(d){
+  const phs=[];d.plan.sections.forEach(s=>(s.phases||[]).forEach(ph=>phs.push(ph)));
+  if(!phs.length)(d.phases||[]).forEach(ph=>phs.push({n:ph.n,title:ph.title}));
+  const gs=(d.gates||[]).filter(g=>(g.phases||[]).length), passed=n=>gs.some(g=>g.phases.includes(n)&&g.status==="done");
+  const cur=d.current_phase!=null?d.current_phase:(phs.find(ph=>!passed(ph.n))||{}).n;
+  return phs.map(ph=>{const g=gs.find(g=>Math.max(...g.phases)===ph.n), gOpen=g&&g.phases.includes(cur);
+    return {n:ph.n,anchor:ph.anchor||String(ph.n),label:String(ph.title||"Phase "+ph.n).replace(/^Phase\s*\d+\s*[·:.-]\s*/i,""),
+      state:passed(ph.n)?"done":ph.n===cur?"doing":"todo",gate:g&&{key:g.key,state:g.status==="done"?"done":gOpen?"open":"todo"},cur}});
+}
+function ltMapBox(camps,d,root,sel,pick){
+  const cur=camps[0].cur, pp=(d.progress.phases||[]).find(x=>x.phase===cur), box=el("div","lt-mapbox"), sc=el("div","lt-mapscroll");
+  const opt={cur,sel,pct:pp?ltPct(pp.done,pp.total):0,summit:"Đỉnh · phát hành",label:"Bản đồ lộ trình: mỗi trại là một phase, bấm để xem chi tiết",onPick:pick};
+  // redraw at the real width (text stays fixed-size); one rAF per resize burst
+  let w=0, raf=0;const ro=new ResizeObserver(()=>{if(!box.isConnected)return ro.disconnect();cancelAnimationFrame(raf);raf=requestAnimationFrame(()=>{
+    const nw=box.clientWidth;if(!nw||nw===w)return;w=nw;const f=sc.contains(document.activeElement)&&document.activeElement.getAttribute("aria-label");
+    sc.replaceChildren(astraMap(camps,{...opt,width:nw}));if(f){const c=[...sc.querySelectorAll(".camp")].find(x=>x.getAttribute("aria-label")===f);if(c)c.focus({preventScroll:true})}})});
+  ro.observe(box);box.append(sc);return box;
+}
+function roadmapDoc(d,p,sel,pick){
   const pl=d.plan, root=el("div","lt"), c={};d.steps.forEach(s=>{if(!s.orphan)c[s.state]=(c[s.state]||0)+(s.state==="done"&&s.stale?0:1)});
   const H=pl.header||{}, hd=el("header","lt-head");
   if(H.eyebrow)hd.append(el("div","eyebrow",H.eyebrow));
@@ -563,6 +613,7 @@ function roadmapDoc(d,p){
   root.append(hd);
   if(pl.banner)root.append(el("p","lt-banner",pl.banner));
   if((pl.summary||[]).length){const top=el("div","lt-top");pl.summary.forEach(x=>{const a=el("article","lt-card");a.append(el("b","",x.label),ltMd("p","",x.body));top.append(a)});root.append(top)}
+  const camps=ltCamps(d);if(camps.length)root.append(ltMapBox(camps,d,root,sel,pick));
   const PG=pl.progress||{};
   const pr=el("section","lt-prog"), ph=el("div","lt-ptop"), tx=el("div"), done=d.progress.done, tot=d.progress.total;
   tx.append(el("h2","",PG.title||"Tiến độ"));if(PG.intro)tx.append(ltMd("p","lt-intro",PG.intro));
@@ -584,9 +635,18 @@ async function roadmapView(box,p,id){
   const cur=list.find(x=>x.roadmap===id)||list[0], url="/api/roadmap?project="+enc(p)+"&roadmap="+enc(cur.roadmap), host=el("div");
   if(list.length>1){const r=el("div","tchips");r.append(el("span","lbl","Lộ trình"));list.forEach(x=>{const a=link(x.title,hashFor(p,"roadmap",x.roadmap),x===cur?"on":"");r.append(a)});box.append(r)}
   box.append(host);
-  let ver=null;
-  const load=async()=>{const d=await get(url);if(d.version===ver)return;ver=d.version;const sc=$("content").scrollTop;host.replaceChildren(roadmapDoc(d,p));$("content").scrollTop=sc};
+  let ver=null, data=null, sel=+hq().get("ph")||null;
+  if(hq().get("ph")==="0")sel=0;
+  // camp pick: highlight + scroll to that phase card; the hash keeps it (replaceState: no re-render)
+  const pick=n=>{sel=n;const q=hq();q.set("ph",n);history.replaceState(null,"",location.hash.split("?")[0]+"?"+q);draw();
+    const cp=host.querySelector(".lt-map .camp.sel");if(cp)cp.focus({preventScroll:true});
+    const a=host.querySelector(".lt-phase.sel");if(a)a.scrollIntoView({behavior:calm.matches?"auto":"smooth",block:"start"})};
+  const draw=()=>{const camps=ltCamps(data), s=sel!=null&&camps.some(c=>c.n===sel)?sel:camps.length?camps[0].cur:null;
+    host.replaceChildren(roadmapDoc(data,p,s,pick));const c=camps.find(c=>c.n===s);
+    const a=c&&host.querySelector("#lt-"+CSS.escape(c.anchor));if(a)a.classList.add("sel")};
+  const load=async()=>{const d=await get(url);if(d.version===ver)return;ver=d.version;data=d;const sc=$("content").scrollTop;draw();$("content").scrollTop=sc};
   await load();
+  if(sel!=null)requestAnimationFrame(()=>{const a=host.querySelector(".lt-phase.sel");if(a)a.scrollIntoView({block:"start"})});
   const tick=async()=>{
     if(!host.isConnected){clearInterval(t);document.removeEventListener("visibilitychange",tick);return}
     if(document.hidden)return;
