@@ -14,6 +14,7 @@
 8. **Subagent không đọc vault.** Prompt giao cho chúng chỉ gồm câu hỏi, quyết định user vừa nói, phạm vi code.
 9. Việc dài chạy nền. Việc độc lập chia subagent song song. Chỉ đọc đủ để hành động.
 10. Báo cáo trung thực: test fail thì nói kèm output; bước nào bỏ qua thì nói.
+11. **Ngôn ngữ mặc định:** dùng tiếng Anh trong hội thoại, tài liệu mới và prompt cho agent; chỉ dùng tiếng Việt khi user yêu cầu hoặc cần giữ nguyên trích dẫn/nội dung gốc.
 
 ## Luồng làm việc (tính năng hoặc hệ thống mới)
 
