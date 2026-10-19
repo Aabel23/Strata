@@ -2,15 +2,30 @@
 import json, pathlib
 import yaml
 
-TYPES = {"actor", "system", "app", "store", "component", "group"}
+TYPES = {"actor", "system", "app", "store", "component", "group", "file", "function"}
+IFACE_KINDS = {"http", "function", "queue", "event"}
+CONN_KINDS = {"network", "call", "queue"}
 STATUS = {"live", "future", "deprecated", "removed"}
 # Which parent types each type may sit under (None = top level).
 PARENTS = {"actor": {None, "group"}, "system": {None, "group"}, "group": {None, "group", "system", "app"},
-           "app": {"system", "group"}, "store": {"system", "group"}, "component": {"app", "group"}}
+           "app": {"system", "group"}, "store": {"system", "group"}, "component": {"app", "group"},
+           "file": {"component", "file"}, "function": {"component", "file"}}
+
+
+KEYS = {
+    "objects": {"id", "type", "name", "parent", "technology", "description", "tags", "links", "status", "responsibilities", "state", "interfaces"},  # interfaces: nested by read_model
+    "connections": {"id", "from", "to", "name", "technology", "status", "direction", "tags", "description", "feature", "interface", "payload", "kind"},
+    "interfaces": {"id", "object", "kind", "name", "signature", "purpose", "input", "output", "errors"},
+    "flows": {"id", "name", "steps"},
+    "steps": {"id", "connection", "at", "from", "to", "text", "payload", "interface", "reverse"}}
 
 
 def load(path):
-    model = yaml.safe_load(pathlib.Path(path).read_text(encoding="utf-8")) or {}
+    try: model = yaml.safe_load(pathlib.Path(path).read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as e:
+        mk = getattr(e, "problem_mark", None)
+        raise ValueError(f"YAML sai cú pháp{f' dòng {mk.line + 1} cột {mk.column + 1}' if mk else ''}: "
+                         f"{getattr(e, 'problem', e)} (chuỗi có : ? # {{ }} , thì bọc \"...\")") from None
     root = (pathlib.Path(path).resolve().parent / model.get("root", ".")).resolve()
     return model, root
 
@@ -18,6 +33,14 @@ def load(path):
 def check(m, root):
     """Return (errors, warnings, n_objects, n_connections) for a model dict."""
     errs, warns = [], []
+    # Unquoted ", " inside a flow mapping silently becomes an extra key: flag any unknown key.
+    for sec, keys in KEYS.items():
+        rows = m.get(sec) or []
+        if sec == "steps": rows = [(f"flow {f.get('id')} bước {i}", st) for f in m.get("flows") or [] for i, st in enumerate(f.get("steps") or [], 1)]
+        else: rows = [(f"{sec} {r.get('id')}", r) for r in rows if isinstance(r, dict)]
+        for where, r in rows:
+            bad = [k for k in r if k not in keys]
+            if bad: warns.append(f"{where}: key lạ {bad} (chuỗi có dấu phẩy thì bọc \"...\")")
     objs = {}
     for o in m.get("objects", []):
         if o.get("id") in objs: errs.append(f"trùng id: {o.get('id')}")
@@ -35,30 +58,82 @@ def check(m, root):
             if not link.startswith("http") and not (root / link).exists():
                 errs.append(f"{o['id']}: link chết '{link}'")
         if not o.get("description"): warns.append(f"{o['id']}: thiếu description")
+    ifaces = {}
+    for i in m.get("interfaces") or []:
+        if i.get("id") in ifaces: errs.append(f"trùng id interface: {i.get('id')}")
+        ifaces[i.get("id")] = i
+        if i.get("object") not in objs: errs.append(f"interface {i.get('id')}: object '{i.get('object')}' không tồn tại")
+        if i.get("kind") is not None and i["kind"] not in IFACE_KINDS: errs.append(f"interface {i.get('id')}: kind '{i['kind']}' không hợp lệ")
     used = set()
     conns = {c.get("id", f"c{i}"): c for i, c in enumerate(m.get("connections", []))}
     for cid, c in conns.items():
         for end in ("from", "to"):
             if c.get(end) not in objs: errs.append(f"connection {cid}: {end} '{c.get(end)}' không tồn tại")
             used.add(c.get(end))
+        if c.get("interface") is not None:
+            i = ifaces.get(c["interface"])
+            if i is None: errs.append(f"connection {cid}: interface '{c['interface']}' không tồn tại")
+            elif i.get("object") != c.get("to"): errs.append(f"connection {cid}: interface '{c['interface']}' không thuộc '{c.get('to')}'")
+        if c.get("kind") is not None and c["kind"] not in CONN_KINDS: errs.append(f"connection {cid}: kind '{c['kind']}' không hợp lệ")
         if not c.get("technology"): warns.append(f"connection {cid} ({c.get('from')}→{c.get('to')}): thiếu technology")
     for f in m.get("flows", []):
+        prev = None
         for i, s in enumerate(f.get("steps", []), 1):
-            ok = s.get("connection") in conns or any(c.get("from") == s.get("from") and c.get("to") == s.get("to") for c in conns.values())
-            if not ok: errs.append(f"flow {f.get('id')} bước {i}: không khớp connection nào")
+            where = f"flow {f.get('id')} bước {i}"
+            ends, err = step_ends(s, conns, objs)
+            if err: errs.append(f"{where}: {err}")
+            if s.get("interface") is not None and s["interface"] not in ifaces:
+                errs.append(f"{where}: interface '{s['interface']}' không tồn tại")
+            if ends and prev and not _related(objs, prev[1], ends[0]):
+                warns.append(f"{where}: đứt mạch, bắt đầu ở '{ends[0]}' nhưng bước trước kết thúc ở '{prev[1]}'")
+            prev = ends or prev
     parents = {o.get("parent") for o in objs.values()}
     for oid in objs:
         if oid not in used and oid not in parents: warns.append(f"{oid}: không có kết nối nào")
     return errs, warns, len(objs), len(conns)
 
 
+def step_ends(s, conns, objs):
+    """(start, end) of a flow step and an error text or None.
+
+    Step forms: {connection, reverse?} | {at} | legacy {from, to}; plus optional id, text, payload, interface.
+    reverse: true walks the connection backwards (to → from), used for responses."""
+    if not isinstance(s, dict): return None, "bước phải là object"
+    has_c, has_at, has_ft = s.get("connection") is not None, s.get("at") is not None, s.get("from") is not None or s.get("to") is not None
+    if has_c + has_at + has_ft != 1: return None, "cần đúng một trong connection | at | from+to"
+    if s.get("reverse") and not has_c: return None, "reverse chỉ dùng với connection"
+    if has_at:
+        return ((s["at"], s["at"]), None) if s["at"] in objs else (None, f"at '{s['at']}' không tồn tại")
+    if has_c:
+        c = conns.get(s["connection"])
+        if c is None: return None, f"connection '{s['connection']}' không tồn tại"
+        a, b = c.get("from"), c.get("to")
+        return ((b, a) if s.get("reverse") else (a, b)), None
+    if any(c.get("from") == s.get("from") and c.get("to") == s.get("to") for c in conns.values()):
+        return (s["from"], s["to"]), None
+    return None, "không khớp connection nào"
+
+
+def _related(objs, a, b):
+    """a == b or one is an ancestor of the other."""
+    def up(x):
+        seen = []
+        while x is not None and x not in seen: seen.append(x); x = (objs.get(x) or {}).get("parent")
+        return seen
+    return a in up(b) or b in up(a)
+
+
+CODE_TYPES = {"app", "component", "file", "function"}
+
+
 def issues_by_object(m, root):
-    """{object id: [codes]} for objects with a problem: dead_link, no_link, no_desc."""
+    """{object id: [codes]} for objects with a problem: dead_link, no_link, no_desc.
+    no_link only for code-bearing types; actors, systems, stores, groups need no code link."""
     out = {}
     for o in m.get("objects", []):
         links = o.get("links") or []
         codes = (["dead_link"] if any(not l.startswith("http") and not (root / l).exists() for l in links) else []) \
-            + ([] if links else ["no_link"]) + ([] if o.get("description") else ["no_desc"])
+            + ([] if links or o.get("type") not in CODE_TYPES else ["no_link"]) + ([] if o.get("description") else ["no_desc"])
         if codes: out[o["id"]] = codes
     return out
 
@@ -72,7 +147,8 @@ def report(m, root):
 
 
 def validate_file(path):
-    return report(*load(path))
+    try: return report(*load(path))
+    except ValueError as e: print("ERROR", e); return 1
 
 
 def validate_db(c, project):
@@ -93,7 +169,8 @@ def import_yaml(c, path, project):
     objs = m.get("objects") or []
     conns = [{**x, "id": x.get("id", f"c{i}")} for i, x in enumerate(m.get("connections") or [])]
     flows = m.get("flows") or []
-    for kind, rows in (("object", objs), ("connection", conns), ("flow", flows)):
+    ifaces = m.get("interfaces") or []
+    for kind, rows in (("object", objs), ("connection", conns), ("flow", flows), ("interface", ifaces)):
         ids = [r.get("id") for r in rows]
         if None in ids or len(set(ids)) != len(ids): raise ValueError(f"{kind}: thiếu hoặc trùng id")
     j = lambda v: json.dumps(v, ensure_ascii=False) if v is not None else None
@@ -103,22 +180,32 @@ def import_yaml(c, path, project):
                   "root=excluded.root,layout=excluded.layout,tags=excluded.tags",
                   (project, m.get("name") or project, str(root), m.get("layout"), j(m.get("tags"))))
         for o in objs:
-            c.execute("INSERT INTO c4_object(id,project,type,name,parent,technology,description,tags,links,status) VALUES(?,?,?,?,?,?,?,?,?,?) "
+            c.execute("INSERT INTO c4_object(id,project,type,name,parent,technology,description,tags,links,status,responsibilities,state) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) "
                       "ON CONFLICT(project,id) DO UPDATE SET type=excluded.type,name=excluded.name,parent=excluded.parent,"
-                      "technology=excluded.technology,description=excluded.description,tags=excluded.tags,links=excluded.links,status=excluded.status",
+                      "technology=excluded.technology,description=excluded.description,tags=excluded.tags,links=excluded.links,status=excluded.status,"
+                      "responsibilities=excluded.responsibilities,state=excluded.state",
                       (o["id"], project, o.get("type"), o.get("name"), o.get("parent"), o.get("technology"),
-                       o.get("description"), j(o.get("tags")), j(o.get("links")), o.get("status")))
+                       o.get("description"), j(o.get("tags")), j(o.get("links")), o.get("status"), j(o.get("responsibilities")), o.get("state")))
         for x in conns:
-            c.execute("INSERT INTO c4_connection(id,project,from_id,to_id,name,technology,status,direction,tags,description) VALUES(?,?,?,?,?,?,?,?,?,?) "
+            c.execute("INSERT INTO c4_connection(id,project,from_id,to_id,name,technology,status,direction,tags,description,feature,interface,payload,kind) "
+                      "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                       "ON CONFLICT(project,id) DO UPDATE SET from_id=excluded.from_id,to_id=excluded.to_id,name=excluded.name,"
-                      "technology=excluded.technology,status=excluded.status,direction=excluded.direction,tags=excluded.tags,description=excluded.description",
+                      "technology=excluded.technology,status=excluded.status,direction=excluded.direction,tags=excluded.tags,description=excluded.description,"
+                      "feature=excluded.feature,interface=excluded.interface,payload=excluded.payload,kind=excluded.kind",
                       (x["id"], project, x.get("from"), x.get("to"), x.get("name"), x.get("technology"),
-                       x.get("status"), x.get("direction"), j(x.get("tags")), x.get("description")))
+                       x.get("status"), x.get("direction"), j(x.get("tags")), x.get("description"),
+                       x.get("feature"), x.get("interface"), j(x.get("payload")), x.get("kind")))
+        for i in ifaces:
+            c.execute("INSERT INTO c4_interface(project,id,object_id,kind,name,signature,purpose,input,output,errors) VALUES(?,?,?,?,?,?,?,?,?,?) "
+                      "ON CONFLICT(project,id) DO UPDATE SET object_id=excluded.object_id,kind=excluded.kind,name=excluded.name,"
+                      "signature=excluded.signature,purpose=excluded.purpose,input=excluded.input,output=excluded.output,errors=excluded.errors",
+                      (project, i["id"], i.get("object"), i.get("kind"), i.get("name"), i.get("signature"),
+                       i.get("purpose"), i.get("input"), i.get("output"), j(i.get("errors"))))
         for f in flows:
             c.execute("INSERT INTO c4_flow(id,project,name,steps) VALUES(?,?,?,?) "
                       "ON CONFLICT(project,id) DO UPDATE SET name=excluded.name,steps=excluded.steps",
                       (f["id"], project, f.get("name"), j(f.get("steps"))))
-        for t, rows in (("object", objs), ("connection", conns), ("flow", flows)):
+        for t, rows in (("object", objs), ("connection", conns), ("flow", flows), ("interface", ifaces)):
             keep = [r["id"] for r in rows]
             c.execute(f"DELETE FROM c4_{t} WHERE project=? AND id NOT IN ({','.join('?' * len(keep))})", (project, *keep))
         after = _counts(c, project)
@@ -136,14 +223,30 @@ def _row(r, renames=(), jsons=()):
 
 
 def read_model(c, project):
-    """The model dict (same shape as the YAML) or None if the project was never imported."""
+    """The model dict (same shape as the YAML) or None if the project was never imported.
+
+    Shape (keys whose value is NULL are omitted, except `interfaces`, always a list):
+      {name, root, layout?, tags?: {tag: {color}},
+       objects: [{id, type: actor|system|app|store|component|group|file|function, name, parent?, technology?,
+                  description?, tags?: [str], links?: [path|url], status?, responsibilities?: [str], state?: str,
+                  interfaces: [{id, object, kind?: http|function|queue|event, name?, signature?, purpose?,
+                                input?, output?, errors?: [str]}]}],
+       connections: [{id, from, to, name?, technology?, status?, direction?, tags?, description?,
+                      feature?: str, interface?: interface id on `to`, payload?: {request?, response?},
+                      kind?: network|call|queue}],
+       flows: [{id, name?, steps: [{id?, connection+reverse? | at | from+to, text?, payload?: str, interface?}]}],
+       interfaces: [same items as objects[].interfaces, flat]}
+    /api/c4 drops root and the flat interfaces list, moves name/layout/tags into meta and adds issues, links, open_issues.
+    """
     meta = c.execute("SELECT * FROM c4_meta WHERE project=?", (project,)).fetchone()
     if not meta: return None
     q = lambda t: c.execute(f"SELECT * FROM c4_{t} WHERE project=? ORDER BY rowid", (project,))
-    return {**_row(meta, jsons=("tags",)), "root": meta["root"],
-            "objects": [_row(r, jsons=("tags", "links")) for r in q("object")],
-            "connections": [_row(r, (("from_id", "from"), ("to_id", "to")), ("tags",)) for r in q("connection")],
-            "flows": [_row(r, jsons=("steps",)) for r in q("flow")]}
+    ifaces = [_row(r, (("object_id", "object"),), ("errors",)) for r in q("interface")]
+    objects = [_row(r, jsons=("tags", "links", "responsibilities")) for r in q("object")]
+    for o in objects: o["interfaces"] = [i for i in ifaces if i["object"] == o["id"]]
+    return {**_row(meta, jsons=("tags",)), "root": meta["root"], "objects": objects,
+            "connections": [_row(r, (("from_id", "from"), ("to_id", "to")), ("tags", "payload")) for r in q("connection")],
+            "flows": [_row(r, jsons=("steps",)) for r in q("flow")], "interfaces": ifaces}
 
 
 # ---- text context for agents (port of lift/view in viewer/index.html) ----
@@ -186,13 +289,29 @@ def context_text(c, project, object=None, max_tokens=2000):
         per = {r[0]: r[1] for r in c.execute("SELECT l.object_id,count(DISTINCT t.id) FROM c4_link l JOIN item t ON t.id=l.ref_id WHERE l.project=? AND l.ref_kind='item' "
                                              "AND t.project=? AND t.kind='issue' AND t.status NOT IN ('done','rejected') GROUP BY l.object_id", (project, project))}
         lines = [f"# {m.get('name') or project} ({project}): {len(byid)} object, {len(m['connections'])} connection, {len(m['flows'])} flow, {n} issue mở"]
-        def walk(p, d):
+        def walk(p, d, deep=True):
             for o in kids(p):
+                if not deep and o["type"] in ("file", "function"): continue
                 lines.append("  " * d + f"- {o['id']} [{o['type']}] {o.get('name') or ''}" + (f" ({o['technology']})" if o.get("technology") else "")
                              + (f" — {per[o['id']]} issue mở" if per.get(o["id"]) else ""))
-                walk(o["id"], d + 1)
+                for i in o.get("interfaces") or []:
+                    lines.append("  " * d + f"    · {i['id']}: {i.get('signature') or i.get('name') or ''}")
+                walk(o["id"], d + 1, deep)
         walk(None, 0)
-        return "\n".join(lines)
+        if _est("\n".join(lines)) > max_tokens // 2:  # map lớn: bỏ L4 khỏi cây tổng quan
+            hidden = sum(o["type"] in ("file", "function") for o in m["objects"])
+            del lines[1:]; walk(None, 0, False)
+            lines.append(f"... (ẩn {hidden} file/function; dùng --object X)")
+        flows = [f"- {f['id']} ({len(f.get('steps') or [])} bước): {f.get('name') or ''}" for f in m["flows"]]
+        conns = [f"- {x['from']}→{x['to']}" + (f" [{x['kind']}]" if x.get("kind") else "") + (f" {x['name']}" if x.get("name") else "")
+                 + (f" ({x['interface']})" if x.get("interface") else "") for x in m["connections"]]
+        out = lines + ["", "Flow (xem: c4 flow --id F):"] + (flows or ["(không)"]) + ["", "Connection:"]
+        budget = max_tokens - _est("\n".join(out))
+        for k, ln in enumerate(conns):
+            if _est(ln) + 1 > budget:
+                out.append(f"... (cắt {len(conns) - k} connection; dùng --object X hoặc --max-tokens lớn hơn)"); break
+            out.append(ln); budget -= _est(ln) + 1
+        return "\n".join(out)
     if object not in byid: raise ValueError(f"không có object '{object}' trong project '{project}'")
     o = byid[object]
     def desc(limit=None):
@@ -224,8 +343,8 @@ def context_text(c, project, object=None, max_tokens=2000):
     flows = []
     for f in m["flows"]:
         for s in f.get("steps") or []:
-            x = cmap.get(s.get("connection"), s)
-            if x.get("from") in sub or x.get("to") in sub: flows.append(f"- {f['id']}: {f.get('name') or ''}"); break
+            ends = step_ends(s, cmap, byid)[0] or ()
+            if any(e in sub for e in ends): flows.append(f"- {f['id']}: {f.get('name') or ''}"); break
     sections = [  # (name, text): the parent chain stays, the rest drop from the end
         ("chuỗi cha", "Cha: " + " > ".join(nm(i) for i in reversed(chain)) if chain else "Cha: (top level)"),
         ("con trực tiếp", "Con:\n" + "\n".join(f"- {k['id']} [{k['type']}] {k.get('name') or ''}" for k in kids(object)) if kids(object) else "Con: (không)"),
@@ -241,3 +360,42 @@ def context_text(c, project, object=None, max_tokens=2000):
         over = (_est(out) - max_tokens) * 4
         out = build(head(max(len(desc()) - over, 0)))
     return out
+
+
+def _path(byid, i):
+    """Readable dotted path: names from the nearest component down (file extensions dropped)."""
+    parts, o = [], byid.get(i)
+    while o:
+        parts.append((o.get("name") or o["id"]).rsplit(".py", 1)[0].rsplit(".dart", 1)[0].rsplit(".kt", 1)[0] if o["type"] == "file" else (o.get("name") or o["id"]))
+        if o["type"] not in ("file", "function"): break
+        o = byid.get(o.get("parent"))
+    parts = [x for k, x in enumerate(reversed(parts)) if k == 0 or x != list(reversed(parts))[k - 1]]
+    return ".".join(parts) if parts else i
+
+
+def flow_text(c, project, flow=None):
+    """Numbered one-line-per-step trace of a flow, or the flow list when flow is None."""
+    m = read_model(c, project)
+    if m is None: raise ValueError(f"project '{project}' chưa import")
+    if flow is None:
+        return "\n".join(f"{f['id']}  {len(f.get('steps') or [])} bước  {f.get('name') or ''}" for f in m["flows"]) or "(không có flow)"
+    f = next((x for x in m["flows"] if x["id"] == flow), None)
+    if f is None: raise ValueError(f"không có flow '{flow}' trong project '{project}'")
+    byid = {o["id"]: o for o in m["objects"]}
+    cmap = {x["id"]: x for x in m["connections"]}
+    P = lambda i: _path(byid, i)
+    out = [f"# {f['id']}: {f.get('name') or ''} ({len(f.get('steps') or [])} bước)"]
+    for n, s in enumerate(f.get("steps") or [], 1):
+        ends, err = step_ends(s, cmap, byid)
+        if err: out.append(f"{n}. ?? {err}"); continue
+        if s.get("at"):
+            ln = f"{n}. @ {P(s['at'])}"
+        else:
+            x = cmap.get(s.get("connection")) or next(v for v in cmap.values() if v.get("from") == s["from"] and v.get("to") == s["to"])
+            ln = f"{n}. {P(ends[0])} → {P(ends[1])} [{x.get('kind') or '-'}{' ↩' if s.get('reverse') else ''}]"
+            if not s.get("text") and not s.get("reverse") and x.get("name"): ln += f" {x['name']}"
+        if s.get("text"): ln += f" {s['text']}"
+        if s.get("interface"): ln += f" ({s['interface']})"
+        if s.get("payload"): ln += f" | payload: {s['payload']}"
+        out.append(ln)
+    return "\n".join(out)

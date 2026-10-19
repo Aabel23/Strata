@@ -1,0 +1,183 @@
+# Strata model cho chính Strata (CLI + server chỉ đọc + viewer)
+name: strata
+root: ..
+layout: LR
+
+tags:
+  write: {color: "#f79009"}
+
+objects:
+  - {id: user, type: actor, name: Người dùng, description: "Xem project, map C4 và flow trên trình duyệt"}
+  - {id: agent, type: actor, name: Agent, description: Claude/Codex đọc và ghi dữ liệu qua CLI}
+  - {id: repo, type: system, name: Repo dự án, description: Code và tài liệu của các project được quản lý}
+
+  - {id: strata, type: system, name: Strata, description: "Quản lý project, task, decision, tài liệu và map C4"}
+  - {id: cli, type: app, parent: strata, name: CLI, technology: Python argparse, tags: [write], links: [strata.py], description: Đường ghi duy nhất; mọi thay đổi để lại audit}
+  - {id: server, type: app, parent: strata, name: Server, technology: Python http.server, links: [strata/server.py], description: Chỉ GET; chặn Host lạ và traversal}
+  - {id: viewer, type: app, parent: strata, name: Viewer, technology: JS thuần, links: [viewer/app.html, viewer/index.html], description: App shell nhiều project và map C4 zoom được}
+  - {id: sqlite, type: store, parent: strata, name: SQLite, technology: SQLite + FTS5, links: [strata/schema.sql], description: /home/abel/project/tools/strata/strata.db; nguồn dữ liệu duy nhất}
+  - {id: mcp, type: app, parent: strata, name: MCP server, status: future, technology: "Python stdlib, stdio JSON-RPC", tags: [write], links: [strata/mcp.py], description: "THIẾT KẾ: strata.py mcp --role R; role cố định lúc khởi chạy, mỗi role một mục cấu hình MCP, agent không đổi được role"}
+
+  # L3 CLI
+  - {id: c4mod, type: component, parent: cli, name: c4, links: [strata/c4.py], responsibilities: [Nạp YAML vào DB, Validate model và flow, Tóm tắt map cho agent], state: stateless, description: "Model C4 - import, validate, context, flow"}
+  - {id: dbmod, type: component, parent: cli, name: db, links: [strata/db.py], responsibilities: [Mở DB và migrate, Ghi project/item/doc/page, Ghi audit], description: Truy cập SQLite và migration}
+  - {id: blocks, type: component, parent: cli, name: blocks, links: [strata/blocks.py], description: Kiểm 8 loại block của page}
+  - {id: argp, type: component, parent: cli, name: main, links: [strata.py], description: Phân lệnh con}
+  - {id: service, type: component, parent: cli, name: service, status: future, links: [strata/service.py], responsibilities: ["Lớp ghi/đọc duy nhất cho CLI và MCP", "Kiểm quyền theo role trước mỗi thao tác", "Ghi audit cho mọi thay đổi", "Decision của role không phải main luôn là proposed"], state: stateless, description: "THIẾT KẾ: add_item, set_item, add_decision, set_decision_status, search; mỗi hàm nhận role"}
+
+  # L3 server
+  - {id: handler, type: component, parent: server, name: Handler, links: [strata/server.py], responsibilities: [Chặn DNS rebinding, Định tuyến /api/*, Phục vụ file tĩnh], state: 1 kết nối SQLite + lock, description: BaseHTTPRequestHandler.do_GET}
+
+  # L3 mcp (thiết kế)
+  - {id: mcp_tools, type: component, parent: mcp, name: tools, status: future, links: [strata/mcp.py], responsibilities: ["Nhận tools/call qua stdio", "Gắn role cố định vào mọi lời gọi", "Chỉ bọc mỏng service, không có logic riêng"], state: "role cố định lúc khởi chạy", description: "THIẾT KẾ: tool wrapper gọi service"}
+
+  # L3 viewer
+  - {id: shell, type: component, parent: viewer, name: app shell, links: [viewer/app.js], description: "Sidebar project, tab, Ctrl+K"}
+  - {id: c4view, type: component, parent: viewer, name: c4 viewer, links: [viewer/index.html], responsibilities: [Vẽ map bằng dagre, Zoom/drill theo tầng, Panel chi tiết và hợp đồng, Theo dõi flow từng bước], description: Map C4 IcePanel-style}
+
+  # L4: đường nạp map
+  - {id: f_main, type: function, parent: argp, name: main, links: [strata.py], description: "Đọc argv, gọi lệnh"}
+  - {id: f_c4py, type: file, parent: c4mod, name: c4.py, links: [strata/c4.py], description: Toàn bộ logic C4}
+  - {id: f_import, type: function, parent: f_c4py, name: import_yaml, links: [strata/c4.py], description: "Upsert model, xoá phần thừa, atomic"}
+  - {id: f_load, type: function, parent: f_c4py, name: load, links: [strata/c4.py], description: "Đọc YAML, tính root"}
+  - {id: f_check, type: function, parent: f_c4py, name: check, links: [strata/c4.py], description: "Lỗi tham chiếu, cảnh báo đứt mạch"}
+  - {id: f_read, type: function, parent: f_c4py, name: read_model, links: [strata/c4.py], description: DB → dict model}
+  - {id: f_issues, type: function, parent: f_c4py, name: issues_by_object, links: [strata/c4.py], description: "dead_link, no_link, no_desc"}
+  - {id: f_init, type: function, parent: dbmod, name: init, links: [strata/db.py], description: "Tạo schema, migrate cột mới"}
+
+  # L4: đường xem map
+  - {id: f_get, type: function, parent: handler, name: do_GET, links: [strata/server.py], description: Kiểm Host rồi định tuyến}
+  - {id: f_vload, type: function, parent: c4view, name: load, links: [viewer/index.html], description: "Nhận model, dựng chỉ mục"}
+  - {id: f_render, type: function, parent: c4view, name: render, links: [viewer/index.html], description: "dagre layout, vẽ SVG"}
+  - {id: f_step, type: function, parent: c4view, name: setStep, links: [viewer/index.html], description: "Đổi bước, drill tới tầng, tô sáng"}
+
+  # L4 thiết kế: service, mcp, tìm kiếm
+  - {id: f_mcp_rec, type: function, parent: mcp_tools, name: tool add_decision, status: future, links: [strata/mcp.py], description: "THIẾT KẾ: tools/call add_decision, gọi service.add_decision với role của tiến trình"}
+  - {id: f_mcp_search, type: function, parent: mcp_tools, name: tool search, status: future, links: [strata/mcp.py], description: "THIẾT KẾ: tools/call search, gọi service.search"}
+  - {id: f_svc_add_item, type: function, parent: service, name: add_item, status: future, links: [strata/service.py], description: "THIẾT KẾ: thêm task/issue; coder và reviewer chỉ được thêm issue"}
+  - {id: f_svc_set_item, type: function, parent: service, name: set_item, status: future, links: [strata/service.py], description: "THIẾT KẾ: đổi trạng thái; coder đổi status mọi task"}
+  - {id: f_svc_add_dec, type: function, parent: service, name: add_decision, status: future, links: [strata/service.py], description: "THIẾT KẾ: thêm decision (title, context, decision, consequences, rejected, supersedes); role khác main thì status proposed"}
+  - {id: f_svc_set_dec, type: function, parent: service, name: set_decision_status, status: future, links: [strata/service.py], description: "THIẾT KẾ: duyệt/đổi trạng thái decision; chỉ main"}
+  - {id: f_svc_search, type: function, parent: service, name: search, status: future, links: [strata/service.py], description: "THIẾT KẾ: FTS5 BM25 + lọc cột project, src; dùng chung CLI search và /api/search"}
+  - {id: f_svc_perm, type: function, parent: service, name: check_perm, status: future, links: [strata/service.py], description: "THIẾT KẾ: bảng quyền: main = tất cả; coder = đổi status mọi task + thêm issue; reviewer = thêm issue"}
+
+interfaces:
+  - {id: i_import, object: f_import, kind: function, name: import_yaml, signature: "import_yaml(c, path, project) -> dict counts", purpose: Thay model của project bằng YAML, errors: [ValueError khi validate có lỗi]}
+  - {id: i_api, object: f_get, kind: http, name: /api/c4, signature: "GET /api/c4?project=P", output: "{meta, objects, connections, flows, issues, links, open_issues}", errors: [403 Host lạ, 404 không có model]}
+  - {id: i_read, object: f_read, kind: function, name: read_model, signature: "read_model(c, project) -> dict | None"}
+  - {id: i_svc_add_dec, object: f_svc_add_dec, kind: function, name: add_decision, signature: "add_decision(c, role, project, title, context, decision, consequences, rejected, supersedes=None) -> id", purpose: "Ghi decision; role khác main buộc status proposed; ghi audit", errors: [PermissionError]}
+  - {id: i_svc_search, object: f_svc_search, kind: function, name: search, signature: "search(c, role, q, project=None, src=None, limit=20) -> list", purpose: "FTS5 BM25, lọc cột project/src", output: "[{src, id, project, title, snippet, rank}]"}
+  - {id: i_mcp_rec, object: f_mcp_rec, kind: function, name: add_decision (MCP tool), signature: "tools/call add_decision {title, context, decision, consequences, rejected, supersedes}", errors: [PermissionError]}
+  - {id: i_mcp_search, object: f_mcp_search, kind: function, name: search (MCP tool), signature: "tools/call search {q, project, src, limit}"}
+
+connections:
+  - {id: u_browse, from: user, to: viewer, name: Mở trang, technology: trình duyệt}
+  - {id: a_cli, from: agent, to: cli, name: Chạy lệnh, technology: shell}
+  - {id: cli_db, from: cli, to: sqlite, name: Ghi/đọc, technology: sqlite3}
+  - {id: v_srv, from: viewer, to: server, name: Gọi API, kind: network, technology: HTTP localhost}
+  - {id: srv_db, from: server, to: sqlite, name: Đọc, technology: sqlite3}
+  - {id: sh_api, from: shell, to: server, name: /api/projects /items /docs, kind: network, technology: HTTP localhost}
+  - {id: m_blocks, from: argp, to: blocks, name: page validate, technology: in-process}
+  - {id: srv_repo, from: server, to: repo, name: Phục vụ /code /docs, technology: file}
+  - {id: cli_repo, from: cli, to: repo, name: "Đọc YAML, quét docs", technology: file}
+
+  # L4 nạp map
+  - {id: a_main, from: agent, to: f_main, name: import-yaml FILE --project P, kind: call, technology: shell}
+  - {id: m_init, from: f_main, to: f_init, name: db.init, kind: call, technology: in-process}
+  - {id: m_imp, from: f_main, to: f_import, name: import_yaml, kind: call, technology: in-process, interface: i_import}
+  - {id: imp_load, from: f_import, to: f_load, name: load, kind: call, technology: in-process}
+  - {id: load_yaml, from: f_load, to: repo, name: Đọc file YAML, kind: call, technology: PyYAML}
+  - {id: imp_check, from: f_import, to: f_check, name: check, kind: call, technology: in-process}
+  - {id: imp_db, from: f_import, to: sqlite, name: Upsert + DELETE thừa, kind: call, technology: sqlite3 transaction}
+
+  # L4 xem map
+  - {id: v_api, from: f_vload, to: f_get, name: fetch /api/c4, kind: network, technology: HTTP, interface: i_api}
+  - {id: g_read, from: f_get, to: f_read, name: read_model, kind: call, technology: in-process, interface: i_read}
+  - {id: r_db, from: f_read, to: sqlite, name: SELECT c4_*, kind: call, technology: sqlite3}
+  - {id: g_iss, from: f_get, to: f_issues, name: issues_by_object, kind: call, technology: in-process}
+  - {id: iss_repo, from: f_issues, to: repo, name: Kiểm link tồn tại, kind: call, technology: file}
+  - {id: vl_render, from: f_vload, to: f_render, name: render, kind: call, technology: in-process}
+  - {id: u_step, from: user, to: f_step, name: Bấm Next / ←→, technology: UI}
+  - {id: st_render, from: f_step, to: f_render, name: render(hot), kind: call, technology: in-process}
+
+  # thiết kế: service, mcp, tìm kiếm
+  - {id: m_svc, from: argp, to: service, name: "gọi service thay vì db trực tiếp", kind: call, technology: in-process, status: future}
+  - {id: a_mcp_rec, from: agent, to: f_mcp_rec, name: tools/call add_decision, kind: call, technology: "stdio JSON-RPC", interface: i_mcp_rec, status: future}
+  - {id: a_mcp_search, from: agent, to: f_mcp_search, name: tools/call search, kind: call, technology: "stdio JSON-RPC", interface: i_mcp_search, status: future}
+  - {id: mcp_svc, from: mcp, to: service, name: "tool gọi service (kèm role cố định)", kind: call, technology: in-process, status: future}
+  - {id: mr_svc, from: f_mcp_rec, to: f_svc_add_dec, name: add_decision, kind: call, technology: in-process, interface: i_svc_add_dec, status: future}
+  - {id: ms_svc, from: f_mcp_search, to: f_svc_search, name: search, kind: call, technology: in-process, interface: i_svc_search, status: future}
+  - {id: cs_svc, from: f_main, to: f_svc_search, name: "CLI search Q", kind: call, technology: in-process, interface: i_svc_search, status: future}
+  - {id: a_cli_search, from: agent, to: f_main, name: "search Q [--project P --src S]", kind: call, technology: shell, status: future}
+  - {id: gs_svc, from: f_get, to: f_svc_search, name: /api/search, kind: call, technology: in-process, interface: i_svc_search, status: future}
+  - {id: svc_perm, from: f_svc_add_dec, to: f_svc_perm, name: check_perm, kind: call, technology: in-process, status: future}
+  - {id: svc_wr, from: f_svc_add_dec, to: sqlite, name: INSERT decision, kind: call, technology: sqlite3, status: future}
+  - {id: svc_audit, from: f_svc_add_dec, to: sqlite, name: INSERT audit, kind: call, technology: sqlite3, status: future}
+  - {id: svc_fts, from: f_svc_search, to: sqlite, name: "SELECT ... MATCH ORDER BY bm25", kind: call, technology: "sqlite3 FTS5", status: future}
+  - {id: cs_add_item, from: f_main, to: f_svc_add_item, name: add_item, kind: call, technology: in-process, status: future}
+  - {id: cs_set_item, from: f_main, to: f_svc_set_item, name: set_item, kind: call, technology: in-process, status: future}
+  - {id: cs_set_dec, from: f_main, to: f_svc_set_dec, name: set_decision_status, kind: call, technology: in-process, status: future}
+  - {id: svc_db, from: service, to: sqlite, name: Ghi/đọc, technology: sqlite3, status: future}
+
+flows:
+  - id: import_map
+    name: Agent nạp map C4
+    steps:
+      - {connection: a_main, text: Agent chạy import-yaml}
+      - {connection: m_init, text: "Mở DB, migrate nếu thiếu cột"}
+      - {connection: m_init, reverse: true, text: trả kết nối}
+      - {connection: m_imp, interface: i_import}
+      - {connection: imp_load}
+      - {connection: load_yaml, text: "đọc YAML, tính root"}
+      - {connection: load_yaml, reverse: true}
+      - {connection: imp_load, reverse: true, text: "trả (model, root)"}
+      - {connection: imp_check, text: "kiểm tham chiếu, step, continuity"}
+      - {at: f_check, text: "có lỗi → dừng, không ghi gì"}
+      - {connection: imp_check, reverse: true, text: trả lỗi + cảnh báo}
+      - {connection: imp_db, text: "upsert object/connection/interface/flow, xoá phần thừa"}
+      - {connection: imp_db, reverse: true, text: commit}
+      - {connection: m_imp, reverse: true, text: trả số lượng}
+      - {connection: a_main, reverse: true, text: "in imported P, N object"}
+  - id: view_map
+    name: Xem map và theo dõi flow
+    steps:
+      - {connection: u_browse, text: "Mở /c4?project=P"}
+      - {connection: v_api, text: tải model}
+      - {at: f_get, text: "kiểm Host, định tuyến /api/c4"}
+      - {connection: g_read, interface: i_read}
+      - {connection: r_db, text: "đọc object, connection, interface, flow"}
+      - {connection: r_db, reverse: true}
+      - {connection: g_read, reverse: true}
+      - {connection: g_iss, text: "tính dấu ! cho từng object"}
+      - {connection: iss_repo}
+      - {connection: iss_repo, reverse: true}
+      - {connection: g_iss, reverse: true}
+      - {connection: v_api, reverse: true, text: JSON model}
+      - {connection: vl_render, text: vẽ tầng đầu}
+      - {connection: u_browse, reverse: true, text: map hiện trên màn hình}
+      - {connection: u_step, text: "chọn flow, bấm Next"}
+      - {at: f_step, text: "tìm tầng chứa bước, drill tới đó"}
+      - {connection: st_render, text: tô sáng cạnh hoặc khối của bước}
+  - id: record_decision
+    name: "Agent ghi decision qua MCP (thiết kế)"
+    steps:
+      - {connection: a_mcp_rec, text: "agent gọi tool add_decision"}
+      - {connection: mr_svc, interface: i_svc_add_dec, text: "chuyển kèm role cố định của tiến trình"}
+      - {connection: svc_perm, text: kiểm quyền theo role}
+      - {connection: svc_perm, reverse: true, text: "cho phép; role khác main → proposed"}
+      - {at: f_svc_add_dec, text: "ép status = proposed nếu không phải main"}
+      - {connection: svc_wr, text: ghi decision}
+      - {connection: svc_wr, reverse: true, text: trả id}
+      - {connection: svc_audit, text: "ghi audit: role, hành động, id"}
+      - {connection: svc_audit, reverse: true}
+      - {connection: mr_svc, reverse: true, text: "trả id, status proposed"}
+      - {connection: a_mcp_rec, reverse: true, text: kết quả tool}
+  - id: search_ctx
+    name: "Agent tìm ngữ cảnh qua MCP hoặc CLI (thiết kế)"
+    steps:
+      - {connection: a_mcp_search, text: "agent gọi tool search (hoặc CLI search Q)"}
+      - {connection: ms_svc, interface: i_svc_search, text: "CLI/server /api/search cũng gọi cùng hàm"}
+      - {connection: svc_fts, text: "FTS5 MATCH, lọc project/src, xếp BM25"}
+      - {connection: svc_fts, reverse: true, text: hàng đã xếp hạng}
+      - {connection: ms_svc, reverse: true, text: "danh sách kết quả"}
+      - {connection: a_mcp_search, reverse: true, text: kết quả tool}

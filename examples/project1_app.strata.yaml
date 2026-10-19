@@ -27,42 +27,978 @@ objects:
     technology: Python http.server
     description: Điểm vào HTTP/HTTPS, mọi body nằm trong phong bì HPKE
     links: [server/main.py]
-  - {id: mysql, type: store, parent: platform, name: MySQL, technology: MySQL, description: Tài khoản, phiên, danh bạ máy}
+  - {id: mysql, type: store, parent: platform, name: MySQL, technology: MySQL, links: [server/migrations/001_accounts.sql, server/migrations/002_devices_sessions.sql], description: "Tài khoản, phiên, danh bạ máy"}
 
-  - {id: transport, type: component, parent: server, name: transport, technology: http, links: [server/src/transport/http.py], description: Cổng HTTP và định tuyến; ghép các khối khác}
-  - {id: security, type: component, parent: server, name: security, technology: HPKE, tags: [security], links: [server/src/security/cloud_protection.py], description: Mở/đóng phong bì HPKE (X25519/HKDF-SHA256/AES-128-GCM)}
-  - {id: account, type: component, parent: server, name: account, links: [server/src/account/account.py], description: Đăng ký, OTP, đăng nhập, phiên}
+  - id: transport
+    type: component
+    parent: server
+    name: transport
+    technology: http
+    links: [server/src/transport/http.py]
+    description: Cổng HTTP và định tuyến; ghép các khối khác
+    state: stateless
+    responsibilities:
+      - Nhận POST, kiểm Content-Length (chỉ một header, không chunked, ≤ HTTP_MAX_BYTES)
+      - Nhờ security mở phong bì, rồi định tuyến body theo route tới account/device/relay
+      - Kiểm auth trong phong bì cho user route (access_token), máy đã ký cho machine route
+      - Đổi mọi lỗi thành {v:1, ok:false, error:{code}}; lỗi nội bộ thành INTERNAL_ERROR 500
+  - id: security
+    type: component
+    parent: server
+    name: security
+    technology: HPKE
+    tags: [security]
+    links: [server/src/security/cloud_protection.py]
+    description: Mở/đóng phong bì HPKE (X25519/HKDF-SHA256/AES-128-GCM)
+    state: RAM-only (replay cache theo (kid, send_id))
+    responsibilities:
+      - Kiểm khung phong bì (pv, kid, route, send_id UUIDv4, sent_at_ms trong độ lệch đồng hồ)
+      - Kiểm chữ ký ECDSA P-256 của máy trước khi tốn công giải HPKE
+      - Giải HPKE với AAD gắn route/kid/send_id, chặn phát lại
+      - Mã hoá phản hồi bằng khoá xuất từ ngữ cảnh HPKE (AES-GCM)
+
+  # level 4: code của transport
+  - {id: t_http, type: file, parent: transport, name: http.py, technology: Python, links: [server/src/transport/http.py], description: "ThreadingHTTPServer, Handler.do_POST và bảng định tuyến"}
+  - {id: t_do_post, type: function, parent: t_http, name: Handler.do_POST, links: [server/src/transport/http.py], description: "Đọc body, gọi open_request, dispatch_request, close_response"}
+  - {id: t_dispatch, type: function, parent: t_http, name: dispatch_request, links: [server/src/transport/http.py], description: "Tra handler theo route, kiểm auth, gọi handler, đổi lỗi thành HandlerResult"}
+  - {id: t_error, type: function, parent: t_http, name: _error, links: [server/src/transport/http.py], description: "ApiError → HandlerResult {v:1, ok:false, error:{code}}"}
+  - {id: t_create, type: function, parent: t_http, name: create_app, links: [server/src/transport/http.py], description: "Dựng server, bọc TLS khi transport=https"}
+  # level 4: code của security
+  - {id: s_cloud, type: file, parent: security, name: cloud_protection.py, technology: Python, links: [server/src/security/cloud_protection.py], description: "Mở/đóng phong bì, danh sách route"}
+  - {id: s_keys, type: file, parent: security, name: crypto_keys.py, technology: Python, links: [server/src/security/crypto_keys.py], description: "Nạp khoá HPKE của server, base64url"}
+  - {id: s_open, type: function, parent: s_cloud, name: open_request, links: [server/src/security/cloud_protection.py], description: "Kiểm khung, chữ ký, giải HPKE, chặn phát lại"}
+  - {id: s_verify, type: function, parent: s_cloud, name: verify_machine_signature, links: [server/src/security/cloud_protection.py], description: ECDSA P-256 low-S trên machine_envelope_bytes}
+  - {id: s_close, type: function, parent: s_cloud, name: close_response, links: [server/src/security/cloud_protection.py], description: AES-GCM với response_key xuất từ HPKE}
+  - {id: s_parse, type: function, parent: s_cloud, name: parse_json, links: [server/src/security/cloud_protection.py], description: "JSON chặt (không trùng key, không NaN)"}
+  - {id: s_load, type: function, parent: s_keys, name: load_server_keys, links: [server/src/security/crypto_keys.py], description: Đọc khoá riêng HPKE từ file cấu hình}
+  - {id: account, type: component, parent: server, name: account, links: [server/src/account/account.py], description: "Đăng ký, OTP, đăng nhập, phiên"}
   - {id: device, type: component, parent: server, name: device, links: [server/src/device/devices.py], description: Danh bạ máy và quy trình claim}
   - {id: relay, type: component, parent: server, name: relay, tags: [ram-only], links: [server/src/relay/relay.py], description: Chuyển lệnh app → máy → app; trạng thái chỉ trong RAM}
   - {id: storage, type: component, parent: server, name: storage, technology: MySQL driver, links: [server/src/storage/database.py], description: Mỗi giao dịch một kết nối riêng}
   - {id: mail, type: component, parent: server, name: mail, links: [server/src/mail/smtp_mail.py], description: Gửi OTP qua Gmail SMTP}
+  # level 4: code phía server cho relay/account/device/storage
+  - {id: a_login, type: function, parent: account, name: login, links: [server/src/account/account.py], description: "Kiểm email+mật khẩu (Argon2, hash giả nếu không có user), rate limit theo IP, _issue cấp token"}
+  - {id: a_auth, type: function, parent: account, name: authenticate_access, links: [server/src/account/account.py], description: access_token → user_id; hết hạn thì SESSION_EXPIRED}
+  - {id: d_owner, type: function, parent: device, name: owner_of, links: [server/src/device/devices.py], description: Chủ hiện tại của machine_id (đọc MySQL)}
+  - {id: st_tx, type: function, parent: storage, name: transaction, links: [server/src/storage/database.py], description: "Mở kết nối riêng, commit/rollback, đóng"}
+  - {id: r_file, type: file, parent: relay, name: relay.py, technology: Python, links: [server/src/relay/relay.py], description: RelayHub (RAM) và 3 route handler}
+  - {id: r_cmd_send, type: function, parent: r_file, name: command_send, links: [server/src/relay/relay.py], description: "Kiểm schema, instruction ∈ INSTRUCTIONS, data ≤ RELAY_DATA_MAX_BYTES, lấy relay slot"}
+  - {id: r_cmd_poll, type: function, parent: r_file, name: command_poll, links: [server/src/relay/relay.py], description: "Long-poll của máy; trả {command} hoặc null"}
+  - {id: r_result, type: function, parent: r_file, name: result_send, links: [server/src/relay/relay.py], description: "Kiểm result {ok,data}|{ok:false,error}, giao cho RelayHub"}
+  - {id: r_hub_send, type: function, parent: r_file, name: RelayHub.send, links: [server/src/relay/relay.py], description: "Kiểm chủ máy, chống lặp theo (machine_id, request_id), tạo Pending, chờ terminal"}
+  - {id: r_hub_poll, type: function, parent: r_file, name: RelayHub.poll, links: [server/src/relay/relay.py], description: "Poll mới nhất thắng; giao Pending chưa giao, đánh dấu online"}
+  - {id: r_hub_result, type: function, parent: r_file, name: RelayHub.result, links: [server/src/relay/relay.py], description: "Khớp request_id đang chờ, _finish lưu Terminal và notify"}
+
+  # Flutter app (level 3-4)
+  - {id: f_auth, type: component, parent: flutter, name: user_auth, technology: Dart, links: [flutter_app/lib/feature/user_auth/data/auth_service.dart], description: "Màn đăng nhập, AuthService, SessionStore"}
+  - {id: f_menu, type: component, parent: flutter, name: machine_menu, technology: Dart, links: [flutter_app/lib/feature/machine_menu/ui/machine_menu_tab.dart], description: "Tab Sản phẩm; menu thật từ máy (nhan_menu, cap_nhat_menu)"}
+  - {id: f_machines, type: component, parent: flutter, name: machines, technology: Dart, links: [flutter_app/lib/feature/machines/data/machine_service.dart], description: MachineService.ask và mixin RelayView (reload/write)}
+  - {id: f_cloud, type: component, parent: flutter, name: cloud, technology: Dart, links: [flutter_app/lib/shared/cloud/cloud_client.dart], description: CloudClient; seal → POST → open qua kênh native}
+  - {id: f_native, type: component, parent: flutter, name: native crypto, technology: Kotlin HPKE, tags: [security], links: [flutter_app/android/app/src/main/kotlin/com/example/simple_app/CloudCrypto.kt], description: HPKE seal/open; khoá phản hồi giữ ở native theo handle}
+  - {id: fa_page, type: function, parent: f_auth, name: AuthPage._submit, links: [flutter_app/lib/feature/user_auth/ui/auth_page.dart], description: Nút Đăng nhập}
+  - {id: fa_login, type: function, parent: f_auth, name: AuthService.login, links: [flutter_app/lib/feature/user_auth/data/auth_service.dart], description: POST /app/user/session/login rồi lưu phiên}
+  - {id: fa_store, type: function, parent: f_auth, name: SessionStore.save, links: [flutter_app/lib/feature/user_auth/data/session_store.dart], description: Lưu phiên qua kênh native saveSession}
+  - {id: fm_load, type: function, parent: f_menu, name: ProductsTab.load, links: [flutter_app/lib/feature/machine_menu/ui/machine_menu_tab.dart], description: "ask(nhan_menu, {menu_version:0}) để luôn nhận gói đầy đủ"}
+  - {id: fm_toggle, type: function, parent: f_menu, name: ProductsTab._toggle, links: [flutter_app/lib/feature/machine_menu/ui/machine_menu_tab.dart], description: "Công tắc bán món → write(cap_nhat_menu)"}
+  - {id: fm_apply, type: function, parent: f_menu, name: ProductsTab._apply, links: [flutter_app/lib/feature/machine_menu/ui/machine_menu_tab.dart, flutter_app/lib/feature/machines/data/machine_controller.dart], description: "decodeMenuPacket (base64 → zlib → JSON) → List<Drink>, setState"}
+  - {id: fm_reload, type: function, parent: f_machines, name: RelayView.reload, links: [flutter_app/lib/feature/machines/ui/relay_view.dart], description: "generation++, busy, gọi load, báo lỗi CloudError"}
+  - {id: fm_write, type: function, parent: f_machines, name: RelayView.write, links: [flutter_app/lib/feature/machines/ui/relay_view.dart], description: "Lệnh ghi; giữ request_id, hỏi retry khi TIMEOUT/TRANSPORT_ERROR"}
+  - {id: fs_ask, type: function, parent: f_machines, name: MachineService.ask, links: [flutter_app/lib/feature/machines/data/machine_service.dart], description: "Gửi /app/machine/command/send, kiểm request_id/machine_id/source"}
+  - {id: fc_send, type: function, parent: f_cloud, name: CloudClient.post/_send, links: [flutter_app/lib/shared/cloud/cloud_client.dart], description: "authenticatedPost gắn access_token; _send: seal, POST, kiểm outer, open"}
+  - {id: fk_seal, type: function, parent: f_native, name: CloudCrypto.sealRequest, links: [flutter_app/android/app/src/main/kotlin/com/example/simple_app/CloudCrypto.kt], description: HPKE base X25519/HKDF-SHA256/AES-128-GCM; AAD gắn route/kid/send_id}
+  - {id: fk_open, type: function, parent: f_native, name: CloudCrypto.openResponse, links: [flutter_app/android/app/src/main/kotlin/com/example/simple_app/CloudCrypto.kt], description: "AES-GCM với khoá phản hồi theo handle, rồi xoá khoá"}
+
+  # Máy pha (version1.1/machine)
+  - {id: machine_agent, type: app, parent: machine, name: machine agent, technology: Python, links: [version1.1/machine/main.py], description: Vòng long-poll lệnh từ server và chạy lệnh nghiệp vụ}
+  - {id: machine_db, type: store, parent: machine, name: MySQL máy, technology: MySQL, links: [version1.1/database/core/connection.py], description: "Menu, kho, đơn trên máy"}
+  - {id: m_loop, type: component, parent: machine_agent, name: main, links: [version1.1/machine/main.py], description: run() và Dispatcher (bảng COMMANDS)}
+  - {id: m_conn, type: component, parent: machine_agent, name: server_connection, tags: [security], links: [version1.1/machine/server_connection/machine_server_request.py], description: ServerClient; seal + ký phong bì máy}
+  - {id: m_menu, type: component, parent: machine_agent, name: menu_sync, links: [version1.1/machine/menu_sync/machine_menu_sync.py], description: "nhan_menu, cap_nhat_menu: database → kiểm → đóng gói"}
+  - {id: mm_run, type: function, parent: m_loop, name: run, links: [version1.1/machine/main.py], description: "hello khi chưa có machine_id, poll_command, handle, send_result"}
+  - {id: mm_handle, type: function, parent: m_loop, name: Dispatcher.handle, links: [version1.1/machine/main.py], description: "Cache kết quả theo request_id; _run kiểm remaining_ms, tra COMMANDS, đổi lỗi thành mã"}
+  - {id: mc_poll, type: function, parent: m_conn, name: ServerClient.poll_command, links: [version1.1/machine/server_connection/machine_server_request.py], description: "POST /machine/command/poll, timeout POLL_HTTP_SECONDS"}
+  - {id: mc_result, type: function, parent: m_conn, name: ServerClient.send_result, links: [version1.1/machine/server_connection/machine_server_request.py], description: POST /machine/result/send}
+  - {id: mc_post, type: function, parent: m_conn, name: ServerClient._post, links: [version1.1/machine/server_connection/machine_server_request.py], description: seal_request → urllib POST (không redirect) → open_response}
+  - {id: mc_seal, type: function, parent: m_conn, name: seal_request, links: [version1.1/machine/server_connection/cloud_protection.py], description: HPKE + chữ ký ECDSA P-256 bằng khoá máy}
+  - {id: mc_open, type: function, parent: m_conn, name: open_response, links: [version1.1/machine/server_connection/cloud_protection.py], description: Giải phản hồi AES-GCM}
+  - {id: mn_nhan, type: function, parent: m_menu, name: nhan_menu, links: [version1.1/machine/menu_sync/machine_menu_sync.py], description: "menu_version trùng → up_to_date; khác → gói đầy đủ"}
+  - {id: mn_cap, type: function, parent: m_menu, name: cap_nhat_menu, links: [version1.1/machine/menu_sync/machine_menu_sync.py], description: "version lệch → conflict + gói mới, không ghi; khớp → kiểm hết rồi ghi trong 1 transaction"}
+  - {id: mn_read, type: function, parent: m_menu, name: read_drinks, links: [version1.1/machine/menu_sync/machine_menu_store.py], description: SELECT drink WHERE deleted_at IS NULL}
+  - {id: mn_update, type: function, parent: m_menu, name: update_drink, links: [version1.1/machine/menu_sync/machine_menu_store.py], description: UPDATE các cột EDITABLE đã kiểm}
+  - {id: mn_pack, type: function, parent: m_menu, name: reply_with_menu, links: [version1.1/machine/menu_sync/machine_menu_pack.py], description: "menu_version = crc32(JSON); packet = base64(zlib(JSON))"}
+
+  # bổ sung: đăng ký/OTP/phiên, máy của user, nhận máy, hello
+  - {id: f_dash, type: component, parent: flutter, name: dashboard, technology: Dart, links: [flutter_app/lib/feature/dashboard/ui/machines_tab.dart], description: "Tab Máy, đăng xuất"}
+  - {id: f_claim, type: component, parent: flutter, name: machine_register, technology: Dart + Kotlin BLE, tags: [security], links: [flutter_app/lib/feature/machine_register/data/claim_flow.dart], description: "Nhận máy qua QR + BLE"}
+  - {id: m_pair, type: component, parent: machine_agent, name: pairing, technology: BLE GATT, tags: [security], links: [version1.1/machine/pairing/claim_session.py], description: "Dịch vụ BLE ghép máy: Wi-Fi và ký claim"}
+  - {id: a_send, type: function, parent: account, name: "account._send", links: [server/src/account/account.py], description: "Khoá theo email, rate limit gửi, tạo user/OTP generation (sending → active), gửi thư"}
+  - {id: a_register, type: function, parent: account, name: "register_account", links: [server/src/account/account.py], description: "POST /app/user/account/register: kiểm email+mật khẩu rồi _send"}
+  - {id: a_otp_send, type: function, parent: account, name: "send_registration_otp", links: [server/src/account/account.py], description: "POST /app/user/otp/send: gửi lại mã"}
+  - {id: a_verify, type: function, parent: account, name: "verify_registration_otp", links: [server/src/account/account.py], description: "POST /app/user/otp/verify: so HMAC mã, đếm sai, khoá tạm, đặt verified_at"}
+  - {id: a_refresh, type: function, parent: account, name: "refresh_session", links: [server/src/account/account.py], description: "POST /app/user/session/refresh: xoay refresh token; dùng lại token cũ ngoài grace thì thu hồi cả phiên"}
+  - {id: a_logout, type: function, parent: account, name: "logout", links: [server/src/account/account.py], description: "POST /app/user/session/logout: revoked_at cho phiên"}
+  - {id: s_boot, type: function, parent: s_cloud, name: "bootstrap_time", links: [server/src/security/cloud_protection.py], description: "POST /app/user/session/bootstrap: trả server_time_ms, rate limit theo IP"}
+  - {id: ml_send, type: function, parent: mail, name: "SmtpMail.send_registration_otp_mail", links: [server/src/mail/smtp_mail.py], description: "Thư OTP (hoặc thông báo nếu email đã xác minh)"}
+  - {id: d_list, type: function, parent: device, name: "list_user_machines", links: [server/src/device/devices.py], description: "Máy của user kèm online/last_seen từ RelayHub"}
+  - {id: d_remove, type: function, parent: device, name: "remove_machine", links: [server/src/device/devices.py], description: "Bỏ chủ máy (owner_user_id=NULL), ghi device_audit"}
+  - {id: d_activate, type: function, parent: device, name: "activate_machine", links: [server/src/device/devices.py], description: "POST /app/user/machine/activate, step begin|complete"}
+  - {id: d_begin, type: function, parent: device, name: "_begin_claim", links: [server/src/device/devices.py], description: "Tạo claim_challenge, server ký challenge"}
+  - {id: d_complete, type: function, parent: device, name: "_complete_claim", links: [server/src/device/devices.py], description: "Kiểm chữ ký máy trên accept_bytes, gán chủ; retry trả lại kết quả cũ"}
+  - {id: d_hello, type: function, parent: device, name: "machine_hello", links: [server/src/device/devices.py], description: "POST /machine/hello/send: server_time_ms, machine_id, owned"}
+  - {id: d_bykey, type: function, parent: device, name: "device_by_key_id", links: [server/src/device/devices.py], description: "Tra máy theo key_id trong phong bì máy"}
+  - {id: r_hub_online, type: function, parent: r_file, name: "RelayHub.is_online/last_seen_ms", links: [server/src/relay/relay.py], description: "Online suy từ long-poll gần nhất"}
+  - {id: fa_register, type: function, parent: f_auth, name: "AuthService.register", links: [flutter_app/lib/feature/user_auth/data/auth_service.dart], description: "POST /app/user/account/register → retry_after_seconds"}
+  - {id: fa_otp_page, type: function, parent: f_auth, name: "OtpPage._verify/_resend", links: [flutter_app/lib/feature/user_auth/ui/otp_page.dart], description: "Nhập mã 6 số, nút gửi lại có đếm ngược"}
+  - {id: fa_verify, type: function, parent: f_auth, name: "AuthService.verifyOtp", links: [flutter_app/lib/feature/user_auth/data/auth_service.dart], description: "POST /app/user/otp/verify"}
+  - {id: fa_otp_send, type: function, parent: f_auth, name: "AuthService.sendOtp", links: [flutter_app/lib/feature/user_auth/data/auth_service.dart], description: "POST /app/user/otp/send"}
+  - {id: fa_refresh, type: function, parent: f_auth, name: "AuthService.refresh", links: [flutter_app/lib/feature/user_auth/data/auth_service.dart], description: "POST /app/user/session/refresh rồi lưu phiên mới"}
+  - {id: fa_logout, type: function, parent: f_auth, name: "AuthService.logout", links: [flutter_app/lib/feature/user_auth/data/auth_service.dart], description: "POST /app/user/session/logout; luôn xoá phiên local"}
+  - {id: fa_restore, type: function, parent: f_auth, name: "_AppState._restore", links: [flutter_app/lib/main.dart], description: "Mở app: có phiên thì refresh; 401 → xoá, mất mạng → vẫn vào"}
+  - {id: fa_load, type: function, parent: f_auth, name: "SessionStore.load", links: [flutter_app/lib/feature/user_auth/data/session_store.dart], description: "Đọc phiên từ native"}
+  - {id: fa_clear, type: function, parent: f_auth, name: "SessionStore.clear", links: [flutter_app/lib/feature/user_auth/data/session_store.dart], description: "Xoá phiên"}
+  - {id: fc_boot, type: function, parent: f_cloud, name: "CloudClient._bootstrap", links: [flutter_app/lib/shared/cloud/cloud_client.dart], description: "Lấy giờ server, cache 5 phút; mọi post gọi trước"}
+  - {id: fd_remove, type: function, parent: f_dash, name: "MachinesTab._remove", links: [flutter_app/lib/feature/dashboard/ui/machines_tab.dart], description: "Xác nhận rồi gỡ máy"}
+  - {id: fd_logout, type: function, parent: f_dash, name: "onLoggedOut", links: [flutter_app/lib/app/app_navigation.dart], description: "Đăng xuất rồi về AuthPage"}
+  - {id: fmc_refresh, type: function, parent: f_machines, name: "MachineController.refresh", links: [flutter_app/lib/feature/machines/data/machine_controller.dart], description: "Tải danh sách máy, chọn máy đầu nếu chưa chọn"}
+  - {id: fmc_remove, type: function, parent: f_machines, name: "MachineController.remove", links: [flutter_app/lib/feature/machines/data/machine_controller.dart], description: "Gỡ máy rồi refresh"}
+  - {id: fmc_added, type: function, parent: f_machines, name: "MachineController.added", links: [flutter_app/lib/feature/machines/data/machine_controller.dart], description: "Chọn máy mới nhận rồi refresh"}
+  - {id: ms_list, type: function, parent: f_machines, name: "MachineService.list", links: [flutter_app/lib/feature/machines/data/machine_service.dart], description: "POST /app/user/machine/list"}
+  - {id: ms_remove, type: function, parent: f_machines, name: "MachineService.remove", links: [flutter_app/lib/feature/machines/data/machine_service.dart], description: "POST /app/user/machine/remove"}
+  - {id: ms_begin, type: function, parent: f_machines, name: "MachineService.beginClaim", links: [flutter_app/lib/feature/machines/data/machine_service.dart], description: "activate step=begin → ClaimChallenge"}
+  - {id: ms_complete, type: function, parent: f_machines, name: "MachineService.completeClaim", links: [flutter_app/lib/feature/machines/data/machine_service.dart], description: "activate step=complete → Machine"}
+  - {id: fr_page, type: function, parent: f_claim, name: "ClaimPage._detect", links: [flutter_app/lib/feature/machine_register/ui/claim_page.dart], description: "Quét QR tem niêm phong, hỏi Wi-Fi khi cần"}
+  - {id: fr_run, type: function, parent: f_claim, name: "ClaimFlow.run", links: [flutter_app/lib/feature/machine_register/data/claim_flow.dart], description: "BLE probe → [Wi-Fi] → begin → máy ký → complete"}
+  - {id: fr_pair, type: function, parent: f_claim, name: "PairingChannel", links: [flutter_app/lib/feature/machine_register/data/claim_flow.dart], description: "Kênh native flexmix/pairing; khoá phiên BLE ở Kotlin"}
+  - {id: mc_hello, type: function, parent: m_conn, name: "ServerClient.hello", links: [version1.1/machine/server_connection/machine_server_request.py], description: "POST /machine/hello/send khi chưa có machine_id"}
+  - {id: mp_handle, type: function, parent: m_pair, name: "ClaimSession.handle/_dispatch", links: [version1.1/machine/pairing/claim_session.py], description: "Phiên BLE mã hoá theo seal_code: probe, wifi, claim"}
+  - {id: mp_claim, type: function, parent: m_pair, name: "ClaimSession._claim", links: [version1.1/machine/pairing/claim_session.py], description: "Kiểm chữ ký server trên challenge, ký accept_bytes bằng khoá máy"}
 
 connections:
   - {id: use, from: user, to: flutter, name: Dùng app, technology: UI}
-  - {id: app_req, from: flutter, to: transport, name: Gọi API, technology: HTTPS + HPKE}
-  - {id: m_poll, from: machine, to: transport, name: Long-poll lệnh, technology: HTTPS + HPKE}
-  - {id: open, from: transport, to: security, name: Mở/đóng phong bì, technology: in-process}
-  - {id: r_acc, from: transport, to: account, name: Route auth, technology: in-process}
+  - id: app_req
+    from: flutter
+    to: transport
+    name: Gọi API
+    technology: HTTPS + HPKE
+    kind: network
+    feature: Mọi màn hình của app (đăng nhập, danh sách máy, gửi lệnh)
+    interface: transport_post
+    description: App seal body vào phong bì HPKE rồi POST tới route tương ứng
+    payload:
+      request: "Phong bì {pv:1, route, method:'POST', receiver:'server', kid:'server-hpke-1', send_id, sent_at_ms, machine_key_id:null, enc, ct, sig:null}; plaintext {auth: {access_token}|null, body}"
+      response: "{pv:1, send_id, status, nonce, ct}; plaintext {v:1, ok, data|error:{code}}"
+  - id: m_poll
+    from: machine
+    to: transport
+    name: Long-poll lệnh
+    technology: HTTPS + HPKE
+    kind: network
+    feature: Máy nhận lệnh pha chế
+    interface: transport_post
+    description: Máy ký phong bì bằng khoá máy, POST /machine/command/poll và chờ tới khi có lệnh hoặc hết hạn
+    payload:
+      request: "Phong bì có machine_key_id và sig (ECDSA P-256); plaintext {auth:null, body:{v:1}}"
+      response: "Lệnh đang chờ {request_id, instruction, data} hoặc rỗng khi hết hạn"
+  - id: open
+    from: transport
+    to: security
+    name: Mở/đóng phong bì
+    technology: in-process
+    kind: call
+    interface: sec_open
+    description: do_POST gọi open_request trước khi định tuyến, close_response sau khi handler trả kết quả
+    payload:
+      request: "path, envelope dict, RequestContext"
+      response: "OpenedRequest(body, auth, route, send_id, response_key, machine)"
+  - id: r_acc
+    from: transport
+    to: account
+    name: Route auth
+    technology: in-process
+    kind: call
+    feature: Đăng nhập bằng OTP
+    interface: acc_login
+    description: dispatch_request gọi handler account theo route /app/user/...
+    payload: {request: "{email, password}", response: "HandlerResult {v:1, ok:true, data:{access_token, refresh_token, ...}}"}
   - {id: r_dev, from: transport, to: device, name: Route máy, technology: in-process}
-  - {id: r_rel, from: transport, to: relay, name: Route lệnh, technology: in-process}
+  - id: r_rel
+    from: transport
+    to: relay
+    name: Route lệnh
+    technology: in-process
+    kind: call
+    feature: Gửi lệnh pha chế
+    interface: relay_send
+    description: dispatch_request đưa lệnh của app vào RelayHub; máy lấy ra qua command_poll
+    payload: {request: "{machine_id, request_id, instruction, data}", response: "Kết quả máy trả về hoặc lỗi MACHINE_OFFLINE/timeout"}
+  # level 4: luồng gọi nội bộ
+  - {id: t_c1, from: t_do_post, to: s_parse, name: parse body, kind: call, technology: in-process, description: Body thô → dict phong bì; lỗi thì INVALID_ENVELOPE 400}
+  - {id: t_c2, from: t_do_post, to: s_open, name: open_request, kind: call, technology: in-process, description: Mở phong bì; ApiError trả thẳng mã công khai}
+  - {id: t_c3, from: t_do_post, to: t_dispatch, name: dispatch_request, kind: call, technology: in-process, interface: tr_dispatch, description: Định tuyến body đã giải mã}
+  - {id: t_c4, from: t_dispatch, to: t_error, name: đổi lỗi, kind: call, technology: in-process, description: ApiError/RetryableTransaction → HandlerResult}
+  - {id: t_c5, from: t_do_post, to: s_close, name: close_response, kind: call, technology: in-process, description: Mã hoá HandlerResult trước khi trả}
+  - {id: s_c1, from: s_open, to: s_verify, name: kiểm chữ ký máy, kind: call, technology: in-process, description: "Chỉ với machine route, trước HPKE"}
+  - {id: s_c2, from: s_open, to: s_parse, name: parse plaintext, kind: call, technology: in-process, description: "Plaintext → {auth, body}"}
+  - {id: s_c3, from: t_create, to: s_load, name: nạp khoá, kind: call, technology: in-process, description: Khoá HPKE nằm trong deps.keys từ lúc khởi động}
   - {id: acc_db, from: account, to: storage, name: Đọc/ghi tài khoản, technology: in-process}
   - {id: dev_db, from: device, to: storage, name: Đọc/ghi máy, technology: in-process}
   - {id: acc_mail, from: account, to: mail, name: Gửi OTP, technology: in-process}
   - {id: sql, from: storage, to: mysql, name: SQL, technology: MySQL protocol}
   - {id: smtp, from: mail, to: gmail, name: Gửi thư, technology: SMTP/TLS}
+  # level 4: server
+  - {id: d_auth, from: t_dispatch, to: a_auth, name: kiểm access_token, kind: call, technology: in-process, description: Chỉ với user route; gắn context.auth}
+  - {id: d_login, from: t_dispatch, to: a_login, name: login, kind: call, technology: in-process}
+  - {id: d_send, from: t_dispatch, to: r_cmd_send, name: command_send, kind: call, technology: in-process}
+  - {id: d_poll, from: t_dispatch, to: r_cmd_poll, name: command_poll, kind: call, technology: in-process}
+  - {id: d_res, from: t_dispatch, to: r_result, name: result_send, kind: call, technology: in-process}
+  - {id: a_login_tx, from: a_login, to: st_tx, name: đọc user, kind: call, technology: in-process}
+  - {id: a_auth_tx, from: a_auth, to: st_tx, name: tra phiên, kind: call, technology: in-process}
+  - {id: owner_tx, from: d_owner, to: st_tx, name: đọc chủ máy, kind: call, technology: in-process}
+  - {id: st_sql, from: st_tx, to: mysql, name: SQL, kind: network, technology: MySQL protocol}
+  - {id: rh_send, from: r_cmd_send, to: r_hub_send, name: RelayHub.send, kind: call, technology: in-process}
+  - {id: rh_owner, from: r_hub_send, to: d_owner, name: owner_lookup, kind: call, technology: in-process, description: Kiểm trước khi xếp lệnh và kiểm lại trước khi trả kết quả}
+  - {id: rh_wake, from: r_hub_send, to: r_hub_poll, name: notify Pending, kind: queue, technology: threading.Condition, description: Pending mới đánh thức long-poll đang chờ của máy}
+  - {id: rp_poll, from: r_cmd_poll, to: r_hub_poll, name: RelayHub.poll, kind: call, technology: in-process}
+  - {id: rr_hub, from: r_result, to: r_hub_result, name: RelayHub.result, kind: call, technology: in-process}
+  - {id: rh_fin, from: r_hub_result, to: r_hub_send, name: _finish notify, kind: queue, technology: threading.Condition, description: "Terminal sẵn sàng, thread của app thức dậy"}
+  # level 4: Flutter
+  - {id: u_pull, from: user, to: fm_reload, name: kéo để làm mới, technology: UI RefreshIndicator}
+  - {id: u_toggle, from: user, to: fm_toggle, name: bật/tắt món, technology: UI Switch}
+  - {id: u_login, from: user, to: fa_page, name: bấm Đăng nhập, technology: UI}
+  - {id: fa_c, from: fa_page, to: fa_login, name: login, kind: call, technology: Dart}
+  - {id: fa_post, from: fa_login, to: fc_send, name: post, kind: call, technology: Dart}
+  - {id: fa_save, from: fa_login, to: fa_store, name: lưu phiên, kind: call, technology: Dart}
+  - {id: fm_c1, from: fm_reload, to: fm_load, name: load, kind: call, technology: Dart}
+  - {id: fm_ask, from: fm_load, to: fs_ask, name: ask, kind: call, technology: Dart, interface: f_ask}
+  - {id: fm_apply_c, from: fm_load, to: fm_apply, name: _apply, kind: call, technology: Dart}
+  - {id: fm_w, from: fm_toggle, to: fm_write, name: write, kind: call, technology: Dart}
+  - {id: fw_ask, from: fm_write, to: fs_ask, name: ask, kind: call, technology: Dart, interface: f_ask}
+  - {id: fm_ta, from: fm_toggle, to: fm_apply, name: _apply, kind: call, technology: Dart}
+  - {id: fs_send, from: fs_ask, to: fc_send, name: authenticatedPost, kind: call, technology: Dart}
+  - {id: fc_seal, from: fc_send, to: fk_seal, name: sealRequest, kind: call, technology: MethodChannel, interface: f_seal}
+  - {id: fc_open, from: fc_send, to: fk_open, name: openResponse, kind: call, technology: MethodChannel}
+  - {id: fc_net, from: fc_send, to: t_do_post, name: POST phong bì, kind: network, technology: HTTPS + HPKE, description: Bản level 4 của app_req}
+  # level 4: máy
+  - {id: mm_pollc, from: mm_run, to: mc_poll, name: poll_command, kind: call, technology: in-process}
+  - {id: mm_h, from: mm_run, to: mm_handle, name: handle, kind: call, technology: in-process}
+  - {id: mm_res, from: mm_run, to: mc_result, name: send_result, kind: call, technology: in-process}
+  - {id: mc_pollc, from: mc_poll, to: mc_post, name: _post, kind: call, technology: in-process}
+  - {id: mc_resc, from: mc_result, to: mc_post, name: _post, kind: call, technology: in-process}
+  - {id: mc_seal_c, from: mc_post, to: mc_seal, name: seal_request, kind: call, technology: in-process}
+  - {id: mc_open_c, from: mc_post, to: mc_open, name: open_response, kind: call, technology: in-process}
+  - {id: mc_net, from: mc_post, to: t_do_post, name: POST phong bì máy, kind: network, technology: HTTPS + HPKE + ECDSA, description: "Bản level 4 của m_poll (poll và result)"}
+  - {id: mh_nhan, from: mm_handle, to: mn_nhan, name: "COMMANDS['nhan_menu']", kind: call, technology: in-process}
+  - {id: mh_cap, from: mm_handle, to: mn_cap, name: "COMMANDS['cap_nhat_menu']", kind: call, technology: in-process}
+  - {id: mn_r, from: mn_nhan, to: mn_read, name: read_drinks, kind: call, technology: in-process}
+  - {id: mn_cr, from: mn_cap, to: mn_read, name: read_drinks, kind: call, technology: in-process}
+  - {id: mn_u, from: mn_cap, to: mn_update, name: update_drink, kind: call, technology: in-process}
+  - {id: mn_p, from: mn_nhan, to: mn_pack, name: reply_with_menu, kind: call, technology: in-process}
+  - {id: mn_cp, from: mn_cap, to: mn_pack, name: reply_with_menu, kind: call, technology: in-process}
+  - {id: mn_rdb, from: mn_read, to: machine_db, name: SELECT drink, kind: network, technology: MySQL protocol}
+  - {id: mn_udb, from: mn_update, to: machine_db, name: UPDATE drink, kind: network, technology: MySQL protocol}
+
+  # bổ sung: đăng ký/OTP/phiên, máy của user, nhận máy, hello
+  - {id: u_register, from: user, to: fa_page, name: "bấm Đăng ký", technology: "UI"}
+  - {id: u_otp, from: user, to: fa_otp_page, name: "nhập mã OTP", technology: "UI"}
+  - {id: u_resend, from: user, to: fa_otp_page, name: "bấm Gửi lại mã", technology: "UI"}
+  - {id: u_open, from: user, to: fa_restore, name: "mở app", technology: "UI"}
+  - {id: u_logout, from: user, to: fd_logout, name: "bấm Đăng xuất", technology: "UI"}
+  - {id: u_machines, from: user, to: fmc_refresh, name: "mở/kéo tab Máy", technology: "UI"}
+  - {id: u_remove, from: user, to: fd_remove, name: "bấm Gỡ máy", technology: "UI"}
+  - {id: u_scan, from: user, to: fr_page, name: "quét QR tem máy", technology: "UI camera"}
+  - {id: fa_reg_c, from: fa_page, to: fa_register, name: "register", kind: call, technology: "Dart"}
+  - {id: fa_reg_post, from: fa_register, to: fc_send, name: "post", kind: call, technology: "Dart"}
+  - {id: fa_to_otp, from: fa_page, to: fa_otp_page, name: "push OtpPage", kind: call, technology: "Navigator"}
+  - {id: fo_v, from: fa_otp_page, to: fa_verify, name: "verifyOtp", kind: call, technology: "Dart"}
+  - {id: fo_v_post, from: fa_verify, to: fc_send, name: "post", kind: call, technology: "Dart"}
+  - {id: fo_s, from: fa_otp_page, to: fa_otp_send, name: "sendOtp", kind: call, technology: "Dart"}
+  - {id: fo_s_post, from: fa_otp_send, to: fc_send, name: "post", kind: call, technology: "Dart"}
+  - {id: fr_load, from: fa_restore, to: fa_load, name: "load", kind: call, technology: "Dart"}
+  - {id: fr_ref, from: fa_restore, to: fa_refresh, name: "refresh", kind: call, technology: "Dart"}
+  - {id: fr_clear, from: fa_restore, to: fa_clear, name: "clear", kind: call, technology: "Dart"}
+  - {id: fref_post, from: fa_refresh, to: fc_send, name: "post", kind: call, technology: "Dart"}
+  - {id: fref_save, from: fa_refresh, to: fa_store, name: "lưu phiên", kind: call, technology: "Dart"}
+  - {id: fc_load, from: fc_send, to: fa_load, name: "store.load", kind: call, technology: "Dart"}
+  - {id: fc_refresh, from: fc_send, to: fa_refresh, name: "refreshSession", kind: call, technology: "Dart"}
+  - {id: fc_bootc, from: fc_send, to: fc_boot, name: "_bootstrap", kind: call, technology: "Dart"}
+  - {id: fc_boot_net, from: fc_boot, to: t_do_post, name: "POST /app/user/session/bootstrap", kind: network, technology: "HTTPS + HPKE"}
+  - {id: fl_c, from: fd_logout, to: fa_logout, name: "logout", kind: call, technology: "Dart"}
+  - {id: fl_load, from: fa_logout, to: fa_load, name: "load", kind: call, technology: "Dart"}
+  - {id: fl_post, from: fa_logout, to: fc_send, name: "post", kind: call, technology: "Dart"}
+  - {id: fl_clear, from: fa_logout, to: fa_clear, name: "clear", kind: call, technology: "Dart"}
+  - {id: fml_c, from: fmc_refresh, to: ms_list, name: "list", kind: call, technology: "Dart"}
+  - {id: ms_list_post, from: ms_list, to: fc_send, name: "authenticatedPost", kind: call, technology: "Dart"}
+  - {id: fd_rm_c, from: fd_remove, to: fmc_remove, name: "remove", kind: call, technology: "Dart"}
+  - {id: fmc_rm_c, from: fmc_remove, to: ms_remove, name: "remove", kind: call, technology: "Dart"}
+  - {id: ms_rm_post, from: ms_remove, to: fc_send, name: "authenticatedPost", kind: call, technology: "Dart"}
+  - {id: fmc_rm_ref, from: fmc_remove, to: fmc_refresh, name: "refresh", kind: call, technology: "Dart"}
+  - {id: frp_run, from: fr_page, to: fr_run, name: "run", kind: call, technology: "Dart"}
+  - {id: fr_ble, from: fr_run, to: fr_pair, name: "start/probe/wifi/claim", kind: call, technology: "MethodChannel"}
+  - {id: fr_ble_net, from: fr_pair, to: mp_handle, name: "gói BLE mã hoá", kind: network, technology: "BLE GATT + HPKE PSK"}
+  - {id: fr_begin, from: fr_run, to: ms_begin, name: "beginClaim", kind: call, technology: "Dart"}
+  - {id: ms_begin_post, from: ms_begin, to: fc_send, name: "authenticatedPost", kind: call, technology: "Dart"}
+  - {id: fr_complete, from: fr_run, to: ms_complete, name: "completeClaim", kind: call, technology: "Dart"}
+  - {id: ms_complete_post, from: ms_complete, to: fc_send, name: "authenticatedPost", kind: call, technology: "Dart"}
+  - {id: fr_added, from: fr_page, to: fmc_added, name: "added", kind: call, technology: "Dart"}
+  - {id: fmc_added_ref, from: fmc_added, to: fmc_refresh, name: "refresh", kind: call, technology: "Dart"}
+  - {id: mp_c, from: mp_handle, to: mp_claim, name: "_claim", kind: call, technology: "in-process"}
+  - {id: mm_hello, from: mm_run, to: mc_hello, name: "hello", kind: call, technology: "in-process"}
+  - {id: mc_helloc, from: mc_hello, to: mc_post, name: "_post", kind: call, technology: "in-process"}
+  - {id: d_reg, from: t_dispatch, to: a_register, name: "register_account", kind: call, technology: "in-process"}
+  - {id: d_otps, from: t_dispatch, to: a_otp_send, name: "send_registration_otp", kind: call, technology: "in-process"}
+  - {id: d_ver, from: t_dispatch, to: a_verify, name: "verify_registration_otp", kind: call, technology: "in-process"}
+  - {id: d_ref, from: t_dispatch, to: a_refresh, name: "refresh_session", kind: call, technology: "in-process"}
+  - {id: d_out, from: t_dispatch, to: a_logout, name: "logout", kind: call, technology: "in-process"}
+  - {id: d_boot, from: t_dispatch, to: s_boot, name: "bootstrap_time", kind: call, technology: "in-process"}
+  - {id: a_reg_s, from: a_register, to: a_send, name: "_send", kind: call, technology: "in-process"}
+  - {id: a_otp_s, from: a_otp_send, to: a_send, name: "_send", kind: call, technology: "in-process"}
+  - {id: a_send_tx, from: a_send, to: st_tx, name: "users + otp_generations", kind: call, technology: "in-process"}
+  - {id: a_send_mail, from: a_send, to: ml_send, name: "gửi thư OTP", kind: call, technology: "in-process"}
+  - {id: ml_smtp, from: ml_send, to: gmail, name: "SMTP", kind: network, technology: "SMTP/TLS"}
+  - {id: a_ver_tx, from: a_verify, to: st_tx, name: "users + otp_generations FOR UPDATE", kind: call, technology: "in-process"}
+  - {id: a_ref_tx, from: a_refresh, to: st_tx, name: "refresh_tokens + sessions FOR UPDATE", kind: call, technology: "in-process"}
+  - {id: a_out_tx, from: a_logout, to: st_tx, name: "UPDATE sessions revoked_at", kind: call, technology: "in-process"}
+  - {id: d_lst, from: t_dispatch, to: d_list, name: "list_user_machines", kind: call, technology: "in-process"}
+  - {id: d_list_tx, from: d_list, to: st_tx, name: "SELECT devices", kind: call, technology: "in-process"}
+  - {id: d_list_on, from: d_list, to: r_hub_online, name: "is_online/last_seen_ms", kind: call, technology: "in-process"}
+  - {id: d_rm, from: t_dispatch, to: d_remove, name: "remove_machine", kind: call, technology: "in-process"}
+  - {id: d_rm_tx, from: d_remove, to: st_tx, name: "UPDATE devices + audit", kind: call, technology: "in-process"}
+  - {id: d_act, from: t_dispatch, to: d_activate, name: "activate_machine", kind: call, technology: "in-process"}
+  - {id: d_act_b, from: d_activate, to: d_begin, name: "_begin_claim", kind: call, technology: "in-process"}
+  - {id: d_act_c, from: d_activate, to: d_complete, name: "_complete_claim", kind: call, technology: "in-process"}
+  - {id: d_begin_tx, from: d_begin, to: st_tx, name: "INSERT claim_challenges", kind: call, technology: "in-process"}
+  - {id: d_complete_tx, from: d_complete, to: st_tx, name: "claim + devices FOR UPDATE", kind: call, technology: "in-process"}
+  - {id: d_hel, from: t_dispatch, to: d_hello, name: "machine_hello", kind: call, technology: "in-process"}
+  - {id: s_c4, from: s_open, to: d_bykey, name: "tra máy theo key_id", kind: call, technology: "in-process"}
+  - {id: d_bykey_tx, from: d_bykey, to: st_tx, name: "SELECT devices", kind: call, technology: "in-process"}
+
+interfaces:
+  - id: transport_post
+    object: transport
+    kind: http
+    name: POST envelope
+    signature: "POST /app/user/... | /app/machine/... | /machine/..."
+    purpose: Cổng duy nhất; mọi route nhận cùng một khung phong bì HPKE
+    input: "JSON phong bì {pv, route, method, receiver, kid, send_id, sent_at_ms, machine_key_id, enc, ct, sig}, ≤ HTTP_MAX_BYTES"
+    output: "JSON {pv:1, send_id, status, nonce, ct}"
+    errors: [INVALID_ENVELOPE 400/404, UNSUPPORTED_VERSION 400, UNKNOWN_KEY 400, RATE_LIMITED 429]
+  - id: tr_dispatch
+    object: t_dispatch
+    kind: function
+    name: dispatch_request
+    signature: "dispatch_request(path: str, payload: dict, context: RequestContext, *, deps, auth=None) -> HandlerResult"
+    purpose: Tra handler theo route, gắn auth/machine vào context rồi gọi
+    input: route, body đã giải mã, auth từ phong bì
+    output: HandlerResult(status, {v:1, ok, data|error})
+    errors: [INVALID_REQUEST 400, SESSION_EXPIRED 401, SERVICE_UNAVAILABLE 503, INTERNAL_ERROR 500]
+  - id: sec_open
+    object: security
+    kind: function
+    name: open_request
+    signature: "open_request(path: str, envelope: dict, context: RequestContext, *, deps) -> OpenedRequest"
+    purpose: Kiểm khung, chữ ký máy, giải HPKE, chặn phát lại
+    input: "Phong bì {enc, ct, ...} với AAD = [1, path, 'POST', 'server', kid, send_id, sent_at_ms, machine_key_id]"
+    output: "OpenedRequest(body, auth, route, send_id, response_key, machine); plaintext là JSON {auth, body}"
+    errors: [INVALID_ENVELOPE 400, UNSUPPORTED_VERSION 400, UNKNOWN_KEY 400, RATE_LIMITED 429]
+  - id: sec_close
+    object: security
+    kind: function
+    name: close_response
+    signature: "close_response(opened: OpenedRequest, result: HandlerResult) -> dict"
+    purpose: Mã hoá phản hồi bằng response_key (AES-128-GCM, nonce ngẫu nhiên 12 byte)
+    input: OpenedRequest, HandlerResult
+    output: "{pv:1, send_id, status, nonce, ct}"
+    errors: [RESPONSE_TOO_LARGE (ValueError)]
+  - id: acc_login
+    object: account
+    kind: function
+    name: login
+    signature: "login(body, context, *, deps) -> HandlerResult"
+    purpose: Đăng nhập email + mật khẩu (Argon2), cấp phiên
+    input: "{email, password}"
+    output: "{v:1, ok:true, data:{access_token, refresh_token, ...}}"
+    errors: [AUTH_FAILED 401, RATE_LIMITED 429, INVALID_REQUEST 400]
+  - id: relay_send
+    object: relay
+    kind: function
+    name: command_send
+    signature: "command_send(body, context, *, deps) -> HandlerResult"
+    purpose: Đưa lệnh của app vào hàng chờ RAM của máy, chờ kết quả
+    input: "{machine_id, request_id, instruction, data}"
+    output: Kết quả máy trả qua result_send
+    errors: [MACHINE_OFFLINE, RATE_LIMITED 429, INVALID_REQUEST 400]
+  - {id: f_ask, object: fs_ask, kind: function, name: ask, signature: "ask(machineId, instruction, data, {requestId?, retry=false}) -> Future<MachineAnswer>", output: "MachineAnswer(ok, data|errorCode)"}
+  - {id: f_seal, object: fk_seal, kind: function, name: sealRequest, signature: "sealRequest({route, body, access_token, sent_at_ms, kid, public_key}) -> {handle, envelope}"}
+  - {id: hub_send, object: r_hub_send, kind: function, name: RelayHub.send, signature: "send(*, user_id, machine_id, request_id, instruction, data, retry, owner_lookup) -> HandlerResult", errors: [FORBIDDEN 403, BUSY 409, REQUEST_CONFLICT 409, REQUEST_GONE 410, MACHINE_OFFLINE 503]}
+  - {id: hub_poll, object: r_hub_poll, kind: function, name: RelayHub.poll, signature: "poll(machine_id) -> {v, request_id, machine_id, instruction, data, remaining_ms} | None"}
+  - {id: m_cmd, object: mm_handle, kind: function, name: Dispatcher.handle, signature: "handle(command) -> {ok:true, data} | {ok:false, error:{code, message?}}", errors: [COMMAND_EXPIRED, UNSUPPORTED_INSTRUCTION, INVALID_DATA, COMMAND_FAILED, MACHINE_READ_FAILED]}
+  - {id: m_nhan, object: mn_nhan, kind: function, name: nhan_menu, signature: "nhan_menu({menu_version}) -> {status:'ok'|'up_to_date', menu_version, packet?}"}
+  - {id: m_cap, object: mn_cap, kind: function, name: cap_nhat_menu, signature: "cap_nhat_menu({menu_version, thay_doi:[{drink_id, ...}]}) -> {status:'ok'|'conflict', menu_version, packet}"}
 
 flows:
+  - id: menu_refresh
+    name: Làm mới menu (tab Sản phẩm)
+    steps:
+      - {connection: u_pull, text: Kéo RefreshIndicator}
+      - {connection: fm_c1, text: "generation++, busy=true"}
+      - {connection: fm_ask, payload: "('nhan_menu', {menu_version:0})"}
+      - {connection: fs_send, text: authenticatedPost /app/machine/command/send, payload: "{v:1, request_id:uuid4 mới, machine_id, instruction:'nhan_menu', data:{menu_version:0}}"}
+      - {connection: fc_seal, text: HPKE seal, interface: f_seal}
+      - {connection: fc_seal, reverse: true, text: "{handle, envelope}; khoá phản hồi ở native"}
+      - {connection: fc_net, text: POST /app/machine/command/send}
+      - {at: t_do_post, text: "Content-Length hợp lệ, parse_json phong bì"}
+      - {connection: t_c2, interface: sec_open}
+      - {at: s_open, text: "kiểm khung, giải HPKE (AAD gắn route), chặn phát lại; app route: không chữ ký"}
+      - {connection: t_c2, reverse: true, text: "OpenedRequest(body, auth:{access_token}, response_key)"}
+      - {connection: t_c3, interface: tr_dispatch}
+      - {connection: d_auth}
+      - {connection: a_auth_tx}
+      - {connection: a_auth_tx, reverse: true}
+      - {connection: d_auth, reverse: true, text: "context.auth = user"}
+      - {connection: d_send, text: "kiểm schema, instruction ∈ INSTRUCTIONS, lấy relay slot"}
+      - {connection: rh_send, interface: hub_send}
+      - {connection: rh_owner, text: "owner_of(machine_id) == user_id"}
+      - {connection: rh_owner, reverse: true}
+      - {at: r_hub_send, text: "máy online → Pending(request_id, deadline) trong RAM"}
+      - {connection: rh_wake, text: "notify; thread app cond.wait tới khi có Terminal"}
+      - {connection: rp_poll, reverse: true, text: long-poll đang mở của máy nhận lệnh, payload: "{v:1, request_id, machine_id, instruction:'nhan_menu', data, remaining_ms}"}
+      - {connection: d_poll, reverse: true, text: "HandlerResult 200 {command}"}
+      - {connection: t_c3, reverse: true}
+      - {connection: t_c5, text: close_response bằng khoá của phong bì poll}
+      - {connection: t_c5, reverse: true}
+      - {connection: mc_net, reverse: true, text: trả 200 cho long-poll}
+      - {connection: mc_open_c}
+      - {connection: mc_open_c, reverse: true}
+      - {connection: mc_pollc, reverse: true}
+      - {connection: mm_pollc, reverse: true, text: command}
+      - {connection: mm_h, text: "cache theo request_id; _run kiểm remaining_ms", interface: m_cmd}
+      - {connection: mh_nhan, interface: m_nhan}
+      - {connection: mn_r}
+      - {connection: mn_rdb}
+      - {connection: mn_rdb, reverse: true}
+      - {connection: mn_r, reverse: true}
+      - {connection: mn_p, text: "crc32 ≠ 0 nên đóng gói đầy đủ"}
+      - {connection: mn_p, reverse: true, payload: "{status:'ok', menu_version, packet:base64(zlib(JSON{type:'menu_sync', fields, drinks}))}"}
+      - {connection: mh_nhan, reverse: true}
+      - {connection: mm_h, reverse: true, text: "{ok:true, data}"}
+      - {connection: mm_res}
+      - {connection: mc_resc}
+      - {connection: mc_seal_c, text: HPKE + ký ECDSA bằng khoá máy}
+      - {connection: mc_seal_c, reverse: true}
+      - {connection: mc_net, text: POST /machine/result/send, payload: "{v:1, request_id, result:{ok:true, data}}"}
+      - {connection: t_c2}
+      - {connection: s_c1, text: verify_machine_signature trước HPKE}
+      - {connection: s_c1, reverse: true}
+      - {connection: t_c2, reverse: true, text: "OpenedRequest(machine)"}
+      - {connection: t_c3}
+      - {connection: d_res}
+      - {connection: rr_hub}
+      - {connection: rh_fin, text: "_finish: Terminal 200 {request_id, machine_id, source:'machine', received_at, result}"}
+      - {connection: rh_owner, text: đọc lại quyền trước khi trả}
+      - {connection: rh_owner, reverse: true}
+      - {connection: rh_send, reverse: true}
+      - {connection: d_send, reverse: true}
+      - {connection: t_c3, reverse: true}
+      - {connection: t_c5, text: close_response bằng khoá của phong bì app}
+      - {connection: t_c5, reverse: true}
+      - {connection: fc_net, reverse: true, payload: "{pv:1, send_id, status:200, nonce, ct}"}
+      - {connection: fc_open}
+      - {connection: fc_open, reverse: true, payload: "{v:1, ok:true, data:{request_id, machine_id, source, received_at, result}}"}
+      - {connection: fs_send, reverse: true}
+      - {connection: fm_ask, reverse: true, text: "kiểm request_id/machine_id/source → MachineAnswer"}
+      - {connection: fm_apply_c, text: "decodeMenuPacket → List<Drink>, setState vẽ lại danh sách"}
+
   - id: login
-    name: Đăng nhập bằng OTP
+    name: Đăng nhập (email + mật khẩu)
     steps:
-      - {connection: app_req, text: App gửi email trong phong bì HPKE}
-      - {connection: open, text: security mở phong bì}
-      - {connection: r_acc, text: Định tuyến tới account}
-      - {connection: acc_mail, text: account tạo OTP và nhờ mail gửi}
-      - {connection: smtp, text: Thư OTP đi qua Gmail}
+      - {connection: u_login, text: nhập email + mật khẩu}
+      - {connection: fa_c}
+      - {connection: fa_post, text: "post /app/user/session/login, không access_token", payload: "{v:1, email, password}"}
+      - {connection: fc_seal, interface: f_seal}
+      - {connection: fc_seal, reverse: true}
+      - {connection: fc_net, text: POST /app/user/session/login}
+      - {at: t_do_post, text: parse_json phong bì}
+      - {connection: t_c2, interface: sec_open}
+      - {at: s_open, text: "kiểm khung, giải HPKE, chặn phát lại"}
+      - {connection: t_c2, reverse: true, text: "OpenedRequest(auth:null)"}
+      - {connection: t_c3, interface: tr_dispatch}
+      - {connection: d_login, text: "route ẩn danh: auth phải null", interface: acc_login}
+      - {at: a_login, text: "_reserve_login: rate limit theo IP"}
+      - {connection: a_login_tx}
+      - {connection: st_sql, text: "SELECT * FROM users WHERE email=%s"}
+      - {connection: st_sql, reverse: true}
+      - {connection: a_login_tx, reverse: true}
+      - {at: a_login, text: "Argon2 verify (hash giả nếu không có user/chưa xác minh); _issue cấp access/refresh token"}
+      - {connection: d_login, reverse: true, payload: "{v:1, ok:true, data:{access_token, refresh_token, ...}}"}
+      - {connection: t_c3, reverse: true}
+      - {connection: t_c5}
+      - {connection: t_c5, reverse: true}
+      - {connection: fc_net, reverse: true}
+      - {connection: fc_open}
+      - {connection: fc_open, reverse: true}
+      - {connection: fa_post, reverse: true}
+      - {connection: fa_save, text: SessionData.fromMap rồi saveSession qua native}
+
   - id: command
-    name: Gửi lệnh pha chế
+    name: Bật/tắt bán món (cap_nhat_menu)
     steps:
-      - {connection: app_req, text: App gửi lệnh}
-      - {connection: r_rel, text: transport đưa lệnh vào RelayHub}
-      - {connection: m_poll, text: Máy long-poll lấy lệnh, rồi gửi kết quả về}
+      - {connection: u_toggle}
+      - {connection: fm_w, payload: "('cap_nhat_menu', {menu_version, thay_doi:[{drink_id, available}]})"}
+      - {connection: fw_ask, text: "request_id giữ nguyên; retry=true chỉ khi thử lại sau TIMEOUT"}
+      - {connection: fs_send, text: authenticatedPost /app/machine/command/send}
+      - {connection: fc_seal, interface: f_seal}
+      - {connection: fc_seal, reverse: true}
+      - {connection: fc_net}
+      - {connection: t_c2, interface: sec_open}
+      - {at: s_open, text: giải HPKE}
+      - {connection: t_c2, reverse: true}
+      - {connection: t_c3}
+      - {connection: d_auth}
+      - {connection: d_auth, reverse: true}
+      - {connection: d_send}
+      - {connection: rh_send, interface: hub_send}
+      - {at: r_hub_send, text: "Terminal cũ cùng (machine_id, request_id) → trả lại, không chạy lại lệnh ghi; khác fingerprint → REQUEST_CONFLICT"}
+      - {connection: rh_wake}
+      - {connection: rp_poll, reverse: true}
+      - {connection: d_poll, reverse: true}
+      - {connection: t_c3, reverse: true}
+      - {connection: t_c5}
+      - {connection: t_c5, reverse: true}
+      - {connection: mc_net, reverse: true}
+      - {connection: mc_open_c}
+      - {connection: mc_open_c, reverse: true}
+      - {connection: mc_pollc, reverse: true}
+      - {connection: mm_pollc, reverse: true}
+      - {connection: mm_h, interface: m_cmd}
+      - {connection: mh_cap, interface: m_cap}
+      - {connection: mn_cr}
+      - {connection: mn_rdb}
+      - {connection: mn_rdb, reverse: true}
+      - {connection: mn_cr, reverse: true}
+      - {at: mn_cap, text: "menu_version lệch → conflict, không ghi; khớp → check_changes cả gói"}
+      - {connection: mn_u}
+      - {connection: mn_udb, text: UPDATE trong cùng transaction}
+      - {connection: mn_udb, reverse: true}
+      - {connection: mn_u, reverse: true}
+      - {connection: mn_cp}
+      - {connection: mn_cp, reverse: true, payload: "{status:'ok'|'conflict', menu_version, packet}"}
+      - {connection: mh_cap, reverse: true}
+      - {connection: mm_h, reverse: true}
+      - {connection: mm_res}
+      - {connection: mc_resc}
+      - {connection: mc_seal_c}
+      - {connection: mc_seal_c, reverse: true}
+      - {connection: mc_net, text: POST /machine/result/send}
+      - {connection: t_c2}
+      - {connection: s_c1}
+      - {connection: s_c1, reverse: true}
+      - {connection: t_c2, reverse: true}
+      - {connection: t_c3}
+      - {connection: d_res}
+      - {connection: rr_hub}
+      - {connection: rh_fin}
+      - {connection: rh_send, reverse: true}
+      - {connection: d_send, reverse: true}
+      - {connection: t_c3, reverse: true}
+      - {connection: t_c5}
+      - {connection: t_c5, reverse: true}
+      - {connection: fc_net, reverse: true}
+      - {connection: fc_open}
+      - {connection: fc_open, reverse: true}
+      - {connection: fs_send, reverse: true}
+      - {connection: fw_ask, reverse: true}
+      - {connection: fm_w, reverse: true, text: MachineAnswer}
+      - {connection: fm_ta, text: "_apply gói mới; status 'conflict' → SnackBar 'Menu trên máy vừa đổi'"}
+
+  - id: register
+    name: "Đăng ký tài khoản (gửi OTP)"
+    steps:
+      - {connection: u_register, text: "nhập email + mật khẩu ở chế độ Đăng ký"}
+      - {connection: fa_reg_c}
+      - {connection: fa_reg_post, payload: "{v:1, email, password}"}
+      - {connection: fc_bootc, text: "chưa có giờ server hoặc quá 5 phút"}
+      - {connection: fc_boot_net, text: "phong bì ẩn danh, timeout 5s"}
+      - {at: t_do_post, text: "open_request như mọi route"}
+      - {connection: t_c3}
+      - {connection: d_boot, text: "rate limit theo IP"}
+      - {connection: d_boot, reverse: true, payload: "{v:1, ok:true, data:{server_time_ms}}"}
+      - {connection: t_c3, reverse: true}
+      - {connection: fc_boot_net, reverse: true}
+      - {connection: fc_bootc, reverse: true, text: "lưu server_time_ms để tính sent_at_ms"}
+      - {connection: fc_seal}
+      - {connection: fc_seal, reverse: true}
+      - {connection: fc_net, text: "POST /app/user/account/register"}
+      - {connection: t_c2}
+      - {connection: t_c2, reverse: true, text: "OpenedRequest(auth:null)"}
+      - {connection: t_c3}
+      - {connection: d_reg}
+      - {connection: a_reg_s}
+      - {at: a_send, text: "_email_lock, _allow_recipient, _send_gate (cooldown, giới hạn email/IP)"}
+      - {connection: a_send_tx, text: "user chưa có → INSERT users (Argon2); OTP 6 số → otp_generations status=sending"}
+      - {connection: st_sql}
+      - {connection: st_sql, reverse: true}
+      - {connection: a_send_tx, reverse: true}
+      - {connection: a_send_mail, text: "email đã xác minh → gửi thư thông báo thay vì OTP"}
+      - {connection: ml_smtp}
+      - {connection: ml_smtp, reverse: true}
+      - {connection: a_send_mail, reverse: true}
+      - {connection: a_send_tx, text: "generation cũ → consumed, mới → active"}
+      - {connection: a_send_tx, reverse: true}
+      - {connection: a_reg_s, reverse: true}
+      - {connection: d_reg, reverse: true, payload: "{v:1, ok:true, data:{message:'CHECK_EMAIL', retry_after_seconds}}"}
+      - {connection: t_c3, reverse: true}
+      - {connection: t_c5}
+      - {connection: t_c5, reverse: true}
+      - {connection: fc_net, reverse: true}
+      - {connection: fc_open}
+      - {connection: fc_open, reverse: true}
+      - {connection: fa_reg_post, reverse: true}
+      - {connection: fa_reg_c, reverse: true, text: "retry_after_seconds"}
+      - {connection: fa_to_otp, text: "mở OtpPage, đếm ngược nút gửi lại"}
+
+  - id: otp_verify
+    name: "Xác minh OTP đăng ký"
+    steps:
+      - {connection: u_otp}
+      - {connection: fo_v}
+      - {connection: fo_v_post, payload: "{v:1, email, otp}"}
+      - {connection: fc_seal}
+      - {connection: fc_seal, reverse: true}
+      - {connection: fc_net, text: "POST /app/user/otp/verify"}
+      - {connection: t_c2}
+      - {connection: t_c2, reverse: true, text: "OpenedRequest(auth:null)"}
+      - {connection: t_c3}
+      - {connection: d_ver}
+      - {connection: a_ver_tx, text: "SELECT user + generation active mới nhất FOR UPDATE"}
+      - {connection: st_sql}
+      - {connection: st_sql, reverse: true}
+      - {connection: a_ver_tx, reverse: true}
+      - {at: a_verify, text: "hết hạn → OTP_EXPIRED 410; sai → tăng registration_attempts, đủ ngưỡng → OTP_LOCKED 429; đúng → verified_at, generation consumed"}
+      - {connection: d_ver, reverse: true, payload: "{v:1, ok:true, data:{verified:true}}"}
+      - {connection: t_c3, reverse: true}
+      - {connection: t_c5}
+      - {connection: t_c5, reverse: true}
+      - {connection: fc_net, reverse: true}
+      - {connection: fc_open}
+      - {connection: fc_open, reverse: true}
+      - {connection: fo_v_post, reverse: true}
+      - {connection: fo_v, reverse: true, text: "verified → về màn đăng nhập"}
+
+  - id: otp_resend
+    name: "Gửi lại mã OTP"
+    steps:
+      - {connection: u_resend, text: "chỉ bật khi hết đếm ngược"}
+      - {connection: fo_s}
+      - {connection: fo_s_post, payload: "{v:1, email}"}
+      - {connection: fc_seal}
+      - {connection: fc_seal, reverse: true}
+      - {connection: fc_net, text: "POST /app/user/otp/send"}
+      - {connection: t_c2}
+      - {connection: t_c2, reverse: true, text: "OpenedRequest(auth:null)"}
+      - {connection: t_c3}
+      - {connection: d_otps}
+      - {connection: a_otp_s}
+      - {at: a_send, text: "_email_lock, _allow_recipient, _send_gate (cooldown, giới hạn email/IP)"}
+      - {connection: a_send_tx, text: "user chưa có → INSERT users (Argon2); OTP 6 số → otp_generations status=sending"}
+      - {connection: st_sql}
+      - {connection: st_sql, reverse: true}
+      - {connection: a_send_tx, reverse: true}
+      - {connection: a_send_mail, text: "email đã xác minh → gửi thư thông báo thay vì OTP"}
+      - {connection: ml_smtp}
+      - {connection: ml_smtp, reverse: true}
+      - {connection: a_send_mail, reverse: true}
+      - {connection: a_send_tx, text: "generation cũ → consumed, mới → active"}
+      - {connection: a_send_tx, reverse: true}
+      - {connection: a_otp_s, reverse: true}
+      - {connection: d_otps, reverse: true, text: "CHECK_EMAIL kể cả email không tồn tại"}
+      - {connection: t_c3, reverse: true}
+      - {connection: t_c5}
+      - {connection: t_c5, reverse: true}
+      - {connection: fc_net, reverse: true}
+      - {connection: fc_open}
+      - {connection: fc_open, reverse: true}
+      - {connection: fo_s_post, reverse: true}
+      - {connection: fo_s, reverse: true, text: "đặt lại đếm ngược theo retry_after_seconds"}
+
+  - id: app_start
+    name: "Mở app, khôi phục phiên"
+    steps:
+      - {connection: u_open}
+      - {connection: fr_load}
+      - {connection: fr_load, reverse: true, text: "không có phiên → AuthPage"}
+      - {connection: fr_ref}
+      - {connection: fref_post, payload: "{v:1, refresh_token}"}
+      - {connection: fc_bootc, text: "chưa có giờ server hoặc quá 5 phút"}
+      - {connection: fc_boot_net, text: "phong bì ẩn danh, timeout 5s"}
+      - {at: t_do_post, text: "open_request như mọi route"}
+      - {connection: t_c3}
+      - {connection: d_boot, text: "rate limit theo IP"}
+      - {connection: d_boot, reverse: true, payload: "{v:1, ok:true, data:{server_time_ms}}"}
+      - {connection: t_c3, reverse: true}
+      - {connection: fc_boot_net, reverse: true}
+      - {connection: fc_bootc, reverse: true, text: "lưu server_time_ms để tính sent_at_ms"}
+      - {connection: fc_seal}
+      - {connection: fc_seal, reverse: true}
+      - {connection: fc_net, text: "POST /app/user/session/refresh"}
+      - {connection: t_c2}
+      - {connection: t_c2, reverse: true, text: "OpenedRequest(auth:null)"}
+      - {connection: t_c3}
+      - {connection: d_ref}
+      - {connection: a_ref_tx, text: "refresh_tokens + sessions FOR UPDATE"}
+      - {connection: st_sql}
+      - {connection: st_sql, reverse: true}
+      - {connection: a_ref_tx, reverse: true}
+      - {at: a_refresh, text: "token đã dùng ngoài grace → thu hồi cả phiên, SESSION_EXPIRED; hợp lệ → used_at, _issue cặp token mới (không vượt absolute)"}
+      - {connection: d_ref, reverse: true, payload: "{v:1, ok:true, data:{access_token, refresh_token, user, ...}}"}
+      - {connection: t_c3, reverse: true}
+      - {connection: t_c5}
+      - {connection: t_c5, reverse: true}
+      - {connection: fc_net, reverse: true}
+      - {connection: fc_open}
+      - {connection: fc_open, reverse: true}
+      - {connection: fref_post, reverse: true}
+      - {connection: fref_save}
+      - {connection: fref_save, reverse: true}
+      - {connection: fr_ref, reverse: true, text: "401 → clear, về AuthPage; TIMEOUT/TRANSPORT_ERROR → vẫn vào dashboard"}
+      - {connection: fr_clear, text: "chỉ khi 401"}
+
+  - id: token_refresh
+    name: "Tự làm mới token khi gặp SESSION_EXPIRED"
+    steps:
+      - {at: fc_send, text: "authenticatedPost nhận 401 SESSION_EXPIRED"}
+      - {connection: fc_load}
+      - {connection: fc_load, reverse: true, text: "phiên đã xoay bởi request khác → dùng luôn"}
+      - {connection: fc_refresh, text: "_refreshing dùng chung, chỉ một refresh bay"}
+      - {connection: fref_post, payload: "{v:1, refresh_token}"}
+      - {connection: fc_seal}
+      - {connection: fc_seal, reverse: true}
+      - {connection: fc_net, text: "POST /app/user/session/refresh"}
+      - {connection: t_c2}
+      - {connection: t_c2, reverse: true, text: "OpenedRequest(auth:null)"}
+      - {connection: t_c3}
+      - {connection: d_ref}
+      - {connection: a_ref_tx}
+      - {connection: st_sql}
+      - {connection: st_sql, reverse: true}
+      - {connection: a_ref_tx, reverse: true}
+      - {connection: d_ref, reverse: true}
+      - {connection: t_c3, reverse: true}
+      - {connection: t_c5}
+      - {connection: t_c5, reverse: true}
+      - {connection: fc_net, reverse: true}
+      - {connection: fc_open}
+      - {connection: fc_open, reverse: true}
+      - {connection: fref_post, reverse: true}
+      - {connection: fref_save}
+      - {connection: fref_save, reverse: true}
+      - {connection: fc_refresh, reverse: true, text: "refresh lỗi 401 → clear + onSessionExpired"}
+      - {at: fc_send, text: "retryAfterRefresh → gửi lại route cũ với access_token mới, không thì ném lỗi"}
+
+  - id: logout
+    name: "Đăng xuất"
+    steps:
+      - {connection: u_logout}
+      - {connection: fl_c}
+      - {connection: fl_load}
+      - {connection: fl_load, reverse: true}
+      - {connection: fl_post, payload: "{v:1, refresh_token}"}
+      - {connection: fc_seal}
+      - {connection: fc_seal, reverse: true}
+      - {connection: fc_net, text: "POST /app/user/session/logout"}
+      - {connection: t_c2}
+      - {connection: t_c2, reverse: true, text: "OpenedRequest(auth:null)"}
+      - {connection: t_c3}
+      - {connection: d_out}
+      - {connection: a_out_tx, text: "tìm session_id theo hash refresh token, đặt revoked_at"}
+      - {connection: st_sql}
+      - {connection: st_sql, reverse: true}
+      - {connection: a_out_tx, reverse: true}
+      - {connection: d_out, reverse: true, payload: "{v:1, ok:true, data:{logged_out:true}}"}
+      - {connection: t_c3, reverse: true}
+      - {connection: t_c5}
+      - {connection: t_c5, reverse: true}
+      - {connection: fc_net, reverse: true}
+      - {connection: fc_open}
+      - {connection: fc_open, reverse: true}
+      - {connection: fl_post, reverse: true}
+      - {connection: fl_clear, text: "finally: luôn xoá phiên local"}
+      - {connection: fl_clear, reverse: true}
+      - {connection: fl_c, reverse: true, text: "về AuthPage; server lỗi → SnackBar"}
+
+  - id: machine_list
+    name: "Xem danh sách máy"
+    steps:
+      - {connection: u_machines}
+      - {connection: fml_c}
+      - {connection: ms_list_post, payload: "{v:1}"}
+      - {connection: fc_seal}
+      - {connection: fc_seal, reverse: true}
+      - {connection: fc_net, text: "POST /app/user/machine/list"}
+      - {connection: t_c2}
+      - {connection: t_c2, reverse: true, text: "OpenedRequest(auth:{access_token})"}
+      - {connection: t_c3}
+      - {connection: d_auth}
+      - {connection: a_auth_tx}
+      - {connection: a_auth_tx, reverse: true}
+      - {connection: d_auth, reverse: true, text: "context.auth = user"}
+      - {connection: d_lst}
+      - {connection: d_list_tx, text: "devices WHERE owner_user_id = user"}
+      - {connection: st_sql}
+      - {connection: st_sql, reverse: true}
+      - {connection: d_list_tx, reverse: true}
+      - {connection: d_list_on, text: "online/last_seen từ RAM"}
+      - {connection: d_list_on, reverse: true}
+      - {connection: d_lst, reverse: true, payload: "{v:1, ok:true, data:{machines:[{id, serial, name, role:'owner', online, last_seen_at}], server_seen_at}}"}
+      - {connection: t_c3, reverse: true}
+      - {connection: t_c5}
+      - {connection: t_c5, reverse: true}
+      - {connection: fc_net, reverse: true}
+      - {connection: fc_open}
+      - {connection: fc_open, reverse: true}
+      - {connection: ms_list_post, reverse: true}
+      - {connection: fml_c, reverse: true, text: "chọn máy đầu nếu chưa chọn, notifyListeners"}
+
+  - id: machine_remove
+    name: "Gỡ máy khỏi tài khoản"
+    steps:
+      - {connection: u_remove}
+      - {connection: fd_rm_c, text: "sau hộp xác nhận"}
+      - {connection: fmc_rm_c}
+      - {connection: ms_rm_post, payload: "{v:1, machine_id}"}
+      - {connection: fc_seal}
+      - {connection: fc_seal, reverse: true}
+      - {connection: fc_net, text: "POST /app/user/machine/remove"}
+      - {connection: t_c2}
+      - {connection: t_c2, reverse: true, text: "OpenedRequest(auth:{access_token})"}
+      - {connection: t_c3}
+      - {connection: d_auth}
+      - {connection: a_auth_tx}
+      - {connection: a_auth_tx, reverse: true}
+      - {connection: d_auth, reverse: true, text: "context.auth = user"}
+      - {connection: d_rm}
+      - {connection: d_rm_tx, text: "FOR UPDATE; không phải chủ → FORBIDDEN 403; owner_user_id=NULL + device_audit owner_release"}
+      - {connection: st_sql}
+      - {connection: st_sql, reverse: true}
+      - {connection: d_rm_tx, reverse: true}
+      - {connection: d_rm, reverse: true, payload: "{v:1, ok:true, data:{removed:true}}"}
+      - {connection: t_c3, reverse: true}
+      - {connection: t_c5}
+      - {connection: t_c5, reverse: true}
+      - {connection: fc_net, reverse: true}
+      - {connection: fc_open}
+      - {connection: fc_open, reverse: true}
+      - {connection: ms_rm_post, reverse: true}
+      - {connection: fmc_rm_c, reverse: true}
+      - {connection: fmc_rm_ref, text: "bỏ chọn nếu là máy đang chọn, tải lại danh sách"}
+
+  - id: machine_claim
+    name: "Nhận máy (QR + BLE + activate)"
+    steps:
+      - {connection: u_scan}
+      - {at: fr_page, text: "SealedQr.parse {v:1, type:flexmix-sealed, serial, seal_code}"}
+      - {connection: frp_run}
+      - {connection: fr_ble, text: "ensurePermissions, start(serial, seal_code), probe"}
+      - {connection: fr_ble_net, text: "probe trong phiên mã hoá từ seal_code"}
+      - {at: mp_handle, text: "AUTHENTICATED; trả machine_public_key, machine_id, online"}
+      - {connection: fr_ble_net, reverse: true}
+      - {connection: fr_ble, reverse: true, text: "online=false → hỏi Wi-Fi, gửi stage wifi rồi chờ máy lên mạng"}
+      - {connection: fr_begin}
+      - {connection: ms_begin_post, payload: "{v:1, step:'begin', serial}"}
+      - {connection: fc_seal}
+      - {connection: fc_seal, reverse: true}
+      - {connection: fc_net, text: "POST /app/user/machine/activate"}
+      - {connection: t_c2}
+      - {connection: t_c2, reverse: true, text: "OpenedRequest(auth:{access_token})"}
+      - {connection: t_c3}
+      - {connection: d_auth}
+      - {connection: a_auth_tx}
+      - {connection: a_auth_tx, reverse: true}
+      - {connection: d_auth, reverse: true, text: "context.auth = user"}
+      - {connection: d_act}
+      - {connection: d_act_b}
+      - {connection: d_begin_tx, text: "không có serial → MACHINE_UNTRUSTED; đã có chủ → ALREADY_OWNED; INSERT claim_challenges"}
+      - {connection: st_sql}
+      - {connection: st_sql, reverse: true}
+      - {connection: d_begin_tx, reverse: true}
+      - {at: d_begin, text: "ký challenge_bytes bằng khoá ký server"}
+      - {connection: d_act_b, reverse: true}
+      - {connection: d_act, reverse: true, payload: "{claim_id, machine_id, challenge, server_challenge_signature}"}
+      - {connection: t_c3, reverse: true}
+      - {connection: t_c5}
+      - {connection: t_c5, reverse: true}
+      - {connection: fc_net, reverse: true}
+      - {connection: fc_open}
+      - {connection: fc_open, reverse: true}
+      - {connection: ms_begin_post, reverse: true}
+      - {connection: fr_begin, reverse: true, text: "ClaimChallenge"}
+      - {connection: fr_ble, text: "claim(challenge, signature)"}
+      - {connection: fr_ble_net, text: "stage claim"}
+      - {connection: mp_c}
+      - {at: mp_claim, text: "verify chữ ký server, kiểm machine_id, ký accept_bytes(challenge, session_id) bằng khoá máy"}
+      - {connection: mp_c, reverse: true, payload: "{claim_id, local_session_binding, machine_proof}"}
+      - {connection: fr_ble_net, reverse: true}
+      - {connection: fr_ble, reverse: true}
+      - {connection: fr_complete}
+      - {connection: ms_complete_post, payload: "{v:1, step:'complete', claim_id, machine_proof, local_session_binding}"}
+      - {connection: fc_seal}
+      - {connection: fc_seal, reverse: true}
+      - {connection: fc_net, text: "POST /app/user/machine/activate"}
+      - {connection: t_c2}
+      - {connection: t_c2, reverse: true, text: "OpenedRequest(auth:{access_token})"}
+      - {connection: t_c3}
+      - {connection: d_auth}
+      - {connection: a_auth_tx}
+      - {connection: a_auth_tx, reverse: true}
+      - {connection: d_auth, reverse: true, text: "context.auth = user"}
+      - {connection: d_act}
+      - {connection: d_act_c}
+      - {connection: d_complete_tx, text: "claim → device FOR UPDATE; đã consumed cùng binding → trả lại kết quả cũ"}
+      - {connection: st_sql}
+      - {connection: st_sql, reverse: true}
+      - {connection: d_complete_tx, reverse: true}
+      - {at: d_complete, text: "hết hạn → CLAIM_EXPIRED; verify_machine_signature sai → CLAIM_PROOF_INVALID; gán owner_user_id, consumed_at, audit owner_claim"}
+      - {connection: d_act_c, reverse: true}
+      - {connection: d_act, reverse: true, payload: "{v:1, ok:true, data:{machine:{id, serial, name, role:'owner'}}}"}
+      - {connection: t_c3, reverse: true}
+      - {connection: t_c5}
+      - {connection: t_c5, reverse: true}
+      - {connection: fc_net, reverse: true}
+      - {connection: fc_open}
+      - {connection: fc_open, reverse: true}
+      - {connection: ms_complete_post, reverse: true}
+      - {connection: fr_complete, reverse: true, text: "TIMEOUT/TRANSPORT_ERROR → gửi lại đúng claim_id một lần"}
+      - {connection: frp_run, reverse: true, text: "finally đóng phiên BLE"}
+      - {connection: fr_added}
+      - {connection: fmc_added_ref}
+
+  - id: machine_hello
+    name: "Máy khởi động: hello lấy machine_id"
+    steps:
+      - {at: mm_run, text: "client.machine_id là None"}
+      - {connection: mm_hello}
+      - {connection: mc_helloc}
+      - {connection: mc_seal_c, text: "HPKE + ký ECDSA bằng khoá máy"}
+      - {connection: mc_seal_c, reverse: true}
+      - {connection: mc_net, text: "POST /machine/hello/send", payload: "{v:1}"}
+      - {connection: t_c2}
+      - {connection: s_c4, text: "key_id trong phong bì"}
+      - {connection: d_bykey_tx}
+      - {connection: st_sql}
+      - {connection: st_sql, reverse: true}
+      - {connection: d_bykey_tx, reverse: true}
+      - {connection: s_c4, reverse: true, text: "không thấy → UNKNOWN_KEY"}
+      - {connection: s_c1}
+      - {connection: s_c1, reverse: true}
+      - {connection: t_c2, reverse: true, text: "OpenedRequest(machine)"}
+      - {connection: t_c3}
+      - {connection: d_hel}
+      - {connection: d_hel, reverse: true, payload: "{v:1, ok:true, data:{server_time_ms, machine_id, owned}}"}
+      - {connection: t_c3, reverse: true}
+      - {connection: t_c5}
+      - {connection: t_c5, reverse: true}
+      - {connection: mc_net, reverse: true}
+      - {connection: mc_open_c}
+      - {connection: mc_open_c, reverse: true}
+      - {connection: mc_helloc, reverse: true}
+      - {connection: mm_hello, reverse: true, text: "hello không đánh dấu online; vòng chuyển sang poll_command"}
+      - {connection: mm_pollc}

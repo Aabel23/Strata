@@ -1,0 +1,255 @@
+title: Lộ trình, phiếu task và luồng duyệt
+summary: Đề xuất feature lộ trình theo cổng và giao task cho agent code. Nội dung viết bằng YAML, trạng thái ghi qua CLI vào DB, có chống tự duyệt và gói ngữ cảnh cho coder.
+code: [strata/schema.sql, strata/db.py, strata/c4.py, strata.py, viewer/roadmap.js]
+
+blocks:
+  - md: |
+      ## Bức tranh toàn cục
+      Hai loại dữ liệu tách hẳn nhau:
+      - **Nội dung** gồm lộ trình, cổng, bước và phiếu task (mục tiêu, phạm vi, tiêu chí đạt). Nội dung viết bằng YAML trong `plan/`, chạy `validate` rồi import, giống cách làm với C4. Nội dung ít đổi, và người duyệt đọc được qua git diff.
+      - **Trạng thái** gồm người nhận, `doing/review/done`, bằng chứng, người kiểm. Trạng thái chỉ ghi qua CLI vào DB. Trigger SQLite ép luật, và mỗi lần chuyển đều ghi một sự kiện không xóa được.
+
+      Lý do tách: nếu trạng thái nằm trong file, agent nào cũng tự sửa được thành `done`, hai agent sửa cùng một file thì đè lẫn nhau, và không có vết. Qua CLI thì kiểm được luật "người làm khác người kiểm", và đúng với nguyên tắc "ghi qua CLI, đọc qua web".
+
+  - diagram:
+      dir: LR
+      caption: Đường đi của một bước từ YAML tới viewer và tới coder.
+      nodes:
+        - {id: y, text: "plan/*.yaml", note: "lộ trình + phiếu", tone: ui}
+        - {id: v, text: validate, note: "schema + tham chiếu chéo"}
+        - {id: c, text: "rm_gate / rm_step", note: "nội dung", shape: store}
+        - {id: s, text: "rm_state / rm_event", note: "trạng thái, append-only", shape: store}
+        - {id: cli, text: "CLI task claim/submit/approve", tone: warn}
+        - {id: ctx, text: "task context", note: "markdown cho coder"}
+        - {id: w, text: Viewer, note: "trang Lộ trình + phiếu", tone: ok}
+      edges: [[y, v], [v, c, import], [cli, s], [c, ctx], [s, ctx], [c, w], [s, w]]
+
+  - md: |
+      ## Luồng chính
+      Ví dụ một bước đi hết vòng đời, từ lúc tasker viết phiếu tới lúc cổng được duyệt.
+
+  - swimlane:
+      lanes: [Tasker, Chat chính, Coder, Reviewer, User, Strata]
+      phases: [Lập phiếu, Thực thi, Duyệt]
+      steps:
+        - {lane: Tasker, text: "Viết bước G1.s3 trong plan/roadmap.yaml"}
+        - {lane: Strata, text: [validate, "c4/flow/file tồn tại, mỗi tiêu chí có verify"]}
+        - {lane: User, text: "Duyệt phiếu, khóa câu hỏi mở"}
+        - {lane: Chat chính, text: "import; bước sang todo"}
+        - {lane: Chat chính, phase: 2, text: "task context G1.s3 → dán vào prompt coder"}
+        - {lane: Coder, text: "task claim (todo→doing, lease 2h)"}
+        - {lane: Coder, text: "Code, chạy verify từng tiêu chí"}
+        - {lane: Coder, text: "task submit --evidence <sha> (→review)"}
+        - {lane: Strata, text: "so git diff với scope, cảnh báo nếu lan ra ngoài"}
+        - {lane: Reviewer, phase: 3, text: Chấm theo từng tiêu chí + diff}
+        - {lane: Reviewer, text: "task approve (→done) hoặc trả về doing"}
+        - {lane: Strata, text: "trigger: reviewer ≠ người làm, có bằng chứng"}
+        - {lane: User, text: "gate pass G1 khi mọi bước done"}
+
+  - table:
+      head: [Trong sơ đồ, Mã nguồn hiện có, Vai trò]
+      rows:
+        - ["validate / import", "strata/c4.py (load, check, import_yaml)", "Giữ cấu trúc. Đổi nhánh xóa dòng vắng mặt (c4.py:210)"]
+        - ["task context", "strata/c4.py context_text", "Gọi lại cho từng object C4 của phiếu"]
+        - ["rm_event append-only", "trigger decision_no_delete trong schema.sql", "Dùng cùng mẫu trigger"]
+        - ["Trang Lộ trình", "viewer/roadmap.js", "Vẽ trục thời gian; cần thêm chế độ theo cổng"]
+        - ["audit", "strata/db.py audit()", "Cần nhận actor thay vì ghi cứng 'cli'"]
+
+  - md: |
+      ## Mô hình dữ liệu (đề xuất)
+      **Làm gì:** gồm 3 cấp là lộ trình, cổng và bước. Việc con không thành cấp riêng mà là danh sách tiêu chí `acceptance` bên trong bước.
+
+      **Các bước:**
+      1. Mỗi project có một lộ trình. Cổng (`G0`, `G1`) có `id` cố định: đổi tiêu đề được, đổi `id` thì không.
+      2. ID của bước có dạng `<cổng>.s<số>`, ví dụ `G1.s3`. Số chỉ tăng, không bao giờ tái dùng. Thứ tự hiển thị lấy theo thứ tự trong YAML, không lấy theo ID. Nhờ vậy chèn bước mới không phải đánh số lại (Taskwarrior cũng tách ID bền khỏi số hiển thị).
+      3. Bước hồi quy là bước mới có `reopens: G1.s3`. Bước cũ vẫn `done` và giữ bằng chứng gốc.
+      4. Bước lộ trình là **bảng riêng**, không nhét vào `item`. Lý do: `item` có bộ trạng thái khác (`proposed/approved/open…`), nếu gộp thì hai bộ đụng nhau. `item` tiếp tục giữ issue và ghi chú.
+      5. Liên kết nhiều-nhiều tới object C4, flow, decision và doc, theo kiểu `c4_link` đang có.
+      6. Tiến độ là "n/m bước done có bằng chứng", không dùng trọng số. Thêm bước thì phần trăm có thể giảm, và đó là hành vi đúng: phạm vi vừa được phát hiện thêm. Shape Up cũng cảnh báo rằng đếm task đã xong sẽ che mất phần chưa biết.
+
+  - table:
+      head: [Bảng, Loại, Cột chính]
+      rows:
+        - [rm_gate, nội dung, "project, id, title, goal, ord"]
+        - [rm_step, nội dung, "project, id, gate, title, spec JSON (phiếu), spec_hash, ord, reopens, retired"]
+        - [rm_dep, nội dung, "project, step, needs (không vòng)"]
+        - [rm_link, nội dung, "project, step, ref_kind c4_object|c4_flow|decision|doc, ref_id"]
+        - [rm_state, trạng thái, "project, step, status todo|doing|review|done|blocked, owner, lease_until, base_sha, evidence JSON, reviewer, version"]
+        - [rm_event, "trạng thái, append-only", "ts, step, from, to, actor, note, evidence"]
+        - [rm_gate_pass, "trạng thái, append-only", "gate, passed_by, ts, snapshot_hash"]
+
+  - md: |
+      ## Phiếu task (đề xuất)
+      **Làm gì:** là bản chỉ dẫn đủ để một coder không biết gì ngoài prompt vẫn làm đúng. Các trường tương ứng với chuẩn công khai như sau: `scope.deny` ứng với *Forbidden Actions* của Devin playbook, `open_decisions` ứng với *[NEEDS CLARIFICATION]* của Spec Kit, `verify` cộng `regress` ứng với *FAIL_TO_PASS / PASS_TO_PASS* của SWE-bench, câu tiêu chí theo EARS của Kiro (`WHEN … THE SYSTEM SHALL …`).
+
+      **Trường bắt buộc** (thiếu thì validate từ chối): `id`, `title`, `goal`, `scope.allow`, `scope.deny`, `acceptance[]` (mỗi mục có `id`, `text`, `verify`), `c4` (hoặc `none` kèm lý do), `depends_on`.
+
+      **Trường nên có** (thiếu thì chỉ cảnh báo): `flows`, `decisions`, `gap` (hiện tại → cần đổi), `contract`, `open_decisions`, `tests`, `regress`.
+
+      Ví dụ một bước trong `plan/roadmap.yaml`:
+      ```yaml
+      gates:
+        - id: G1
+          title: Nền giao task
+          steps:
+            - id: G1.s3
+              title: Lệnh task claim nguyên tử
+              goal: Hai agent claim cùng một bước thì chỉ một người thắng.
+              c4: [strata.cli, strata.db]
+              depends_on: [G1.s1]
+              scope:
+                allow: [strata/db.py, strata.py, tests/test_task.py]
+                deny: [strata/server.py, viewer/]
+              gap:
+                - {where: "strata/db.py set_item", now: "đọc rồi ghi, không điều kiện", need: "UPDATE … WHERE status='todo', kiểm rowcount"}
+              acceptance:
+                - {id: A1, text: "WHEN hai claim đồng thời THE SYSTEM SHALL chỉ nhận một", verify: {cmd: "pytest tests/test_task.py::test_claim_race"}}
+                - {id: A2, text: "WHEN lease hết hạn THE SYSTEM SHALL cho claim lại và ghi sự kiện", verify: {cmd: "pytest tests/test_task.py::test_lease"}}
+              regress: ["pytest -q"]
+              open_decisions:
+                - {id: Q1, q: "Lease mặc định?", status: locked, answer: "2 giờ"}
+      ```
+
+  - statemachine:
+      dir: LR
+      caption: Phiếu chỉ giao được khi sẵn sàng.
+      states:
+        - {id: draft, text: Nháp, tone: muted, note: "validate chỉ cảnh báo"}
+        - {id: hold, text: Chưa giao, tone: warn, note: "còn câu hỏi mở"}
+        - {id: ready, text: Sẵn sàng, tone: ok, note: "task context xuất được"}
+      initial: draft
+      transitions:
+        - [draft, hold, validate sạch]
+        - [hold, ready, "user khóa hết open_decisions, depends_on đã done"]
+
+  - md: |
+      ## Gói ngữ cảnh cho coder (đề xuất)
+      **Làm gì:** `strata.py task context G1.s3` xuất một khối markdown. Chat chính dán nguyên khối này vào prompt coder.
+
+      **Các bước:**
+      1. Đầu tiên là **luật cứng** của project. Đặt đầu để không bao giờ bị cắt, theo khuyến nghị giữ luật luôn nạp ở mức nhỏ của Cursor và AGENTS.md.
+      2. Tiếp theo là phiếu rút gọn: mục tiêu, phạm vi, tiêu chí kèm lệnh verify, hợp đồng, khoảng cách với code, các quyết định đã khóa cùng đáp án.
+      3. Ngữ cảnh C4: với mỗi object, gọi `context_text` và lấy láng giềng 1 bước.
+      4. Flow: chỉ những bước chạm object của phiếu.
+      5. Decision ràng buộc: mỗi cái một dòng.
+      6. Doc architect: chỉ đường dẫn kèm `summary`, không nhúng nội dung.
+      7. Ngân sách mặc định khoảng 3000 token. Cắt theo thứ tự ưu tiên ngược (doc trước, rồi decision, flow…). Phiếu và luật cứng không bao giờ bị cắt: nếu riêng hai phần này đã vượt ngân sách thì báo lỗi.
+
+      Không lặp lại CLAUDE.md: subagent của Claude Code đã tự nhận file này.
+
+  - md: |
+      ## Luồng trạng thái và chống tự duyệt (đề xuất)
+
+  - statemachine:
+      dir: LR
+      caption: Trạng thái một bước trong rm_state. Trigger chặn mọi chuyển khác.
+      states:
+        - {id: todo, text: todo, tone: muted}
+        - {id: doing, text: doing}
+        - {id: blocked, text: blocked, tone: warn}
+        - {id: review, text: review}
+        - {id: done, text: done, tone: ok, note: "bất biến"}
+      initial: todo
+      final: [done]
+      transitions:
+        - [todo, doing, "claim (coder)"]
+        - [doing, blocked, "block + lý do"]
+        - [blocked, doing, gỡ chặn]
+        - [doing, review, "submit + bằng chứng"]
+        - [review, doing, "reviewer trả về"]
+        - [review, done, "approve (reviewer ≠ owner)"]
+
+  - md: |
+      **Các bước:**
+      1. **Claim nguyên tử:** một câu `UPDATE rm_state SET status='doing', owner=?, lease_until=?, base_sha=? WHERE step=? AND (status='todo' OR (status='doing' AND lease_until<now))`, rồi kiểm `rowcount`. SQLite khóa ghi nên câu này đã nguyên tử. Lease mô phỏng Kubernetes Lease: hết hạn thì người khác claim lại được, và việc này ghi vào `rm_event`.
+      2. **Danh tính** là nhãn khai báo, lấy từ `--as reviewer:x` hoặc `STRATA_ACTOR`, rồi ghi vào `rm_event` và `audit`. Mọi agent chạy cùng user OS nên đây **không phải bảo mật**. Mục tiêu là chống nhầm lẫn và để lại vết, đúng tinh thần tách nhiệm của NIST SP 800-53 AC-5.
+      3. **Trigger** (cùng mẫu `decision_no_delete`): chỉ cho các chuyển trong sơ đồ; `done` phải có `reviewer` khác `owner` và có bằng chứng; không sửa hay xóa dòng đã `done`; không sửa hay xóa `rm_event`.
+      4. **Bằng chứng** là JSON `[{type: commit|file|test, ref}]`. Khi approve, CLI kiểm commit có thật bằng `git cat-file -e`, kiểm file có tồn tại, và từ chối chuỗi trông giống bí mật. CLI không chạy lại test.
+      5. **Phạm vi:** khi submit, CLI so `git diff --name-only <base_sha>..HEAD` với `scope`. File nằm ngoài `allow` hoặc nằm trong `deny` thì cảnh báo, và reviewer phải ghi lý do hoặc tạo issue.
+      6. **Đồng bộ YAML ↔ DB:** mỗi bước lưu `spec_hash`. Khi import:
+         - bước chưa `done` thì cập nhật tự do;
+         - bước `done` mà hash đổi thì đánh dấu stale và in cảnh báo, giống "dismiss stale approvals" của GitHub;
+         - bước biến mất khỏi YAML mà đã có trạng thái thì đánh `retired`, không xóa.
+      7. **Cổng:** `gate pass` chỉ chạy khi mọi bước của cổng đã `done` và không stale, và người chạy phải là `user`. Lệnh lưu `snapshot_hash`. Sau đó thêm bước mới vào cổng đã qua thì cổng tự mở lại; lịch sử xác nhận vẫn giữ.
+
+  - md: |
+      ## Case study
+  - table:
+      head: [Hệ, Điều rút ra, Áp dụng]
+      rows:
+        - ["[Gerrit submit requirements](https://gerrit-review.googlesource.com/Documentation/config-submit-requirements.html)", "Code-Review +2 với `user=non_uploader`", "reviewer ≠ owner"]
+        - ["[GitHub protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)", "Bỏ duyệt khi có push mới (dismiss stale approvals)", "spec_hash → stale"]
+        - ["[Kubernetes Lease](https://kubernetes.io/docs/concepts/architecture/leases/)", "holderIdentity, renewTime, leaseDuration", "lease cho claim"]
+        - ["[Linear](https://linear.app/docs/conceptual-model)", "Tiến độ milestone = đếm issue", "tiến độ cổng n/m"]
+        - ["[Shape Up ch.13](https://basecamp.com/shapeup/3.4-chapter-13)", "Đếm task che mất phần chưa biết", "luôn hiện tổng số bước"]
+        - ["[Taskwarrior](https://taskwarrior.org/docs/terminology/)", "UUID bền, số hiển thị riêng, depends theo khóa", "ID bước không tái dùng"]
+        - ["[Spec Kit](https://github.com/github/spec-kit/blob/main/spec-driven.md)", "[NEEDS CLARIFICATION], checkpoint, [P]", "open_decisions, cổng"]
+        - ["[Kiro specs](https://kiro.dev/docs/specs/feature-specs/)", "Tiêu chí EARS", "câu acceptance"]
+        - ["[SWE-bench Verified](https://openai.com/index/introducing-swe-bench-verified/)", "FAIL_TO_PASS / PASS_TO_PASS", "verify + regress"]
+        - ["[Devin playbooks](https://docs.devin.ai/product-guides/creating-playbooks)", "Forbidden Actions, Required from User", "scope.deny, open_decisions"]
+        - ["[Aider repo map](https://aider.chat/docs/repomap.html)", "Nhét ngữ cảnh vừa ngân sách token", "cắt theo ưu tiên"]
+        - ["[Claude Code subagents](https://code.claude.com/docs/en/sub-agents)", "Subagent chỉ thấy prompt + CLAUDE.md", "context không lặp CLAUDE.md"]
+
+  - md: |
+      ## Ghi chú và câu hỏi mở
+      **Lỗi trong code hiện tại (chưa sửa):**
+      - `strata/db.py:74-76`: `audit` ghi cứng `actor_role="cli"`, nên không phân biệt được ai đã ghi.
+      - `strata/db.py:92-97`: `set_item` cho phép chuyển sang trạng thái bất kỳ, kể cả từ `done` về `open`. Hàm đọc rồi mới ghi mà không có điều kiện `WHERE status=?`, nên hai agent ghi cùng lúc sẽ đè nhau.
+      - `strata/c4.py:210`: import xóa mọi dòng không có trong YAML. Nếu dùng nguyên cách này cho lộ trình thì sẽ xóa mất bước đã `done`.
+
+      **Chưa kiểm chứng:** cơ chế workflow của Jira và Phabricator (không tra được nguồn), cấu trúc `tasks.md` của Kiro.
+
+  - question:
+      q: "YAML lộ trình: một file cho cả lộ trình hay một file cho mỗi cổng?"
+      options:
+        - {label: "Một file plan/roadmap.yaml", note: "duyệt cả lô dễ, file dài dần"}
+        - {label: "plan/G1.yaml mỗi cổng", note: "file ngắn, cần thêm quy ước thứ tự cổng"}
+      recommend: "Một file plan/roadmap.yaml"
+  - question:
+      q: "YAML đổi tiêu chí của bước đã done thì làm gì?"
+      options:
+        - {label: "Đánh stale và cảnh báo", note: "cổng không qua được tới khi review lại"}
+        - {label: "Từ chối import", note: "chặt, buộc tạo bước hồi quy"}
+      recommend: "Đánh stale và cảnh báo"
+  - question:
+      q: "Ai được ghi done?"
+      options:
+        - {label: "Actor có vai reviewer hoặc user, khác owner"}
+        - {label: "Chỉ user (gõ ở terminal)"}
+      recommend: "Actor có vai reviewer hoặc user, khác owner"
+  - question:
+      q: "Tiêu chí dạng manual (không tự động kiểm được)?"
+      options:
+        - {label: "Cho phép, ghi rõ ai xác nhận", note: "viewer đếm riêng số mục manual chưa xác nhận"}
+        - {label: "Chỉ khi có lý do ghi trong phiếu"}
+      recommend: "Cho phép, ghi rõ ai xác nhận"
+  - question:
+      q: "Luật cứng đưa vào task context lấy từ đâu?"
+      options:
+        - {label: "Mục '## Luật cứng' trong CLAUDE.md của project"}
+        - {label: "Một doc rules riêng trong Strata"}
+      recommend: "Mục '## Luật cứng' trong CLAUDE.md của project"
+
+  - table:
+      head: [Để sau MVP, Lý do]
+      rows:
+        - ["Heartbeat tự gia hạn lease", "Lease cố định + claim --steal là đủ"]
+        - ["Token/TTY để xác nhận done", "Nhãn khai báo đủ cho mục tiêu trung thực"]
+        - ["Chạy lại test lúc approve", "Coder và reviewer đã chạy; server chỉ GET"]
+        - ["Trọng số, hill chart, burndown", "Số tự đặt dễ bị chỉnh"]
+        - ["Theo dõi file đổi sau done", "Chỉ gợi ý mở hồi quy, không tự mở"]
+        - ["Xếp hạng ngữ cảnh kiểu Aider", "Cắt theo ưu tiên cố định là đủ"]
+        - ["Phụ thuộc giữa các project", "Chưa có nhu cầu"]
+
+  - md: |
+      ## Thuật ngữ
+  - table:
+      head: [Thuật ngữ, Nghĩa]
+      rows:
+        - [Cổng (gate), "Mốc gom nhiều bước; chỉ qua khi mọi bước done và user xác nhận"]
+        - [Lease, "Quyền giữ việc có thời hạn; hết hạn thì người khác nhận lại được"]
+        - [Append-only, "Chỉ thêm dòng, không sửa hay xóa dòng cũ"]
+        - [Stale, "Đã duyệt nhưng nội dung đổi sau đó, nên phải duyệt lại"]
+        - [EARS, "Mẫu câu yêu cầu: WHEN điều kiện THE SYSTEM SHALL hành vi"]
+        - [FAIL_TO_PASS / PASS_TO_PASS, "Test phải từ đỏ thành xanh / test cũ phải vẫn xanh"]
+        - [Drift, "Phiếu hoặc thiết kế không còn khớp với code"]

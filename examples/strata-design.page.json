@@ -6,7 +6,7 @@
  "blocks": [
   {
    "type": "md",
-   "text": "Nguồn làm việc chính thay tài liệu project và RAM/OPEN. Bản chính là SQLite tại `~/.secondbrain/strata.db`. Trạng thái tính đến 18/10/2026: xong T1 (schema), T2 (import C4), T3 (viewer đọc DB), T3b (page)."
+   "text": "Nguồn làm việc chính thay tài liệu project và RAM/OPEN. Bản chính là SQLite tại `/home/abel/project/tools/strata/strata.db`. Trạng thái tính đến 18/10/2026: xong T1 (schema), T2 (import C4), T3 (viewer đọc DB), T3b (page)."
   },
   {
    "type": "legend",

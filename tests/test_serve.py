@@ -46,7 +46,7 @@ def test_api_c4_shape(srv):
     d = json.loads(body)
     assert st == 200 and set(d) == {"meta", "objects", "connections", "flows", "issues", "links", "open_issues"}
     assert d["meta"]["name"] == "project1_app" and "security" in d["meta"]["tags"]
-    assert len(d["objects"]) == 14 and "from" in d["connections"][0] and d["flows"][0]["steps"][0]["connection"] == "app_req"
+    assert len(d["objects"]) == 115 and "interfaces" in d["objects"][0] and "from" in d["connections"][0] and d["flows"][0]["steps"][1] == {"connection": "fm_c1", "text": "generation++, busy=true"}
     assert json.loads(get(srv, "/api/c4")[1]) == d  # default project
 
 

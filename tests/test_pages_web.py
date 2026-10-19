@@ -61,7 +61,7 @@ const fs=require('fs'), vm=require('vm');
 function mk(tag){const e={tag,children:[],className:'',
   set textContent(v){this.children=[{text:String(v)}]}, append(...xs){xs.forEach(x=>this.children.push(typeof x==='string'?{text:x}:x))},
   set innerHTML(v){throw new Error('innerHTML')}};return e}
-const ctx={document:{createElement:mk,getElementById:()=>mk('main'),documentElement:{dataset:{}}},localStorage:{getItem:()=>null},
+const ctx={document:{createElement:mk,getElementById:()=>mk('main'),documentElement:{dataset:{}},addEventListener(){}},MutationObserver:class{observe(){}},addEventListener(){},localStorage:{getItem:()=>null},
   location:{pathname:'/pages',search:''},fetch:()=>new Promise(()=>{}),setInterval(){},matchMedia:()=>({matches:false}),URLSearchParams,encodeURIComponent,decodeURIComponent};
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(process.argv[2],'utf8')+';this.md=md',ctx);

@@ -135,3 +135,104 @@ def test_assets_route(env):
 def test_app_js_never_injects_html():
     js = (ROOT / "viewer/app.js").read_text()
     assert not any(w in js for w in ("innerHTML", "insertAdjacentHTML", "document.write", "eval(", "outerHTML"))
+
+
+def test_docs_autoscan_md(env):
+    b, p, d = env
+    (d / "guide.md").write_text("Intro\n\n# Hướng dẫn đặc biệt\n\n| a | b |\n|---|---|\n| 1 | 2 |\n")
+    docs = {x["path"]: x for x in J(env, "/api/docs?project=a")}  # no `doc scan`: server picks it up
+    assert docs["guide.md"]["title"] == "Hướng dẫn đặc biệt" and docs["guide.md"]["status"] == "current"
+    assert get(b, "/docs/a/guide.md")[0] == 200
+    n = db.connect(p).execute("SELECT count(*) FROM audit WHERE tool='doc.scan'").fetchone()[0]
+    J(env, "/api/docs?project=a")  # unchanged dir: no rescan, no new audit row
+    assert db.connect(p).execute("SELECT count(*) FROM audit WHERE tool='doc.scan'").fetchone()[0] == n
+    (d / "guide.md").unlink()
+    assert {x["path"]: x for x in J(env, "/api/docs?project=a")}["guide.md"]["status"] == "missing"
+
+
+def test_yaml_doc_codetree_and_api(env):
+    b, p, d = env
+    (d / "strata").mkdir()
+    (d / "strata/flow.yaml").write_text("title: Luồng\nsummary: tóm tắt\nblocks:\n  - md: '## Hi đặc biệt'\n"
+                                        "  - diagram: {nodes: [{id: a}, {id: b, link: x}], edges: [[a, b, nhãn]]}\n")
+    (d / "bad.yaml").write_text("title: Hỏng\ncode: src/x.py\nblocks:\n  - diagram: {nodes: [{id: a}], edges: [[a, z]]}\n  - nope: 1\n")
+    docs = {x["path"]: x for x in J(env, "/api/docs?project=a")}
+    assert docs["strata/flow.yaml"]["title"] == "Luồng" and json.loads(docs["strata/flow.yaml"]["code"]) == []  # code: is metadata, never inferred
+    assert json.loads(docs["bad.yaml"]["code"]) == ["src/x.py"]
+    ok = J(env, "/api/doc?project=a&path=strata/flow.yaml")
+    assert ok["errors"] == [] and [x["type"] for x in ok["blocks"]] == ["md", "diagram"] and ok["blocks"][0]["text"] == "## Hi đặc biệt"
+    bad = J(env, "/api/doc?project=a&path=bad.yaml")["errors"]
+    assert any("unknown node 'z'" in e for e in bad) and any("unknown type 'nope'" in e for e in bad)
+    assert "Luồng" in [h["title"] for h in J(env, "/api/search?q=dac%20biet&project=a")]
+    for bad_path in ("../secret.txt", "b.html", ".hid/z.yaml", "nope.yaml"):
+        assert get(b, "/api/doc?project=a&path=" + bad_path)[0] == 404
+
+
+def test_swimlane_block_validates():
+    from strata.blocks import load_doc
+    ok = """title: t
+blocks:
+  - swimlane:
+      lanes: {A: [x, y]}
+      phases: [p1, p2]
+      steps:
+        - {lane: x, text: a}
+        - {lane: y, text: [b, c], phase: 2, data: [1]}
+"""
+    assert load_doc(ok)[1] == []
+    bad = ok.replace("lane: y", "lane: z").replace("data: [1]", "data: [5]")
+    errs = load_doc(bad)[1]
+    assert any("lane 'z'" in m for m in errs) and any("step 5" in m for m in errs)
+
+
+def test_statemachine_roadmap_validate():
+    from strata.blocks import load_doc
+    sm = """title: t
+blocks:
+  - statemachine:
+      states: [a, {id: b, tone: ok}]
+      initial: a
+      final: b
+      transitions: [[a, a, loop], [a, b]]
+  - roadmap:
+      periods: [Q1, Q2]
+      lanes: [L]
+      items: [{lane: L, text: x, from: Q1, to: Q2, status: done}]
+      milestones: [{at: Q2, text: v1}]
+"""
+    assert load_doc(sm)[1] == []
+    bad = load_doc(sm.replace("final: b", "final: [z]").replace("tone: ok", "tone: red").replace("[a, b]]", "[a, q]]").replace("dir", "dir")
+                   .replace("states: [a,", "dir: UP\n      states: [a, a,"))[1]
+    for m in ("unknown state 'z'", "tone must be", "unknown state 'q'", "dir must be", "duplicate id 'a'"):
+        assert any(m in x for x in bad), (m, bad)
+    bad = load_doc(sm.replace("lane: L", "lane: M").replace("to: Q2", "to: Q0").replace("done", "x").replace("at: Q2", "at: Q9"))[1]
+    for m in ("lane 'M'", "to 'Q0'", "status must be", "at 'Q9'"):
+        assert any(m in x for x in bad), (m, bad)
+    assert any("before" in x for x in load_doc(sm.replace("from: Q1", "from: Q2").replace("to: Q2", "to: Q1"))[1])
+    assert any("periods" in x for x in load_doc(sm.replace("periods: [Q1, Q2]", "periods: []"))[1])
+
+
+def test_mermaid_blocks_validate():
+    from strata.blocks import load_doc
+    ok = """title: t
+blocks:
+  - diagram:
+      nodes: [{id: a, shape: decision, tone: warn}, {id: b, shape: store}]
+      edges: [[a, b, [x, y]], [b, a, "l1\\nl2"]]
+  - statemachine:
+      states: [a, b]
+      initial_label: register
+      transitions: [[a, b, [x, y]]]
+"""
+    assert load_doc(ok)[1] == []
+    for old, new, msg in (("shape: decision", "shape: round", "shape must be"), ("tone: warn", "tone: red", "tone must be"),
+                          ("[x, y]]", "[1]]", "label must be"), ("initial_label: register", "initial_label: [1]", "initial_label")):
+        assert any(msg in x for x in load_doc(ok.replace(old, new, 1))[1]), (old, msg)
+
+
+def test_details_validate():
+    from strata.blocks import load_doc
+    ok = "title: t\nblocks:\n  - diagram:\n      details_title: X\n      nodes: [{id: a, details: [[k, v `c`]]}]\n  - statemachine:\n      states: [{id: a, details: [[k, v]]}]\n"
+    assert load_doc(ok)[1] == []
+    for old, new in (("[[k, v `c`]]", "[k, v]"), ("[[k, v `c`]]", "[[k]]"), ("[[k, v]]", "[[k, 1]]"), ("details_title: X", "details_title: 1")):
+        assert load_doc(ok.replace(old, new, 1))[1], (old, new)

@@ -5,7 +5,7 @@
 Công cụ cục bộ, đọc dữ liệu từ SQLite, quản lý nhiều project: task, issue, decision, trang thảo luận, mục lục tài liệu kỹ thuật, bản đồ C4, nhật ký audit. Giao diện web chỉ đọc. Mọi thao tác ghi đi qua CLI.
 
 - Code: `/home/abel/project/tools/strata` (Python stdlib + PyYAML, JS thuần, không build, không CDN). **Chưa có git.**
-- DB thật: `/home/abel/.secondbrain/strata.db`, mới có schema, chưa có dữ liệu.
+- DB thật: `/home/abel/project/tools/strata/strata.db`, mới có schema, chưa có dữ liệu.
 - DB mẫu: `/tmp/claude-1000/-home-abel-project-tools-strata/31fe5838-bdb3-476e-9ab9-d00ef4a47539/scratchpad/demo.db`. Nằm trong `/tmp`, khởi động lại máy là mất. Tạo lại theo mục "Dựng lại DB mẫu".
 
 ## Chạy
@@ -20,7 +20,9 @@ Lúc bàn giao, server đang chạy nền trên DB mẫu. Tắt bằng cách kil
 
 ## Lệnh CLI chính
 
-`init`, `import-yaml FILE --project P`, `validate --project P`, `project add/list`, `doc scan/set`, `item add/set`, `page put/validate/list`. Xem thêm `README.md`.
+`init`, `import-yaml FILE --project P`, `validate --project P`, `project add/list`, `doc scan/set`, `item add/set`, `page put/validate/list`, `c4 context`, `c4 flow`. Xem thêm `README.md`.
+
+Agent vẽ/sửa map C4 và flow: đọc `docs/AGENT_C4.md` (giao thức đọc ít token, quy ước YAML, luật viết flow).
 
 ## Đã xong và đã kiểm
 
@@ -50,6 +52,17 @@ Lúc bàn giao, server đang chạy nền trên DB mẫu. Tắt bằng cách kil
 - Chưa có git. Nên `git init` và commit trước khi sửa tiếp.
 - Chưa chạy reviewer cho đợt giao diện (từ lúc thêm khung nhiều project trở đi).
 - Theo kế hoạch đã duyệt, chưa làm: T4 (lớp service có kiểm quyền theo vai và audit), T5 (nhận task nguyên tử), T6 (decision qua service), T7 (tìm kiếm), T8 (`context(role, task)`), T9 (MCP server), T10–T11 (export ra git, `CORE_RULES.md`), T12 (nhập dữ liệu từ vault), T13.
+  - Bản plan chi tiết đã mất: Strata chưa có task nào cho project `strata`, chỉ còn tên bước ở dòng trên. T13 không rõ nội dung, cần hỏi user.
+  - Thứ tự đề xuất (19/10/2026, chờ user duyệt): T6 trước (có thể làm cùng T4), rồi T8. Lý do: research giờ nằm ở vault nên quyết định chỉ có trong note research, coder không thấy. T6 cho quyết định vào Strata, T8 gom context theo vai.
+  - User duyệt thì ghi các bước thành task: `item add --project strata --kind task`.
+
+## Đổi luật 19/10/2026: research ghi vào vault
+
+- Bước 3 (research) giờ ra note Markdown trong vault `research/<project>/<chu-de>.md`, chỉ chat chính ghi qua Obsidian MCP. Không ghi research vào Strata nữa. Doc YAML chỉ còn cho phần đã chốt (`architect/`, `plan/`, `review/`).
+- Note có frontmatter để tra: title, summary, project, topic, status (dang-ban/da-chot/bo), created/updated, keywords, code, related, strata_doc, tags (`research`, `project/<p>`, `status/<s>`).
+- File đã sửa: `agent/HIEN_PHAP.md` (bảng luồng bước 3, mục "Strata trong luồng"), `agent/skills/research-stage/SKILL.md` (bước 5–6).
+- Chưa sửa theo: skill `strata` (mục "Luồng 6 bước", dòng B3 vẫn ghi doc YAML trong `research/`). Hai doc cũ `docs/research/*.yaml` để nguyên.
+- Chưa commit: cả `agent/` chưa được git theo dõi, chờ user quyết commit toàn bộ.
 - Tài liệu kỹ thuật của project1_app chưa gán tính năng, nên mục lục đang dồn hết vào "Chưa phân nhóm" (`doc set --feature`).
 - Tài liệu HTML được phục vụ cùng nguồn với app, không bị cô lập.
 

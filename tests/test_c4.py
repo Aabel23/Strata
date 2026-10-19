@@ -86,5 +86,6 @@ def test_issues_by_object(tmp_path):
     m = {"objects": [{"id": "a", "links": ["ok.py"], "description": "d"},
                      {"id": "b", "links": ["ok.py", "gone.py"], "description": "d"},
                      {"id": "c", "links": ["http://x"]},
-                     {"id": "d", "description": "d"}]}
+                     {"id": "d", "type": "component", "description": "d"},
+                     {"id": "e", "type": "actor", "description": "d"}]}
     assert c4.issues_by_object(m, tmp_path) == {"b": ["dead_link"], "c": ["no_desc"], "d": ["no_link"]}

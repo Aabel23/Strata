@@ -7,7 +7,7 @@ try{const t=localStorage.getItem("strata-theme");if(t)document.documentElement.d
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
 const get=url=>fetch(url).then(r=>r.ok?r.json():Promise.reject(new Error(url+" → "+r.status)));
 
-/* minimal markdown: headings (#..###), paragraphs, lists, ``` code, `code`, **bold**, [text](url) */
+/* minimal markdown: headings (#..###), paragraphs, lists, | tables |, ``` code, `code`, **bold**, [text](url) */
 function inline(parent,s){
   const re=/`([^`]+)`|\*\*(.+?)\*\*|\[([^\]]+)\]\(([^)\s]+)\)/g; let i=0,m;
   while((m=re.exec(s))){
@@ -20,7 +20,7 @@ function inline(parent,s){
   }
   if(i<s.length) parent.append(s.slice(i));
 }
-const LI=/^([-*]|\d+\.) /, HEAD=/^(#{1,3}) (.*)/;
+const LI=/^([-*]|\d+\.) /, HEAD=/^(#{1,3}) (.*)/, TR=/^\s*\|.*\|\s*$/;
 function md(text){
   const root=el("div","md"), lines=String(text).split("\n"); let i=0;
   while(i<lines.length){
@@ -28,26 +28,143 @@ function md(text){
     if(!l.trim()){i++;continue}
     if(l.startsWith("```")){const buf=[];i++;while(i<lines.length&&!lines[i].startsWith("```"))buf.push(lines[i++]);i++;
       const pre=el("pre");pre.append(el("code","",buf.join("\n")));root.append(pre);continue}
+    if(TR.test(l)){const t=el("table"), cells=r=>r.trim().replace(/^\||\|$/g,"").split("|").map(x=>x.trim());
+      const rows=[];while(i<lines.length&&TR.test(lines[i]))rows.push(lines[i++]);
+      rows.filter(r=>!/^\s*\|[\s:|-]+\|\s*$/.test(r)).forEach((r,k)=>{const tr=el("tr");
+        cells(r).forEach(c=>{const td=el(k?"td":"th");inline(td,c);tr.append(td)});t.append(tr)});
+      root.append(t);continue}
     const h=l.match(HEAD);
     if(h){const e=el("h"+(h[1].length+1));inline(e,h[2]);root.append(e);i++;continue}
     if(LI.test(l)){const list=el(/^\d/.test(l)?"ol":"ul");
       while(i<lines.length&&LI.test(lines[i])){const li=el("li");inline(li,lines[i].replace(LI,""));list.append(li);i++}
       root.append(list);continue}
     const buf=[];
-    while(i<lines.length&&lines[i].trim()&&!lines[i].startsWith("```")&&!HEAD.test(lines[i])&&!LI.test(lines[i]))buf.push(lines[i++]);
+    while(i<lines.length&&lines[i].trim()&&!lines[i].startsWith("```")&&!HEAD.test(lines[i])&&!LI.test(lines[i])&&!TR.test(lines[i]))buf.push(lines[i++]);
     const p=el("p");inline(p,buf.join(" "));root.append(p);
   }
   return root;
 }
 
+/* ---- mermaid figures: diagram, statemachine and hand-written mermaid all render through here ----
+   Look ported from project1's doc.js. Colours come from the --d-* tokens in page.css, so both themes work. */
 let mmN=0;
-function mermaidBlock(code){
-  const box=el("div","diagram"), fail=e=>{box.textContent="";box.append(el("p","err","Mermaid: "+(e&&e.message||e)),el("pre","",code))};
-  if(!window.mermaid){fail("not loaded");return box}
-  const dark=(document.documentElement.dataset.theme||(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"))==="dark";
-  mermaid.initialize({startOnLoad:false,securityLevel:"strict",theme:dark?"dark":"default"});
-  mermaid.render("mm"+(++mmN),code).then(r=>{box.innerHTML=r.svg}).catch(fail);
-  return box;
+const tok=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function classDefs(){
+  const ink=tok("--fg"), d=(n,fill,stroke,x)=>`  classDef ${n} fill:${fill},stroke:${stroke},color:${ink},stroke-width:1.4px${x||""}`;
+  return [d("ui",tok("--d-ui-soft"),tok("--d-ui")),d("proc",tok("--d-proc-soft"),tok("--d-proc")),
+    d("store",tok("--d-store-soft"),tok("--d-store")),d("dec",tok("--d-amber-soft"),tok("--d-amber")),
+    d("ok",tok("--d-ok-soft"),tok("--d-ok")),d("bad",tok("--d-red-soft"),tok("--d-red")),
+    d("muted",tok("--bg"),tok("--faint"),",stroke-dasharray:4 3")].join("\n");
+}
+function mmConfig(){
+  const v={fontFamily:tok("--body"),fontSize:"13px",background:tok("--card"),
+    primaryColor:tok("--d-proc-soft"),primaryTextColor:tok("--fg"),primaryBorderColor:tok("--d-proc"),
+    secondaryColor:tok("--bg"),tertiaryColor:tok("--bg"),lineColor:tok("--faint"),textColor:tok("--fg"),
+    mainBkg:tok("--d-proc-soft"),nodeBorder:tok("--d-proc"),clusterBkg:tok("--card"),clusterBorder:tok("--line"),titleColor:tok("--muted"),
+    edgeLabelBackground:tok("--card"),actorBkg:tok("--card"),actorBorder:tok("--line"),actorTextColor:tok("--fg"),actorLineColor:tok("--line"),
+    signalColor:tok("--accent"),signalTextColor:tok("--fg"),labelBoxBkgColor:tok("--bg"),labelBoxBorderColor:tok("--line"),labelTextColor:tok("--fg"),
+    noteBkgColor:tok("--d-amber-soft"),noteBorderColor:tok("--d-amber"),noteTextColor:tok("--fg"),sequenceNumberColor:"#FFFFFF",
+    stateLabelColor:tok("--fg"),transitionColor:tok("--faint"),transitionLabelColor:tok("--muted"),stateBkg:tok("--d-proc-soft"),
+    altBackground:tok("--bg"),compositeBackground:tok("--bg"),specialStateColor:tok("--muted")};
+  return {startOnLoad:false,theme:"base",themeVariables:v,securityLevel:"loose",
+    flowchart:{htmlLabels:true,curve:"basis",nodeSpacing:28,rankSpacing:40,padding:8,useMaxWidth:false},
+    sequence:{useMaxWidth:false,mirrorActors:false,wrap:false,width:118,actorMargin:22,boxMargin:6,messageMargin:26,messageFontSize:13,noteFontSize:13,actorFontSize:13,showSequenceNumbers:true},
+    state:{useMaxWidth:false}};
+}
+// shrink to the frame when only slightly wider (ratio >= 0.6), else natural size and the frame scrolls
+function fit(canvas){
+  const svg=canvas.querySelector("svg");if(!svg)return;
+  const vb=svg.viewBox&&svg.viewBox.baseVal, nat=vb&&vb.width?vb.width:svg.getBoundingClientRect().width, room=canvas.clientWidth;
+  svg.style.maxWidth="none";svg.style.width=(nat>room&&room/nat>=0.6?room:nat)+"px";
+}
+let zoomEl=null;
+function closeZoom(){if(zoomEl){zoomEl.remove();zoomEl=null}}
+function openZoom(svg){
+  if(!svg)return;closeZoom();
+  const copy=svg.cloneNode(true), vb=svg.viewBox&&svg.viewBox.baseVal;
+  copy.removeAttribute("style");if(vb&&vb.width){copy.setAttribute("width",Math.round(vb.width));copy.removeAttribute("height")}
+  const x=el("button","dg-zx","Đóng");x.type="button";x.onclick=closeZoom;
+  const body=el("div","dg-zbody");body.append(copy);
+  zoomEl=el("div","dg-zoom");zoomEl.setAttribute("role","dialog");zoomEl.setAttribute("aria-modal","true");
+  zoomEl.append(x,body);zoomEl.onclick=e=>{if(e.target===zoomEl||e.target===body)closeZoom()};
+  document.body.append(zoomEl);x.focus();
+}
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeZoom()});
+
+const figs=new Set(); let queue=Promise.resolve();
+function drawFig(f){
+  const src=f.src+(f.defs?"\n"+classDefs():"");
+  queue=queue.then(()=>{
+    if(!f.canvas.isConnected)return;
+    mermaid.initialize(mmConfig());
+    return mermaid.render("mm"+(++mmN),src).then(r=>{f.canvas.innerHTML=r.svg;fit(f.canvas)})
+      .catch(err=>{f.canvas.replaceChildren(el("p","err","Mermaid: "+(err&&err.message||err)),el("pre","",f.src))});
+  });
+}
+/* details: {title, groups:[[heading, [[label,text],..]],..]} -> side table next to the figure */
+function sidePanel(d){
+  const side=el("aside","dg-side"), t=el("table"), h=el("tr"), th=el("th","",d.title);
+  th.colSpan=2;h.append(th);t.append(h);
+  d.groups.forEach(([head,rows])=>{
+    const g=el("tr","grp"), c=el("td","",head);c.colSpan=2;g.append(c);t.append(g);
+    rows.forEach(([k,v])=>{const tr=el("tr"), a=el("td","",k), b=el("td");inline(b,v);tr.append(a,b);t.append(tr)});
+  });
+  side.append(t);return side;
+}
+const detailsOf=(b,items)=>{
+  const groups=items.map(n=>[(n.text||n.id).split("\n")[0],n.details]).filter(g=>g[1]&&g[1].length);
+  return groups.length?{title:b.details_title||"Bên trong các khối",groups}:null;
+};
+function mmFigure(src,caption,defs,details){
+  const fig=el("figure","dg"+(details?" dg-split":"")), canvas=el("div","dg-canvas"), bar=el("div","dg-tools");
+  const zoom=el("button","","Phóng to"), code=el("button","","Mã nguồn");zoom.type=code.type="button";
+  zoom.onclick=()=>openZoom(canvas.querySelector("svg"));
+  const showSrc=()=>canvas.replaceChildren(el("pre","fallback",src));
+  code.onclick=()=>{try{navigator.clipboard.writeText(src).then(()=>{code.textContent="Đã chép";setTimeout(()=>{code.textContent="Mã nguồn"},1600)},showSrc)}catch{showSrc()}};
+  bar.append(zoom,code);
+  if(details){const main=el("div","dg-main");main.append(canvas,bar);fig.append(main,sidePanel(details))}else fig.append(canvas,bar);
+  if(caption)fig.append(el("figcaption","",caption));
+  if(!window.mermaid){showSrc();return fig}
+  const f={src,canvas,defs:defs||/\n\s*class /.test(src)};figs.add(f);drawFig(f);return fig;
+}
+const redrawAll=()=>{for(const f of figs){if(f.canvas.isConnected)drawFig(f);else figs.delete(f)}};
+new MutationObserver(redrawAll).observe(document.documentElement,{attributes:true,attributeFilter:["data-theme"]});
+if(matchMedia){const mq=matchMedia("(prefers-color-scheme: dark)");mq.addEventListener&&mq.addEventListener("change",redrawAll)}
+let rt;addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(()=>{for(const f of figs)fit(f.canvas)},150)});
+function mermaidBlock(code){return mmFigure(code)}
+
+/* diagram / statemachine -> mermaid source. User text only ever lands inside quotes or after a colon, escaped by esc();
+   ids are generated (n0, n1..), so no user text becomes mermaid syntax. */
+const esc=s=>String(s).replace(/#/g,"#35;").replace(/"/g,"#quot;").replace(/</g,"#lt;").replace(/>/g,"#gt;").replace(/&/g,"#amp;").replace(/;/g,"#59;").replace(/`/g,"#96;");
+const lines=l=>[].concat(l==null?[]:l).flatMap(x=>String(x).split("\n")).map(esc).join("<br/>");
+const safeHref=h=>typeof h==="string"&&/^(https?:\/\/|#\/)/.test(h)&&!/[\s"]/.test(h)?h:null;  // only what linkFor resolved; no javascript:
+const toneCls={ui:"ui",proc:"proc",store:"store",ok:"ok",bad:"bad",muted:"muted",warn:"dec"};
+function clicks(items,linkFor,out){
+  items.forEach((n,i)=>{const h=n.link&&linkFor?safeHref(linkFor(n.link)):null;if(h)out.push(`  click n${i} href "${h}" ${h[0]==="#"?"_self":"_blank"}`)});
+}
+function diagram(b,linkFor){
+  const ix=new Map(b.nodes.map((n,i)=>[n.id,"n"+i])), out=["flowchart "+(b.dir||"TB")];
+  b.nodes.forEach((n,i)=>{
+    const t=lines(n.text||n.id)+(n.note?"<br/><small>"+lines(n.note)+"</small>":""), q=`"${t}"`;
+    out.push("  n"+i+({decision:`{${q}}`,store:`[(${q})]`}[n.shape]||`[${q}]`));
+    out.push(`  class n${i} ${toneCls[n.tone]||(n.shape==="store"?"store":"proc")}`);
+  });
+  (b.edges||[]).forEach(x=>{const [f,t,l]=Array.isArray(x)?x:[x.from,x.to,x.label];
+    out.push(`  ${ix.get(f)} -->${l?`|"${lines(l)}"|`:""} ${ix.get(t)}`)});
+  clicks(b.nodes,linkFor,out);
+  return mmFigure(out.join("\n"),b.caption,true,detailsOf(b,b.nodes));
+}
+function statemachine(b,linkFor){
+  const ss=b.states.map(s=>typeof s==="string"?{id:s}:s), ix=new Map(ss.map((s,i)=>[s.id,"n"+i])), fin=[].concat(b.final||[]);
+  const out=["stateDiagram-v2","  direction "+(b.dir||"TB")];
+  ss.forEach((s,i)=>out.push(`  state "${lines(s.text||s.id)+(s.note?"<br/>"+lines(s.note):"")}" as n${i}`));
+  const il=b.initial_label?" : "+lines(b.initial_label):"";
+  out.push(`  [*] --> ${ix.get(b.initial||ss[0].id)}${il}`);
+  (b.transitions||[]).forEach(x=>{const [f,t,l]=Array.isArray(x)?x:[x.from,x.to,x.label];
+    out.push(`  ${ix.get(f)} --> ${ix.get(t)}${l?" : "+lines(l):""}`)});
+  fin.forEach(f=>out.push(`  ${ix.get(f)} --> [*]`));
+  ss.forEach((s,i)=>{if(toneCls[s.tone])out.push(`  class n${i} ${toneCls[s.tone]}`)});
+  return mmFigure(out.join("\n"),b.caption,true,detailsOf(b,ss));
 }
 
 function table(b){
@@ -88,6 +205,10 @@ const R={
       band.append(l)});
     return band},
   mermaid:b=>mermaidBlock(b.code),
+  swimlane:b=>swimlane(b),
+  diagram:b=>diagram(b,l=>/^https?:\/\//.test(l)?l:null),
+  statemachine:b=>statemachine(b,l=>/^https?:\/\//.test(l)?l:null),
+  roadmap:b=>roadmap(b,l=>/^https?:\/\//.test(l)?l:null),
   table,
   legend:b=>{const d=el("div","legend");b.items.forEach(i=>{const c=el("span","chip "+(i.status==="plan"?"plan":"done"));c.append(el("i"),i.label);d.append(c)});return d},
   question:b=>{const d=el("div","question");d.append(el("p","q",b.q));

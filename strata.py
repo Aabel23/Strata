@@ -4,16 +4,20 @@
   strata.py init [--db]
   strata.py import-yaml FILE --project P [--db]   load a C4 YAML model into the DB
   strata.py validate FILE | --project P [--db]    check structure and code links
-  strata.py serve [--db] [--project P] [--port]   viewer on http://127.0.0.1:PORT
+  strata.py serve [--db] [--project P] [--port] [--host] viewer on http://127.0.0.1:PORT
   strata.py page put|validate FILE | list [--project]
   strata.py project add ID --name N [--root --docs-dir --parent --description] | list
   strata.py doc scan --project P | set --project P PATH [--feature --status --ord]
   strata.py c4 link|unlink|links --project P --object X [--item ID | --decision ID]   (links: list only)
   strata.py c4 context --project P [--object X] [--max-tokens N]
+  strata.py c4 flow --project P [--id F]          numbered step trace (no --id: list flows)
+  strata.py search Q [--project P --src item|decision|page|doc --limit N]
+  strata.py decision add --project P --title T --context C --decision D --consequences Q --rejected R [--supersedes N] | set N --status S
+  strata.py mcp --role main|coder|reviewer [--db]   MCP server on stdio
   strata.py item add --project P --kind task|issue --title T [--body --priority --status] | set ID [--status --priority]
 """
-import argparse, json, pathlib, sqlite3, sys, webbrowser
-from strata import blocks, c4, db
+import argparse, json, pathlib, sqlite3, sys, threading, webbrowser
+from strata import blocks, c4, db, service
 
 
 def cmd_page(a):
@@ -41,10 +45,18 @@ def cmd_write(a):
             db.add_project(c, a.id, a.name, a.root, a.docs_dir, a.parent, a.description); print("ok:", a.id)
         elif a.cmd == "project":
             for r in c.execute("SELECT id,name,parent,status FROM project ORDER BY id"): print(f"{r['id']}  {r['name']}  parent={r['parent'] or '-'}  [{r['status']}]")
-        elif a.action == "scan":
+        elif a.cmd == "doc" and a.action == "scan":
             print("scanned {}: {} found, {} missing".format(a.project, *db.scan_docs(c, a.project)))
+        elif a.cmd == "decision" and a.action == "add":
+            print("ok: decision", service.add_decision(c, "main", a.project, a.title, a.context, a.decision, a.consequences, a.rejected, a.supersedes))
+        elif a.cmd == "decision":
+            service.set_decision_status(c, "main", a.id, a.status); print("ok")
+        elif a.cmd == "search":
+            for h in service.search(c, a.q, a.project, a.src, a.limit): print(f"{h['src']}#{h['ref']} {h['project']} {h['title']}")
         elif a.cmd == "c4" and a.action == "context":
             print(c4.context_text(c, a.project, a.object, a.max_tokens))
+        elif a.cmd == "c4" and a.action == "flow":
+            print(c4.flow_text(c, a.project, a.id))
         elif a.cmd == "c4" and a.action == "links":
             l = db.links_for(c, a.project, a.object)
             for i in l["items"]: print(f"{i['kind']} #{i['id']} [{i['status']}] {i['title']}")
@@ -55,10 +67,10 @@ def cmd_write(a):
         elif a.cmd == "doc":
             db.set_doc(c, a.project, a.path, a.feature, a.status, a.ord); print("ok")
         elif a.action == "add":
-            print("ok: item", db.add_item(c, a.project, a.kind, a.title, a.body, a.priority, a.status))
+            print("ok: item", service.add_item(c, "main", a.project, a.kind, a.title, a.body, a.priority, a.status))
         else:
-            db.set_item(c, a.id, a.status, a.priority); print("ok")
-    except (sqlite3.DatabaseError, ValueError, KeyError) as e:
+            service.set_item(c, "main", a.id, a.status, a.priority); print("ok")
+    except (sqlite3.DatabaseError, ValueError, KeyError, PermissionError) as e:
         print("ERROR", e); return 1
     return 0
 
@@ -76,7 +88,7 @@ def main(argv=None):
     add("init")
     add("import-yaml", (["file"], {}), (["--project"], {"required": True}))
     add("validate", (["file"], {"nargs": "?"}), (["--project"], {}))
-    add("serve", (["--project"], {}), (["--port"], {"type": int, "default": 8740}))
+    add("serve", (["--project"], {}), (["--port"], {"type": int, "default": 8740}), (["--host"], {"default": "127.0.0.1"}))
     pg = sub.add_parser("page"); ps = pg.add_subparsers(dest="action", required=True)
     for n in ("put", "validate"):
         p = ps.add_parser(n); p.add_argument("file"); p.add_argument("--db")
@@ -93,11 +105,21 @@ def main(argv=None):
     group("item", {"add": [(["--project"], req), (["--kind"], {"required": True, "choices": ["task", "issue"]}), (["--title"], req), (["--body"], {}),
                            (["--priority"], {}), (["--status"], {"choices": ITEM_STATUS, "default": "open"})],
                    "set": [(["id"], {"type": int}), (["--status"], {"choices": ITEM_STATUS}), (["--priority"], {})]})
+    p = sub.add_parser("search"); p.add_argument("q"); p.add_argument("--db"); p.add_argument("--project"); p.add_argument("--limit", type=int, default=30)
+    p.add_argument("--src", choices=["item", "decision", "page", "doc"])
+    group("decision", {"add": [(["--project"], req), (["--title"], req), (["--context"], req), (["--decision"], req), (["--consequences"], req),
+                               (["--rejected"], req), (["--supersedes"], {"type": int})],
+                       "set": [(["id"], {"type": int}), (["--status"], {"required": True, "choices": ["proposed", "accepted", "superseded"]})]})
+    add("mcp", (["--role"], {"required": True, "choices": service.ROLES}))
     ref = [(["--project"], req), (["--object"], req), (["--item"], {"type": int}), (["--decision"], {"type": int})]
     group("c4", {"link": ref, "unlink": ref, "links": ref[:2],
-                 "context": [(["--project"], req), (["--object"], {}), (["--max-tokens"], {"type": int, "default": 2000})]})
+                 "context": [(["--project"], req), (["--object"], {}), (["--max-tokens"], {"type": int, "default": 2000})],
+                 "flow": [(["--project"], req), (["--id"], {})]})
     a = ap.parse_args(argv)
-    if a.cmd in ("project", "doc", "item", "c4"): return cmd_write(a)
+    if a.cmd in ("project", "doc", "item", "c4", "search", "decision"): return cmd_write(a)
+    if a.cmd == "mcp":
+        from strata import mcp
+        return mcp.serve(a.role, a.db)
     if a.cmd == "init":
         db.init(a.db).close(); print("ok:", db.db_path(a.db)); return 0
     if a.cmd == "import-yaml":
@@ -110,8 +132,11 @@ def main(argv=None):
         ap.error("validate needs FILE or --project")
     if a.cmd == "page": return cmd_page(a)
     from strata import server
-    srv = server.make_server(a.db, a.project, a.port)
-    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    hosts = a.host.split(",")  # vd "127.0.0.1,100.107.55.40": nghe nhiều địa chỉ
+    srv = server.make_server(a.db, a.project, a.port, hosts[0])
+    for h in hosts[1:]:
+        threading.Thread(target=server.make_server(a.db, a.project, a.port, h).serve_forever, daemon=True).start()
+    url = f"http://{hosts[0]}:{srv.server_address[1]}/"
     print(f"Strata: {url}  (db: {db.db_path(a.db)})")
     webbrowser.open(url)
     try: srv.serve_forever()

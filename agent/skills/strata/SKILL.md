@@ -1,0 +1,87 @@
+---
+name: strata
+description: Sổ tay dùng app Strata (SQLite + CLI strata.py + viewer http://127.0.0.1:8740) để ghi/đọc task, issue, decision, doc, sơ đồ C4 và flow của bất kỳ project nào. Dùng khi user nhắc "strata", "ghi task", "tạo issue", "đổi trạng thái task", "vẽ C4", "sửa map", "flow", "viết doc", "project add", "viewer 8740", "strata.db"; hoặc khi đi qua bước 2 (sơ đồ), 3 (research/doc), 4 (duyệt → task), 6 (lỗi → issue) của luồng làm việc.
+---
+
+# Strata
+
+Strata giữ kiến thức project trong **một file SQLite** (mặc định `/home/abel/project/tools/strata/strata.db`, đổi bằng env `STRATA_DB` hoặc `--db`).
+Ghi qua CLI `python3 /home/abel/project/tools/strata/strata.py`. Đọc qua web chỉ-GET http://127.0.0.1:8740
+(systemd user `strata.service`; sửa Python thì `systemctl --user restart strata`, đổi dữ liệu chỉ cần reload trang).
+
+```bash
+S="python3 /home/abel/project/tools/strata/strata.py"   # dùng $S ở mọi lệnh dưới
+```
+
+## Luật
+- Chỉ **agent chính** ghi. Subagent trả văn bản cho agent chính ghi.
+- Không sửa DB bằng `sqlite3` trực tiếp. Không tự viết HTML cho tài liệu (viết YAML, Strata lo trình bày).
+- Thử lệnh ghi lạ trên DB tạm: `$S init --db /tmp/x/t.db` rồi thêm `--db /tmp/x/t.db`.
+
+## Bước 0: chọn project
+```bash
+$S project list
+$S project add ID --name "Tên" --root /đường/dẫn/code --docs-dir /đường/dẫn/docs [--parent CHA] [--description "..."]
+```
+Hiện có: `internproj`; `project1_app` (cha internproj, root `/home/abel/project/internproj/project1_app`, docs `…/project1_app/documentation`); `strata` (docs `/home/abel/project/tools/strata/docs`).
+
+## Muốn làm X → lệnh
+| Muốn | Lệnh |
+|---|---|
+| Danh sách project | `curl -s localhost:8740/api/projects` (Host phải là `127.0.0.1:8740` hoặc `localhost:8740`) |
+| Task/issue | `curl -s 'localhost:8740/api/items?project=P'` (lọc thêm `&kind=task\|issue`, `&status=...`, `&id=N`) |
+| Decision | `curl -s 'localhost:8740/api/decisions?project=P'` |
+| Doc | `curl -s 'localhost:8740/api/docs?project=P'`; một doc: `/api/doc?project=P&path=research/x.yaml` (kèm `errors`) |
+| Tìm kiếm | `curl -s 'localhost:8740/api/search?q=từ+khoá&project=P'` |
+| Thêm task/issue | `$S item add --project P --kind task --title "..." [--body "..." --priority high --status approved]` → in `ok: item N` |
+| Đổi trạng thái | `$S item set N --status doing [--priority ...]` |
+| Gắn item vào object C4 | `$S c4 link --project P --object OBJ --item N` (gỡ: `unlink`; xem: `c4 links --project P --object OBJ`) |
+| Đọc map | `$S c4 context --project P [--object OBJ] [--max-tokens 2000]` |
+| Đọc flow | `$S c4 flow --project P` (liệt kê) / `$S c4 flow --project P --id FLOW` |
+| Sửa map | sửa YAML → `$S validate FILE` (0 lỗi) → `$S import-yaml FILE --project P`. Chi tiết: `docs/AGENT_C4.md` |
+| Viết tài liệu | file YAML trong `<docs_dir>/research\|architect\|plan\|review/`, server tự quét. Định dạng: `docs/architect/doc-format.yaml` |
+| Quét doc tay | `$S doc scan --project P` |
+| Gán feature/status doc | `$S doc set --project P research/x.yaml --feature F --status current\|draft\|outdated\|missing [--ord N]` |
+| Page JSON | `$S page validate F.json` / `$S page put F.json` / `$S page list [--project P]` |
+
+Status item: `proposed|approved|open|doing|done|rejected` (mặc định `open`). Kind: `task|issue`.
+
+## Ví dụ doc tối thiểu (`<docs_dir>/research/vi-du.yaml`)
+```yaml
+title: So sánh cách lưu phiên        # bắt buộc
+summary: Một câu cho mục lục
+code: [src/session.py]
+blocks:
+  - md: |
+      ## Bối cảnh
+      Cần chọn nơi lưu phiên đăng nhập.
+  - table:
+      head: [Phương án, Ưu, Nhược]
+      rows: [[Cookie, "đơn giản", "giới hạn 4KB"], [Redis, "nhanh", "thêm dịch vụ"]]
+  - question:
+      q: Chọn phương án nào?
+      options: [{label: Cookie}, {label: Redis, note: "nếu cần scale"}]
+      recommend: Cookie
+```
+Block khác: `diagram`, `layers`, `swimlane`, `mermaid`, `legend`, `c4`, `query` (xem doc-format.yaml).
+Kiểm lỗi: mở viewer (trang hiện khung lỗi) hoặc `curl -s 'localhost:8740/api/doc?project=P&path=...' | jq .errors`.
+
+## Luồng 6 bước → Strata
+- **B2 sơ đồ**: viết/sửa C4 YAML + flow → `validate` → `import-yaml`.
+- **B3 research**: doc YAML trong `research/`; quyết định tạm ghi bằng block `question` (chưa có `decision add`).
+- **B4 user duyệt**: `item add --kind task --status approved` + `c4 link` vào object liên quan.
+- **B5 làm**: `item set N --status doing` → `done`.
+- **B6 lỗi**: `item add --kind issue` (+ `c4 link`).
+- Ngoại lệ: `project1_app` vẫn dùng `documentation/plan/plan.json` cho luồng đang chạy.
+
+## Chỗ hổng đã biết
+- Chưa có lệnh kiểm YAML doc (`page validate` chỉ nhận JSON) → dùng viewer hoặc `/api/doc` trường `errors`.
+- Chưa có `decision add` (decision chỉ đọc qua API).
+- Chưa có `item list` CLI → đọc `/api/items`.
+
+## Lỗi hay gặp (C4 YAML)
+- Chuỗi có `:` `?` `{` `}` `,` `#` phải bọc `"..."`; dấu phẩy không bọc cắt chuỗi, `validate` báo `key lạ`.
+- Giữ `id` ổn định: link item và flow bám theo id; `import-yaml` là upsert và **xoá** phần không còn trong YAML.
+- Phản hồi dùng `{connection: id, reverse: true}`, không tạo connection ngược.
+- Flow phải liền mạch; `validate` cảnh báo `đứt mạch` khi bước sau không nối bước trước.
+- Cha hợp lệ: app/store → system/group; component → app/group; file/function → component/file.

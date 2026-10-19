@@ -1,0 +1,84 @@
+title: Nạp model C4 vào SQLite
+summary: "Cách import_yaml đồng bộ một file *.strata.yaml vào các bảng c4_*: chỗ nào kiểm, chỗ nào không, SQL chạy ra sao và các trường hợp biên."
+code: [strata/c4.py, strata.py, strata/schema.sql]
+
+blocks:
+  - md: |
+      ## Điểm vào
+      `strata.py import-yaml FILE --project P` gọi `c4.import_yaml(db.init(db), FILE, P)`. `db.init` chạy migrate trước, nên DB cũ luôn có đủ cột trước khi ghi.
+
+      Lỗi `OSError`, `ValueError`, `TypeError`, `AttributeError`, `sqlite3.IntegrityError` được bắt, in `ERROR import: …` và thoát mã 1. Thành công thì in số object, connection, flow **sau** khi nạp.
+
+  - diagram:
+      dir: TB
+      caption: Đường đi trong import_yaml. Nhánh đỏ ở thực tế là exception, transaction tự rollback.
+      nodes:
+        - {id: load, text: "load(path)", note: "yaml.safe_load, tính root tuyệt đối"}
+        - {id: ids, text: "kiểm id", note: "thiếu hoặc trùng → ValueError"}
+        - {id: tx, text: "with c:", note: "một transaction"}
+        - {id: meta, text: "upsert c4_meta", note: "name, root, layout, tags"}
+        - {id: rows, text: "upsert 4 bảng", note: "object · connection · interface · flow"}
+        - {id: del, text: "DELETE … NOT IN", note: "xoá dòng không còn trong YAML"}
+        - {id: aud, text: "INSERT audit", note: "before/after = số dòng"}
+        - {id: err, text: "rollback", note: "IntegrityError, lỗi kiểu"}
+      edges:
+        - [load, ids]
+        - [ids, tx]
+        - [tx, meta]
+        - [meta, rows]
+        - [rows, del]
+        - [del, aud]
+        - [rows, err, "CHECK type"]
+
+  - md: |
+      ## 1. load()
+      - Đọc bằng `yaml.safe_load`. File rỗng thành `{}`.
+      - YAML sai cú pháp: `ValueError("YAML sai cú pháp dòng L cột C: …")` kèm gợi ý bọc chuỗi có `: ? # { } ,` trong ngoặc kép. Lỗi hay gặp nhất là dấu `, ` không bọc trong flow mapping, nó âm thầm tạo thêm một khoá.
+      - `root` tính từ **thư mục chứa file YAML**, không phải thư mục đang đứng, rồi `resolve()` thành đường dẫn tuyệt đối. Link code trong viewer và `dead_link` đều dựa vào giá trị này.
+
+      ## 2. Kiểm id, và chỉ kiểm id
+      Với từng nhóm object, connection, flow, interface: thiếu `id` hoặc trùng `id` thì `ValueError("<nhóm>: thiếu hoặc trùng id")`. Connection không có id được gán `c0, c1, …` theo **vị trí trong file**. Chèn một connection không có id vào giữa danh sách sẽ đổi id của tất cả connection phía sau, và step trong flow trỏ tới chúng sẽ trỏ sai.
+
+      `import_yaml` **không** chạy `check()`. Các lỗi sau vẫn lọt vào DB:
+
+  - table:
+      head: [Lỗi, Ai bắt, Hậu quả nếu bỏ qua]
+      rows:
+        - ["type lạ (vd. servise)", "CHECK của c4_object → IntegrityError", "import dừng, rollback"]
+        - ["cha sai tầng (app nằm trong app)", "chỉ validate", "viewer vẽ sai tầng"]
+        - ["connection trỏ object không tồn tại", "chỉ validate", "_lift trả None, connection bị bỏ qua khi vẽ"]
+        - ["step trỏ connection không tồn tại", "chỉ validate", "flow trace in dòng thiếu"]
+        - ["khoá lạ (gõ nhầm descripton)", "chỉ validate", "trường bị bỏ qua, không báo"]
+        - ["link code chết", "validate (cảnh báo) và /api/c4", "huy hiệu ! dead_link"]
+
+  - md: |
+      Vì vậy luôn chạy `validate FILE` **trước** `import-yaml`, ví dụ trong pre-commit:
+      ```
+      python3 strata.py validate docs/x.strata.yaml && python3 strata.py import-yaml docs/x.strata.yaml --project P
+      ```
+
+      ## 3. Upsert
+      Mọi thứ nằm trong `with c:`, nên exception ở bất kỳ câu nào đều rollback toàn bộ, DB không bao giờ ở trạng thái nửa vời.
+      - `c4_meta`: một dòng mỗi project. `name` thiếu thì lấy id project.
+      - Bốn bảng còn lại: `INSERT … ON CONFLICT(project,id) DO UPDATE SET` từng cột. Cột không có trong YAML được ghi `NULL`. Upsert **ghi đè** chứ không gộp, nên xoá một trường trong YAML là xoá nó trong DB.
+      - Trường danh sách hay map (`tags`, `links`, `responsibilities`, `payload`, `errors`, `steps`) lưu dạng JSON bằng `json.dumps(ensure_ascii=False)`.
+      - Interface là danh sách ở cấp ngoài cùng của YAML, mỗi phần tử có `object`. `read_model` mới gắn chúng vào object khi đọc ra.
+
+      ## 4. Xoá phần bị bỏ
+      ```
+      DELETE FROM c4_<bảng> WHERE project=? AND id NOT IN (?, ?, …)
+      ```
+      Chạy cho cả bốn bảng sau khi upsert. Nhóm rỗng trong YAML sinh ra `NOT IN ()`. SQLite chấp nhận câu này và xoá hết dòng của nhóm đó, đúng ý đồ.
+
+      `c4_link` (gắn object với task/decision) **không** bị xoá theo. Object đổi id thì link cũ thành mồ côi: `c4 links` vẫn liệt kê, nhưng viewer không còn object để gắn.
+
+      ## 5. Audit
+      Một dòng `audit(tool='import-yaml', target=<đường dẫn file>)`. `before` và `after` là số dòng `{object, connection, flow}`, không phải diff. Muốn biết đổi gì thì xem diff git của file YAML.
+
+  - question:
+      q: Có nên cho import-yaml tự chạy check() và dừng khi có lỗi?
+      options:
+        - {label: "Có, chặn khi có lỗi", note: "Một lệnh là đủ, DB không bao giờ nhận model sai. Cần thêm cờ --force cho lúc sửa dở."}
+        - {label: Giữ như hiện tại, note: "Nhập được model đang sửa dở, nhưng phải nhớ chạy validate riêng."}
+        - {label: Tự đặt id cho connection, note: "Sinh id từ from→to thay vì vị trí trong file, để chèn thêm connection không làm lệch flow."}
+      recommend: Có, chặn khi có lỗi

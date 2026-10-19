@@ -1,0 +1,204 @@
+title: Bộ định tuyến hội thoại theo giai đoạn
+summary: Một model quyết định đứng trước mỗi câu của user, xác định giai đoạn quy trình và loại câu, chèn hướng dẫn giai đoạn cho Claude. Câu đụng quy trình chỉ được đề xuất, user xác nhận mới ghi.
+code: [agent/HIEN_PHAP.md, agent/hooks/block_secondbrain_creative_agents.py, strata/schema.sql]
+
+blocks:
+  - md: |
+      ## Bức tranh toàn cục
+      Mỗi câu user gõ đi qua một hook `UserPromptSubmit` trước khi Claude nhận. Hook gửi câu (đã lọc) cùng trạng thái rút gọn cho một **model quyết định**. Model trả về nhãn có kiểu kèm xác suất. Từ đó, **code tất định** chọn một trong bốn hành động:
+      - `route`: chèn vài dòng hướng dẫn giai đoạn;
+      - `confirm`: dặn Claude hỏi xác nhận;
+      - `ask`: hỏi lại bằng câu (a)/(b);
+      - `passthrough`: không làm gì.
+
+      Vẫn giữ **một phiên chat chính**. "Nối với Claude của giai đoạn" nghĩa là chèn hướng dẫn của giai đoạn đó vào lượt hiện tại, không phải chuyển sang phiên khác. Hook không bao giờ chặn câu của user, cũng không bao giờ ghi vào Strata.
+
+  - diagram:
+      caption: Đường đi của một câu.
+      nodes:
+        - {id: u, text: Câu của user, tone: ui}
+        - {id: h, text: "Hook UserPromptSubmit", note: "lọc bí mật, cắt độ dài"}
+        - {id: st, text: Strata, note: "giai đoạn, cổng, câu hỏi chờ", shape: store}
+        - {id: m, text: Model quyết định, note: "Jev / Haiku, sau một giao diện", tone: warn}
+        - {id: p, text: Bảng ngưỡng, note: "code tất định"}
+        - {id: c, text: Claude chính, note: "additionalContext", tone: ok}
+        - {id: l, text: "log.jsonl", shape: store}
+      edges: [[u, h], [st, h, đọc], [h, m, "timeout 3s"], [m, p, "nhãn + xác suất"], [p, c, "route / confirm / ask / passthrough"], [p, l]]
+
+  - md: |
+      ## Luồng chính
+      Ví dụ: đang ở bước 3, có một câu hỏi chờ (q7), user gõ "ừ chốt b đi".
+
+  - swimlane:
+      lanes: [User, Hook, Model, Claude chính, Strata]
+      steps:
+        - {lane: User, text: "\"ừ chốt b đi\""}
+        - {lane: Hook, text: "Đọc giai đoạn 3, cổng G1, câu chờ q7"}
+        - {lane: Model, text: [stage S3 0.91, "act chốt 0.93", "anchor q7=b 0.92"]}
+        - {lane: Hook, text: "Ngưỡng: chốt ≥0.9 và có neo → confirm"}
+        - {lane: Claude chính, text: "Hỏi: Ghi q7 = b, đúng không?"}
+        - {lane: User, text: Bấm xác nhận}
+        - {lane: Claude chính, text: "strata.py ghi decision, actor=user"}
+        - {lane: Strata, text: "Lưu + audit"}
+
+  - table:
+      head: [Trong sơ đồ, Mã nguồn hiện có, Vai trò]
+      rows:
+        - ["Hook", "agent/hooks/block_secondbrain_creative_agents.py", "Khuôn hook Python stdlib: đọc stdin, lỗi thì exit 0"]
+        - ["Nhãn giai đoạn", "agent/HIEN_PHAP.md (bảng 6 bước)", "Chính là trục stage"]
+        - ["Câu hỏi chờ", "chưa có trong DB (block question chỉ nằm trong doc)", "Cần thêm để làm neo"]
+        - ["Ghi với actor=user", "strata/db.py audit() ghi cứng 'cli'", "Cần nhận actor"]
+
+  - md: |
+      ## Model quyết định (đề xuất)
+      **Jev** của TypeSafe AI, ra mắt ngày 15/09/2026, là model "System One". Nó nhận `state` cùng các câu hỏi `choice`/`score`/`noul` và trả về lựa chọn, `confidence` và `probabilities` cho từng nhãn. Nó không sinh văn bản. Giá $0.042 cho mỗi triệu token input, output miễn phí. Độ trễ tự báo là 70–500 ms. Endpoint `POST /v1/systemone`, có SDK Python.
+
+      **Giới hạn đã được tài liệu chính thức thừa nhận:**
+      - Tiếng Anh là ngôn ngữ chính; ngôn ngữ khác "không đều", tiếng Việt không được nhắc tới.
+      - Calibration chưa được bên thứ ba kiểm.
+      - Thiên về lựa chọn đứng đầu danh sách, dễ bị nội dung đối kháng lái.
+      - Không có abstain riêng; phải tự thêm lựa chọn "none" vào danh sách.
+      - Đang ở giai đoạn early access, chỉ chạy qua API đặt ở Mỹ, ZDR chỉ có cho gói enterprise.
+
+      **Ngôn ngữ:** user nói với bộ định tuyến bằng tiếng Anh, nên nhãn, `instructions` và `criteria` cũng viết bằng tiếng Anh. Làm vậy tránh được điểm yếu về đa ngữ của Jev.
+
+      **Đề xuất:** đặt model sau một giao diện duy nhất, `classify(state) → {stage, act, anchor, probs}`, để đổi được giữa Jev, Claude Haiku với structured output, hoặc một classifier cục bộ. Ghim phiên bản (`jev-1.13.0`), không dùng alias `jev-latest`.
+
+  - table:
+      head: [Tiêu chí, Jev, Haiku structured output, Classifier cục bộ]
+      rows:
+        - [Độ trễ, "70–500 ms (tự báo)", "chưa đo", "hàng chục ms"]
+        - [Giá, "$0.042/M input", "$0.10/M input + $0.50/M output", "không phí API"]
+        - [Ngôn ngữ, "tốt nhất với tiếng Anh", "đa ngữ", "Von/Laya: tiếng Anh tốt, Laya có bản đa ngữ"]
+        - [Xác suất hiệu chỉnh, "có, chưa kiểm độc lập", "xác suất tự khai, không tin được", "tự hiệu chỉnh được"]
+        - [Riêng tư, "dữ liệu lên TypeSafe", "trong hệ Anthropic đang dùng", "không rời máy"]
+        - [Sẵn có, "early access", "sẵn sàng", "dự án mới, chưa kiểm"]
+
+  - md: |
+      ## Nhãn và quyết định (đề xuất)
+      **Hai trục, mỗi trục một nhãn chính**, kèm top-2 xác suất:
+      - Giai đoạn: `S0` ngoài quy trình, `S1`–`S6` theo HIEN_PHAP. Mặc định giữ giai đoạn hiện tại của project.
+      - Loại câu: liệt kê trong bảng dưới.
+
+      Câu nhạy cảm (`chốt`, `đồng_ý_lửng`, `từ_chối`, `đổi_luật`) bắt buộc có **neo**, tức là câu hỏi chờ hoặc cổng mà câu này trả lời. Không có neo thì không được `confirm`. Tách `đồng_ý_lửng` ("ừ", "hợp lý") khỏi `chốt` vì nhầm hai nhãn này là lỗi đắt nhất.
+
+      Input chỉ gồm câu hiện tại, giai đoạn, cổng đang mở, tối đa 3 câu hỏi chờ và 2–3 lượt gần nhất (đã cắt ngắn). Không gửi nội dung doc, task hay C4: input dài làm giảm độ chính xác, và chính tài liệu của model cũng ghi nhận điều này.
+
+  - table:
+      head: [Loại câu, Ví dụ, Điều kiện, Hành động]
+      rows:
+        - ["hỏi / bàn / làm / trò_chuyện", "\"vẽ lại flow gửi mail đi\"", "stage p ≥ 0.85, cách top-2 ≥ 0.3 (≥ 0.9 nếu đổi giai đoạn)", route]
+        - ["", "", "thấp hơn", "passthrough"]
+        - [chốt, "\"chốt phương án b\"", "p ≥ 0.9 và neo p ≥ 0.9", "confirm (không bao giờ tự ghi)"]
+        - ["", "", "0.6 ≤ p < 0.9", "ask (a: chốt / b: đang bàn)"]
+        - [đồng_ý_lửng, "\"ừ cũng được\"", "đúng một đề xuất vừa nêu ở lượt trước", "ask kèm nhắc lại nội dung"]
+        - [từ_chối, "\"bỏ cái đó\"", "p ≥ 0.8 và có neo", confirm]
+        - [đổi_luật, "\"từ giờ bước 4 không cần tôi duyệt\"", "p ≥ 0.7", "confirm, trích nguyên văn"]
+        - [chuyển_chủ_đề, "\"qua vụ project1_app đi\"", "p ≥ 0.85", "route sang project/giai đoạn mới"]
+
+  - md: |
+      Ngưỡng ở trên chỉ là điểm xuất phát. Lỗi trong vùng xám đều rơi về `passthrough`, nghĩa là Claude hiện tại nhận nguyên văn câu, không mất gì. Nhận nhầm "chốt" đắt hơn nhiều so với bỏ sót, nên chấp nhận tỉ lệ hỏi lại cao hơn ở các nhãn nhạy cảm. Cách làm này lấy từ fallback hai ngưỡng (độ tin và khoảng cách top-2) của Rasa, `nluIntentConfidenceThreshold` của Amazon Lex, và mẫu "ngưỡng theo rủi ro" trong tài liệu của TypeSafe.
+
+      ## Tích hợp và vận hành (đề xuất)
+      **Các bước:**
+      1. Hook `UserPromptSubmit` kiểu command, viết bằng Python stdlib. Bỏ qua slash command và câu ngắn kiểu "ok", "tiếp".
+      2. Trước khi gửi, che bí mật bằng regex (khóa, token, email, đường dẫn vault) và cắt còn khoảng 2000 ký tự. Có công tắc tắt theo từng project.
+      3. Timeout cứng 3 giây. Lỗi hoặc quá hạn thì passthrough. Lỗi 3 lần liên tiếp thì tự tắt 10 phút. Không bao giờ dùng `decision:"block"` hay `onFailure:"block"`.
+      4. Chèn `additionalContext` khoảng 300 ký tự, ví dụ: "Giai đoạn 3 Research: nạp research-stage, chưa code". Gặp `confirm` thì dặn: "đề xuất, hỏi user bằng AskUserQuestion, chưa ghi".
+      5. Có lệnh `/stage N` để user ghi đè nhãn khi model đoán sai.
+      6. Nhật ký `~/.claude/jev/log.jsonl` (quyền 600): mặc định lưu bản băm của câu, kèm nhãn, xác suất, hành động, độ trễ, và việc user có sửa lại ở lượt sau hay không.
+
+  - roadmap:
+      periods: [Pha 1, Pha 2, Pha 3, Pha 4]
+      items:
+        - {text: "Bóng: chỉ ghi log, không chèn", from: Pha 1}
+        - {text: "Đánh giá: gán nhãn, đo ECE, p95", from: Pha 2}
+        - {text: "Bật route cho nhãn chính xác nhất", from: Pha 3}
+        - {text: "Bật confirm cho câu quy trình", from: Pha 4}
+      caption: "Mỗi pha chỉ mở khi pha trước đạt chỉ số. Pha bóng chạy 1–2 tuần."
+
+  - md: |
+      ## Đánh giá
+      - Bộ dữ liệu: 500–1000 lượt user lấy từ transcript thật. Mỗi mẫu kèm trạng thái tại thời điểm đó. Chia theo phiên, không chia theo lượt.
+      - Có khoảng 100 mẫu `chốt` dương và nhiều mẫu khó như "chốt luôn nhỉ?" (đây là câu hỏi, không phải chốt) hay "được rồi nhưng…".
+      - LLM gán nhãn trước, user kiểm 100% nhãn nhạy cảm.
+      - Chỉ số:
+        - precision của `confirm(chốt)` ≥ 0.95;
+        - recall của chốt (tính cả confirm lẫn ask) ≥ 0.85;
+        - ECE riêng cho nhãn nhạy cảm;
+        - tỉ lệ hỏi lại;
+        - tỉ lệ đặt sai giai đoạn.
+      - Chạy cùng bộ dữ liệu cho Jev và Haiku để so trên tiếng Việt thật.
+
+  - md: |
+      ## Case study
+  - table:
+      head: [Nguồn, Rút ra]
+      rows:
+        - ["[TypeSafe: System One & Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev)", "Quyết định có kiểu, giá chỉ tính input, benchmark tự làm"]
+        - ["[Jev (Wikipedia)](https://en.wikipedia.org/wiki/Jev_(AI_model))", "Không công bố kiến trúc, dữ liệu tổng hợp, câu hỏi chạy song song"]
+        - ["[TechCrunch 16/10/2026](https://techcrunch.com/2026/10/16/jev-is-vercels-fastest-adopted-ai-model-ever/)", "Nhiều đội dùng thử, chi tiêu thật còn nhỏ"]
+        - ["[DataCamp: System One](https://www.datacamp.com/blog/system-one-models-jev)", "Độ chính xác 67,8%, ngang LLM tầm trung; phản biện 'zero-shot classifier'"]
+        - ["[Claude Code hooks](https://code.claude.com/docs/en/hooks)", "additionalContext ≤10k ký tự; hook lỗi thì không chặn"]
+        - ["[Rasa fallback](https://legacy-docs-oss.rasa.com/docs/rasa/fallback-handoff/)", "Hai ngưỡng; đoán rồi xác nhận"]
+        - ["[Amazon Lex V2](https://docs.aws.amazon.com/lexv2/latest/dg/using-intent-confidence-scores.html)", "Fallback là intent hạng nhất"]
+        - ["[semantic-router](https://github.com/aurelio-labs/semantic-router)", "Ngưỡng riêng cho từng route, tối ưu bằng dữ liệu"]
+        - ["[Guo et al. 2017](https://arxiv.org/abs/1706.04599)", "Temperature scaling, ECE"]
+        - ["[Geifman & El-Yaniv 2017](https://arxiv.org/abs/1705.08500)", "Selective prediction, đường cong rủi ro-độ phủ"]
+        - ["[OpenRouter Auto Router](https://openrouter.ai/docs/guides/routing/routers/auto-router)", "Định tuyến lỗi thì rơi về mặc định"]
+        - ["[Shadow mode](https://christophergs.com/machine%20learning/2019/03/30/deploying-machine-learning-applications-in-shadow-mode/)", "Chạy trên lưu lượng thật, chưa dùng kết quả"]
+
+  - md: |
+      ## Ghi chú và câu hỏi mở
+      - Strata chưa có "câu hỏi chờ" trong DB. Neo cần danh sách câu hỏi có id, mỗi câu kèm phương án.
+      - `strata/db.py:74-76`: audit ghi cứng actor `cli`, nên chưa ghi được actor=user (chưa sửa).
+      - Model chỉ gợi ý: Claude có thể lờ dòng context được chèn. Lối thoát là `/stage`.
+      - Chưa kiểm chứng: calibration độc lập, độ trễ đo từ Việt Nam, trang pháp lý của TypeSafe (docs.typesafe.ai/legal).
+
+  - question:
+      q: "Lõi phân loại cho MVP?"
+      options:
+        - {label: "Haiku structured output, Jev chạy bóng", note: "không phụ thuộc early access, dữ liệu ở lại Anthropic"}
+        - {label: "Jev ngay từ đầu", note: "rẻ, có xác suất; tiếng Việt chưa rõ"}
+        - {label: "Classifier cục bộ", note: "Von/Laya chạy CPU, miễn phí, cùng kiểu API với Jev"}
+        - {label: "Jev nếu được duyệt early access, chưa được thì Von cục bộ", note: "giữ API /v1/systemone, đổi base_url"}
+      recommend: "Jev nếu được duyệt early access, chưa được thì Von cục bộ"
+  - question:
+      q: "Có chấp nhận gửi câu chat (đã lọc) lên TypeSafe AI không?"
+      options:
+        - {label: "Có, trừ project được đánh dấu nhạy cảm"}
+        - {label: "Không, chỉ Anthropic hoặc cục bộ"}
+      recommend: "Có, trừ project được đánh dấu nhạy cảm"
+  - question:
+      q: "Câu hỏi chờ (làm neo) lưu ở đâu?"
+      options:
+        - {label: "Bảng mới trong Strata, ghi qua CLI", note: "dùng chung với lộ trình/cổng"}
+        - {label: "Hook tự giữ trong state.json"}
+      recommend: "Bảng mới trong Strata, ghi qua CLI"
+  - question:
+      q: "Bước 5–6 có tự route không cần hỏi?"
+      options:
+        - {label: "Tự route", note: "bước 5–6 vốn tự chạy"}
+        - {label: "Vẫn hỏi"}
+      recommend: "Tự route"
+
+  - table:
+      head: [Để sau MVP, Lý do]
+      rows:
+        - ["Daemon http thay hook command", "Chỉ làm khi đo được độ trễ khởi động đáng kể"]
+        - ["Học từ lượt sửa của user", "Cần dữ liệu từ pha bóng trước"]
+        - ["Đường cong rủi ro-độ phủ tự động", "Lúc đầu chọn ngưỡng bằng tay là đủ"]
+        - ["Đa nhãn, tách câu ghép", "Hiếm gặp"]
+
+  - md: |
+      ## Thuật ngữ
+  - table:
+      head: [Thuật ngữ, Nghĩa]
+      rows:
+        - [System One model, "Model chỉ trả quyết định có kiểu kèm xác suất, không sinh văn bản"]
+        - [Neo (anchor), "Câu hỏi chờ hoặc cổng mà câu của user đang trả lời"]
+        - [Calibration, "Xác suất khớp với tần suất đúng thật: 0.9 thì đúng khoảng 90%"]
+        - [ECE, "Sai số hiệu chỉnh kỳ vọng, đo mức xác suất lệch so với thực tế"]
+        - [Passthrough, "Không can thiệp; câu đi thẳng tới Claude"]
+        - [Chế độ bóng, "Chạy model trên dữ liệu thật nhưng chỉ ghi log, chưa dùng kết quả"]
+        - [ZDR, "Zero data retention: nhà cung cấp không lưu dữ liệu gửi lên"]

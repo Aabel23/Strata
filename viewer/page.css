@@ -70,7 +70,6 @@ p{margin:0 0 8px;max-width:68ch;color:var(--muted)}
 .box.plan{border:1px dashed var(--plan)}
 .box b{display:block;font-size:.92rem;font-weight:500}
 .box span{font-family:var(--mono);font-size:.74rem;color:var(--muted)}
-.diagram{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px}
 table{border-collapse:collapse;font-size:13px;width:100%}
 td,th{border-bottom:1px solid var(--line-soft);padding:7px 10px;text-align:left;vertical-align:top}
 th{font-size:12px;font-weight:500;color:var(--faint)}
@@ -89,3 +88,85 @@ code{font-family:var(--mono);font-size:.82rem}
 .err{color:var(--err)}
 @media (max-width:560px){.layer{grid-template-columns:1fr;gap:8px}}
 @media (prefers-reduced-motion: reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+/* mermaid figures (diagram, statemachine, mermaid): frame, toolbar, zoom overlay. Look ported from project1 doc.css. */
+figure.dg{margin:0;background:var(--bg);border:1px solid var(--line);border-radius:var(--r-lg);padding:12px;display:grid;gap:10px;min-width:0}
+.dg-canvas{overflow-x:auto;overflow-y:hidden;min-height:60px}
+.dg-canvas svg{display:block;margin-inline:auto;height:auto}
+.dg-canvas pre.fallback{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:pre;margin:0}
+.dg-canvas a{cursor:pointer}
+figure.dg figcaption{font-size:13.5px;color:var(--muted);font-style:italic;max-width:84ch;line-height:1.5}
+figure.dg-split{grid-template-columns:minmax(0,1fr)}
+.dg-main{display:grid;gap:10px;min-width:0;align-content:start}
+.dg-side{border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card);overflow:hidden;align-self:start;min-width:0}
+.dg-side table{font-size:12.5px}
+.dg-side th,.dg-side td{padding:6px 10px}
+.dg-side th{text-transform:uppercase;letter-spacing:.06em;font-size:11px}
+.dg-side td:first-child{color:var(--faint);white-space:nowrap}
+.dg-side tr.grp td{color:var(--fg);font-weight:600;background:var(--bg)}
+figure.dg-split>figcaption{grid-column:1 / -1}
+@media (min-width:1000px){figure.dg-split{grid-template-columns:minmax(0,1fr) minmax(260px,330px);column-gap:14px}.dg-side{position:sticky;top:20px}}
+.dg-tools{display:flex;justify-content:flex-end;gap:6px}
+.dg-tools button{font:inherit;font-size:12px;color:var(--muted);background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:3px 10px;cursor:pointer}
+.dg-tools button:hover{background:var(--hover);color:var(--fg)}
+.dg-zoom{position:fixed;inset:0;z-index:100;background:color-mix(in srgb,var(--bg-0) 88%,transparent);display:grid;grid-template-rows:auto 1fr;padding:12px}
+.dg-zx{justify-self:end;font:inherit;font-size:13px;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:5px 14px;cursor:pointer}
+.dg-zbody{overflow:auto;min-height:0;padding:12px}
+.dg-zbody svg{display:block;margin:0 auto;max-width:none;height:auto}
+
+/* node tones for mermaid classDefs (read by page.js through getComputedStyle) */
+:root{--d-ui:#8DB2DA;--d-ui-soft:#263444;--d-proc:#d3a67c;--d-proc-soft:#3a2f27;--d-store:#a19d92;--d-store-soft:#2b2a28;
+  --d-amber:#DDB467;--d-amber-soft:#443922;--d-ok:#A7BE8A;--d-ok-soft:#303A27;--d-red:#EE8B73;--d-red-soft:#4C2A23}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--d-ui:#4A7BAF;--d-ui-soft:#E5EDF6;--d-proc:#07807d;--d-proc-soft:#e4f1ee;--d-store:#7a776d;--d-store-soft:#f1ebdc;
+  --d-amber:#936b0d;--d-amber-soft:#f5ebd2;--d-ok:#3f7a4a;--d-ok-soft:#e5ebdb;--d-red:#B23A26;--d-red-soft:#f6dbd2}}
+:root[data-theme="light"]{--d-ui:#4A7BAF;--d-ui-soft:#E5EDF6;--d-proc:#07807d;--d-proc-soft:#e4f1ee;--d-store:#7a776d;--d-store-soft:#f1ebdc;
+  --d-amber:#936b0d;--d-amber-soft:#f5ebd2;--d-ok:#3f7a4a;--d-ok-soft:#e5ebdb;--d-red:#B23A26;--d-red-soft:#f6dbd2}
+
+/* phase colours: picked by order, so a doc never names a colour. --on-ph is the badge digit. */
+:root{--ph1:#e0a07a;--ph2:#8fb0de;--ph3:#9cc58f;--ph4:#b9a8e0;--ph5:#d9bd6a;--on-ph:#100e14}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--ph1:#b5603a;--ph2:#2f6fae;--ph3:#3b7f4c;--ph4:#6b5aa8;--ph5:#8f6c10;--on-ph:#fff}}
+:root[data-theme="light"]{--ph1:#b5603a;--ph2:#2f6fae;--ph3:#3b7f4c;--ph4:#6b5aa8;--ph5:#8f6c10;--on-ph:#fff}
+
+/* swimlane block */
+.swimfig{margin:0;display:grid;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:12px;min-width:0}
+.sw-legend{display:flex;flex-wrap:wrap;gap:6px 8px;font-size:12.5px}
+.sw-legend span{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:var(--r);padding:3px 10px;font-weight:600;color:var(--fg)}
+.sw-legend i{display:inline-block;width:18px;height:6px;border-radius:3px}
+.sw-legend i.data{height:0;border-top:2px dashed var(--faint);border-radius:0}
+.sw-canvas{overflow-x:auto}
+.swim{display:block;margin:0 auto;font-family:var(--body)}
+.sw-lane{fill:var(--card)} .sw-lane.alt{fill:var(--bg)}
+.sw-zone{fill:var(--line)}
+.sw-zt{fill:var(--fg);font-size:10.5px;font-weight:700;letter-spacing:.06em}
+.sw-ln{fill:var(--fg);font-size:12px;font-weight:700}
+.sw-rule{stroke:var(--line)}
+.sw-box{fill:var(--raised);stroke-width:1.6}
+.sw-t{fill:var(--fg);font-size:11.5px}
+.sw-n{fill:var(--on-ph);font-size:11px;font-weight:700}
+.sw-lb{fill:var(--card);stroke:var(--line)} .sw-lt{fill:var(--muted);font-size:11px}
+.swimfig figcaption{font-size:12.5px;color:var(--muted);max-width:none}
+/* wide figures may leave the reading column, centred, never past the reader frame */
+article.doc>section:has(>.swimfig){width:max-content;max-width:min(1240px,calc(100vw - 280px));justify-self:center}
+@media (max-width:900px){article.doc>section:has(>.swimfig){max-width:100%}}
+
+/* roadmap */
+.rm{display:block;margin:0 auto;font-family:var(--body)}
+.rm-lane{fill:var(--card)} .rm-lane.alt{fill:var(--bg)}
+.rm-rule{stroke:var(--line)}
+.rm-pt{fill:var(--fg);font-size:12px;font-weight:700}
+.rm-ln{fill:var(--fg);font-size:12px;font-weight:700}
+.rm-t{fill:var(--fg);font-size:11.5px;pointer-events:none}
+.rm-b rect{stroke-width:1.5}
+.rm-b.st-done rect{stroke:var(--st-done);fill:color-mix(in srgb,var(--st-done) 20%,var(--card))}
+.rm-b.st-doing rect{stroke:var(--st-doing);fill:color-mix(in srgb,var(--st-doing) 20%,var(--card))}
+.rm-b.st-plan rect{stroke:var(--st-backlog);stroke-dasharray:5 3;fill:color-mix(in srgb,var(--st-backlog) 10%,var(--card))}
+.rm-b.st-blocked rect{stroke:var(--st-block);fill:color-mix(in srgb,var(--st-block) 20%,var(--card))}
+.rm-b.link{cursor:pointer}
+.rm-b.link:hover rect,.rm-b.link:focus-visible rect{stroke:var(--accent);stroke-width:2.2}
+.rm-ms{stroke:var(--accent);stroke-width:1.4;stroke-dasharray:4 3}
+.rm-msd{fill:var(--accent)} .rm-mt{fill:var(--fg);font-size:11.5px;font-weight:700}
+.sw-legend i.rm-k{height:10px;width:18px;border-radius:3px;border:2px solid}
+.rm-k.st-done{border-color:var(--st-done);background:color-mix(in srgb,var(--st-done) 20%,var(--card))}
+.rm-k.st-doing{border-color:var(--st-doing);background:color-mix(in srgb,var(--st-doing) 20%,var(--card))}
+.rm-k.st-plan{border:2px dashed var(--st-backlog)}
+.rm-k.st-blocked{border-color:var(--st-block);background:color-mix(in srgb,var(--st-block) 20%,var(--card))}

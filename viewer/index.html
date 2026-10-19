@@ -18,6 +18,7 @@
 :root[data-theme="light"]{--bg:#f6f2e8;--canvas:#fbfaf5;--dot:#e6dec9;--bar:#ffffff;--panel:#ffffff;--card:#ffffff;--card2:#f6f2e8;--ink:#294342;--muted:#55625f;--faint:#8f9894;--line:#e6dec9;--edge:#8f9894;--accent:#07807d;--accent2:#05615f;--hot:#07807d;--warn:#a8701c;--err:#cd3c35;color-scheme:light;}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.45 "Segoe UI Variable Text","Segoe UI",Inter,system-ui,-apple-system,sans-serif;height:100vh;display:grid;grid-template-rows:auto auto 1fr;overflow:hidden}
+body{-webkit-user-select:none;user-select:none}aside,input,textarea{-webkit-user-select:text;user-select:text}
 button,select{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:4px 10px;cursor:pointer}
 button:hover{border-color:var(--faint)}
 /* top bar */
@@ -47,7 +48,7 @@ button:hover{border-color:var(--faint)}
 #tip{position:fixed;z-index:20;max-width:320px;pointer-events:none;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:8px 10px;box-shadow:0 6px 18px rgba(0,0,0,.28);font-size:12px}
 #tip b{font-size:13px}#tip .m{color:var(--muted);margin:1px 0 4px}#tip .w{color:var(--warn)}
 @media (prefers-reduced-motion:reduce){.node,.edge,#legend summary::before{transition:none!important}}
-main{display:grid;grid-template-columns:56px 1fr 320px;min-height:0}
+main{display:grid;grid-template-columns:56px minmax(0,1fr) var(--info-width,320px);min-height:0}
 /* left toolbar */
 #tools{background:var(--bar);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 0}
 #tools button{width:44px;border:0;background:none;color:var(--muted);font-size:10px;padding:6px 0;display:flex;flex-direction:column;align-items:center;gap:3px;border-radius:6px}
@@ -107,6 +108,17 @@ main{display:grid;grid-template-columns:56px 1fr 320px;min-height:0}
 .edge.hot{color:var(--hot)}.edge.hot path{stroke-width:2.4}.edge.hot text{fill:var(--hot);font-weight:600}
 /* right panel */
 aside{background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.info-wrap{position:relative;min-width:0;min-height:0;display:flex}
+.info-wrap aside{flex:1;min-width:0}
+#info-resize{width:6px;position:absolute;z-index:3;left:-3px;top:0;bottom:0;cursor:col-resize;touch-action:none}
+#info-resize:hover,#info-resize:focus-visible{background:var(--accent);outline:none}
+.info-head{display:flex;align-items:center;justify-content:flex-end;min-height:30px;padding:2px 8px 0}
+#hide-info{padding:2px 7px;border:0;background:none;color:var(--muted);font-size:16px;line-height:1}
+#show-info{position:absolute;z-index:4;right:0;top:8px;border-radius:6px 0 0 6px;padding:7px 8px;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+main.info-hidden{grid-template-columns:56px minmax(0,1fr) 0}
+main.info-hidden #info-wrap{display:none}
+main.info-hidden #show-info{display:block}
+#show-info{display:none}
 .ptabs{display:flex;gap:18px;padding:0 16px;border-bottom:1px solid var(--line)}
 .ptabs a{padding:10px 0;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
 .ptabs a.on{color:var(--ink);border-color:var(--accent)}
@@ -151,9 +163,9 @@ aside{background:var(--panel);border-left:1px solid var(--line);display:flex;fle
 .pbody ol,.pbody ul.r{margin:4px 0;padding-left:18px}
 .embed{grid-template-rows:1fr}
 .embed #top,.embed #sub,.embed #tools{display:none}
-.embed main{grid-template-columns:1fr 320px}
+.embed main{grid-template-columns:minmax(0,1fr) var(--info-width,320px)}
 .shell{grid-template-rows:auto 1fr}.shell #top{display:none}
-@media (max-width:760px){main{grid-template-columns:1fr;grid-template-rows:1fr 42vh}#tools{display:none}aside{border-left:0;border-top:1px solid var(--line)}}
+@media (max-width:760px){main{grid-template-columns:1fr;grid-template-rows:1fr 42vh}main.info-hidden{grid-template-columns:1fr;grid-template-rows:1fr}#tools{display:none}aside{border-left:0;border-top:1px solid var(--line)}#info-resize{display:none}#show-info{top:auto;bottom:8px}}
 </style>
 </head>
 <body>
@@ -182,11 +194,16 @@ aside{background:var(--panel);border-left:1px solid var(--line);display:flex;fle
       <span id="zoomlbl">100%</span>
     </div>
   </div>
-  <aside>
+  <div class="info-wrap" id="info-wrap">
+   <div id="info-resize" role="separator" aria-orientation="vertical" aria-label="Đổi độ rộng bảng thông tin" tabindex="0"></div>
+   <aside>
+    <div class="info-head"><button id="hide-info" title="Ẩn bảng thông tin" aria-label="Ẩn bảng thông tin">›</button></div>
     <div class="ptabs"><a data-p="info" class="on">Chi tiết</a><a data-p="flows">Diagram flows</a></div>
     <div class="pbody" id="pinfo"><p class="empty">Bấm một ô để xem chi tiết và làm nổi các kết nối của nó. Bấm đúp, Enter hoặc “… bên trong ›” để đi vào bên trong; bấm nền để bỏ chọn.</p></div>
     <div class="pbody" id="pflows" hidden></div>
-  </aside>
+   </aside>
+  </div>
+  <button id="show-info" title="Hiện bảng thông tin" aria-label="Hiện bảng thông tin">‹</button>
 </main>
 <div id="tip" hidden></div>
 <script>
@@ -205,6 +222,19 @@ const isCode=o=>CODE.has(o?.type);
 const KIND={network:"network",call:"function call",queue:"queue"};
 let scopeRect=null, curEdges=new Map(), tok=0, busy=false, pickConn=null;
 const EMPTY='<p class="empty">Bấm một ô để xem chi tiết và làm nổi các kết nối của nó. Bấm đúp, Enter hoặc “… bên trong ›” để đi vào bên trong; bấm nền để bỏ chọn.</p>';
+// Keep the right panel's width and visibility independent of the diagram state.
+const infoMain=$("main"), infoResize=$("#info-resize");
+const INFO_WIDTH_KEY="strata-info-width", INFO_HIDDEN_KEY="strata-info-hidden";
+function setInfoWidth(width){const w=Math.max(220,Math.min(560,width));document.documentElement.style.setProperty("--info-width",`${w}px`);infoResize.setAttribute("aria-valuenow",String(w));try{localStorage.setItem(INFO_WIDTH_KEY,String(w))}catch{}}
+try{const w=Number(localStorage.getItem(INFO_WIDTH_KEY));if(Number.isFinite(w)&&w>=220&&w<=560)setInfoWidth(w)}catch{}
+function setInfoHidden(hidden){infoMain.classList.toggle("info-hidden",hidden);$("#show-info").style.display=hidden?"block":"none";try{localStorage.setItem(INFO_HIDDEN_KEY,hidden?"1":"0")}catch{}}
+try{setInfoHidden(localStorage.getItem(INFO_HIDDEN_KEY)==="1")}catch{}
+let infoDrag=null;
+infoResize.addEventListener("pointerdown",e=>{if(e.button!==0)return;infoDrag={x:e.clientX,width:$("#info-wrap").getBoundingClientRect().width};infoResize.setPointerCapture(e.pointerId);e.preventDefault()});
+infoResize.addEventListener("pointermove",e=>{if(infoDrag)setInfoWidth(infoDrag.width+infoDrag.x-e.clientX)});
+infoResize.addEventListener("pointerup",()=>infoDrag=null);infoResize.addEventListener("pointercancel",()=>infoDrag=null);
+infoResize.addEventListener("keydown",e=>{if(e.key==="ArrowLeft"||e.key==="ArrowRight"){setInfoWidth($("#info-wrap").getBoundingClientRect().width+(e.key==="ArrowLeft"?16:-16));e.preventDefault()}});
+$("#hide-info").onclick=()=>setInfoHidden(true);$("#show-info").onclick=()=>setInfoHidden(false);
 // Small line icons per C4 type, drawn in a 20x20 box.
 const ICON={
   actor:'<circle cx="10" cy="6" r="3.5"/><path d="M3 18c1-4 4-6 7-6s6 2 7 6"/>',

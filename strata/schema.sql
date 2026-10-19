@@ -24,12 +24,18 @@ BEGIN SELECT RAISE(ABORT,'decision: only status may change'); END;
 
 CREATE TABLE IF NOT EXISTS c4_object(
   id TEXT NOT NULL, project TEXT NOT NULL,
-  type TEXT NOT NULL CHECK(type IN ('actor','system','app','store','component','group')),
+  type TEXT NOT NULL CHECK(type IN ('actor','system','app','store','component','group','file','function')),
   name TEXT NOT NULL, parent TEXT, technology TEXT, description TEXT,
-  tags JSON, links JSON, status TEXT, PRIMARY KEY(project,id));
+  tags JSON, links JSON, status TEXT, responsibilities JSON, state TEXT, PRIMARY KEY(project,id));
 CREATE TABLE IF NOT EXISTS c4_connection(
   id TEXT NOT NULL, project TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL,
-  name TEXT, technology TEXT, status TEXT, direction TEXT, tags TEXT, description TEXT, PRIMARY KEY(project,id));
+  name TEXT, technology TEXT, status TEXT, direction TEXT, tags TEXT, description TEXT,
+  feature TEXT, interface TEXT, payload JSON, kind TEXT, PRIMARY KEY(project,id));
+-- a callable contract on an object: HTTP route, function, queue, event
+CREATE TABLE IF NOT EXISTS c4_interface(
+  project TEXT NOT NULL, id TEXT NOT NULL, object_id TEXT NOT NULL,
+  kind TEXT CHECK(kind IN ('http','function','queue','event')), name TEXT, signature TEXT,
+  purpose TEXT, input TEXT, output TEXT, errors JSON, PRIMARY KEY(project,id));
 CREATE TABLE IF NOT EXISTS c4_meta(
   project TEXT PRIMARY KEY, name TEXT NOT NULL, root TEXT, layout TEXT, tags JSON);
 CREATE TABLE IF NOT EXISTS c4_flow(
@@ -55,7 +61,7 @@ CREATE TRIGGER IF NOT EXISTS item_ad AFTER DELETE ON item BEGIN
 -- decision text is immutable and rows undeletable, so insert sync is enough
 CREATE TRIGGER IF NOT EXISTS decision_ai AFTER INSERT ON decision BEGIN
   INSERT INTO search VALUES(replace(replace(NEW.title,'đ','d'),'Đ','D'),
-    replace(replace(trim(coalesce(NEW.context,'')||' '||coalesce(NEW.decision,'')||' '||coalesce(NEW.consequences,'')),'đ','d'),'Đ','D'),
+    replace(replace(trim(coalesce(NEW.context,'')||' '||coalesce(NEW.decision,'')||' '||coalesce(NEW.consequences,'')||' '||coalesce(NEW.rejected_options,'')),'đ','d'),'Đ','D'),
     'decision',NEW.id,NEW.project); END;
 
 CREATE TABLE IF NOT EXISTS page(
@@ -85,7 +91,7 @@ CREATE TABLE IF NOT EXISTS doc(
   project TEXT NOT NULL, path TEXT NOT NULL, title TEXT NOT NULL, feature TEXT,
   kind TEXT NOT NULL DEFAULT 'other' CHECK(kind IN ('research','architect','review','plan','other')),
   status TEXT NOT NULL DEFAULT 'current' CHECK(status IN ('current','draft','outdated','missing')),
-  ord INT NOT NULL DEFAULT 0, text TEXT, updated_at TEXT,
+  ord INT NOT NULL DEFAULT 0, text TEXT, updated_at TEXT, summary TEXT, code JSON,
   PRIMARY KEY(project,path));
 
 CREATE TRIGGER IF NOT EXISTS doc_ai AFTER INSERT ON doc BEGIN

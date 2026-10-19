@@ -1,0 +1,187 @@
+title: Định dạng tài liệu
+summary: Tài liệu là file YAML chỉ chứa nội dung. Strata lo phần trình bày; người viết không đụng tới HTML, CSS hay JS.
+code: [strata/blocks.py, strata/db.py, viewer/page.js, viewer/app.js]
+
+blocks:
+  - md: |
+      ## Viết ở đâu
+      Đặt file `*.yaml` trong `docs_dir` của project. Server tự quét mỗi khi file được thêm, sửa hay xoá. Trang đang mở cũng tự vẽ lại sau khoảng 2 giây. Không cần chạy lệnh nào.
+
+      Mục lục chia chương theo thư mục con của `docs_dir`: `architect/` (Kỹ thuật, đi sâu vào code; tổng quan kiến trúc nằm ở tab Kiến trúc), `research/` (Nghiên cứu), `plan/` (Kế hoạch), `review/`. Thư mục sâu hơn thành mục con, ví dụ `architect/features/`. `code:` chỉ ghi file code liên quan, không ảnh hưởng chỗ xếp.
+
+  - md: |
+      ## Khung một file
+      ```
+      title: Luồng nạp bản đồ C4          # bắt buộc
+      summary: Một câu cho mục lục         # nên có
+      code: [strata/c4.py, strata.py]     # file/thư mục code mà tài liệu mô tả
+      blocks:
+        - md: |
+            ## Tiêu đề
+            Đoạn văn, **đậm**, `code`, [link](https://...)
+        - diagram:
+            nodes:
+              - {id: a, text: "xin chào"}
+              - {id: b, text: "tab 2", link: c4-import}
+            edges: [[a, b, "nhãn mũi tên"]]
+      ```
+
+  - md: |
+      ## Các block
+      Mỗi block là một dòng `- tên: nội dung`. Đây là toàn bộ "hàm" của framework. Viết sai trường thì trang hiện khung lỗi kèm vị trí, ví dụ `block[2] type diagram: missing 'nodes'`.
+
+  - table:
+      head: [Block, Trường, Dùng khi]
+      rows:
+        - [md, "chuỗi markdown (#..###, danh sách, bảng, code)", Văn bản]
+        - [diagram, "nodes [{id, text, note?, shape? box|decision|store, tone? ui|proc|store|ok|bad|muted|warn, link?, details? [[nhãn, nội dung]]}], edges [[từ, tới, nhãn?]], dir? TB|LR (mặc định TB), details_title?, caption?", "Biểu đồ khối, luồng (vẽ bằng mermaid)"]
+        - [table, "head, rows", "So sánh, tra cứu"]
+        - [layers, "rows [{title, cells [{name, note?, status done|plan}]}]", Kiến trúc theo tầng]
+        - [swimlane, "lanes (list hoặc {vùng: [làn]}), phases?, steps [{lane, text, phase?, after?, data?, label?}], caption?", Luồng nhiều bên theo từng bước đánh số]
+        - [statemachine, "states [{id, text?, tone? muted|ok|warn|bad, note?, details? [[nhãn, nội dung]]}], transitions [[từ, tới, nhãn?]], initial?, initial_label?, final?, dir? TB|LR (mặc định TB), details_title?, caption?", Vòng đời trạng thái (vẽ bằng mermaid)]
+        - [roadmap, "periods [..], lanes?, items [{lane?, text, from, to?, status? done|doing|plan|blocked, link?}], milestones? [{at, text}], caption?", Lộ trình theo kỳ]
+        - [mermaid, chuỗi mermaid, "Sequence, state, gantt; có dòng `class` thì được thêm màu của Strata"]
+        - [legend, "items [{label, status}]", Chú giải trạng thái]
+        - [question, "q, options [{label, note?}], recommend?", Câu hỏi chờ quyết]
+        - [c4, "ids [..], project?", Nhúng một góc bản đồ C4]
+        - [query, "src item|decision, where, limit?", Danh sách task/decision sống]
+
+  - md: |
+      ## Link trong diagram
+      `link` của một ô nhận tên tài liệu khác, tính tương đối từ thư mục của tài liệu hiện tại (có thể bỏ đuôi `.yaml`), hoặc một URL `https://`. Ô có link bấm được.
+
+      ## Nhãn nhiều dòng, hình ô, màu
+      Nhãn mũi tên (`diagram` và `statemachine`) là một chuỗi, hoặc một list; chuỗi có `\n` hoặc list thì xuống dòng. `note` của ô nằm ở dòng thứ hai. `shape`: `box` (mặc định), `decision` (hình thoi, câu hỏi có/không), `store` (hình trụ, nơi lưu). `tone` chọn màu, mặc định `proc`. Hướng mặc định là dọc (`dir: TB`); sơ đồ dẹt, ít bước thì đặt `dir: LR`. Cuối mỗi hình có nút Phóng to và Mã nguồn (chép mã mermaid).
+
+  - diagram:
+      dir: LR
+      caption: Đường đi của một file tài liệu
+      nodes:
+        - {id: f, text: "docs/**/*.yaml", note: "chỉ nội dung"}
+        - {id: s, text: Tự quét, note: "khi file đổi"}
+        - {id: i, text: Mục lục, note: "chương theo thư mục"}
+        - {id: r, text: Trình đọc, note: "block renderer"}
+        - {id: c, text: Ví dụ thật, note: "luồng nạp C4", link: c4-import}
+      edges: [[f, s], [s, i], [i, r, "bấm"], [r, c]]
+
+  - diagram:
+      dir: LR
+      caption: Gửi sự kiện offline-first qua outbox.
+      nodes:
+        - {id: ev, text: Sự kiện phát sinh, tone: ui}
+        - {id: tx, text: Ghi trong một transaction}
+        - {id: ob, text: outbox, shape: store}
+        - {id: net, text: "Có mạng?", shape: decision, tone: warn}
+        - {id: send, text: Gửi lên server}
+        - {id: ack, text: "Server xác nhận?", shape: decision, tone: warn}
+        - {id: del, text: Xóa khỏi outbox, tone: ok}
+      edges:
+        - [ev, tx]
+        - [tx, ob]
+        - [ob, net]
+        - [net, send, có]
+        - [net, ob, ["không", "giữ lại, thử sau"]]
+        - [send, ack]
+        - [ack, del, có]
+        - [ack, ob, không]
+
+  - legend:
+      items:
+        - {label: "YAML, md, html đều được quét", status: done}
+        - {label: "YAML là định dạng mặc định", status: done}
+        - {label: "Chuyển AGENT_C4.md sang YAML", status: plan}
+
+  - md: |
+      ## Swimlane
+      Chỉ ghi ai làm gì theo thứ tự. Số bước, màu giai đoạn, độ rộng làn, chỗ đặt hộp và đường mũi tên do Strata tự tính.
+      - `phase`: số (từ 1) hoặc tên giai đoạn; bỏ trống thì giữ giai đoạn của bước trước.
+      - `after`: các bước phải xong trước; bỏ trống là bước liền trước, `[]` là mở nhánh mới.
+      - `data`: phụ thuộc dữ liệu, vẽ nét đứt. `text` là list thì mỗi ý một dòng có dấu chấm.
+
+  - swimlane:
+      lanes:
+        Người share: [Người share, App người share]
+        Server: [Server]
+        Người mới: [App người mới]
+        Thiết bị: [Máy]
+      phases: [Tạo lời mời, Chấp nhận và xác nhận, Máy nhận quyền mới]
+      steps:
+        - {lane: Người share, text: Bấm "Thêm người"}
+        - {lane: App người share, text: Gửi MACHINE_SHARE_CREATE}
+        - {lane: Server, text: "Trả mã mời một lần, có hạn"}
+        - {lane: App người share, text: Đưa QR chứa mã mời}
+        - {lane: App người mới, phase: 2, text: [Gửi MACHINE_SHARE_ACCEPT, Kèm mã mời]}
+        - {lane: Server, text: "Báo chờ xác nhận: tên, email người mới"}
+        - {lane: App người share, text: Hiện tên người mới}
+        - {lane: Người share, text: Bấm xác nhận}
+        - {lane: Server, text: [Ghi quyền Employee, Tăng acl_version]}
+        - {lane: App người mới, text: Báo đã vào máy}
+        - {lane: Máy, phase: 3, after: [], text: Poll thấy có bản quyền mới}
+        - {lane: Server, text: Ký bản sao quyền, data: [9]}
+        - {lane: Máy, text: "Kiểm chữ ký, lưu bản sao"}
+        - {lane: Máy, text: Tự kiểm quyền cả khi offline}
+      caption: Ví dụ lấy từ tài liệu Share máy của project1_app.
+
+  - md: |
+      ## Statemachine
+      Vẽ bằng mermaid `stateDiagram-v2`. Chấm đặc là trạng thái đầu (`initial`, mặc định là trạng thái đầu tiên; `initial_label` ghi nhãn lên mũi tên từ chấm), chấm có vòng là trạng thái cuối (`final`). Chuyển về chính nó thì vẽ vòng cung phía trên ô. `tone` tô màu ô: muted, ok, warn, bad.
+
+  - statemachine:
+      dir: LR
+      states:
+        - {id: unverified, text: Chưa xác minh, tone: muted}
+        - {id: active, text: Hoạt động, tone: ok}
+        - {id: deleted, text: Đã xóa, tone: bad, note: ẩn danh hóa}
+      initial: unverified
+      initial_label: register
+      final: [deleted]
+      transitions:
+        - [unverified, unverified, đăng ký lại cùng email]
+        - [unverified, active, otp/verify đúng]
+        - [active, deleted, xóa tài khoản]
+      caption: Vòng đời tài khoản.
+
+  - md: |
+      ## Roadmap
+      Chỉ ghi việc gì, làn nào, từ kỳ nào đến kỳ nào. Độ rộng cột, chỗ xếp thanh chồng nhau và màu theo trạng thái do Strata tự tính. Bỏ `to` thì thanh dài một kỳ; bỏ `lanes` thì chỉ có một làn không tên. `link` hoạt động như ô của diagram.
+
+  - roadmap:
+      periods: [Q1/26, Q2/26, Q3/26]
+      lanes: [Core, Viewer]
+      items:
+        - {lane: Core, text: SQLite core, from: Q1/26, to: Q2/26, status: done}
+        - {lane: Core, text: Import C4, from: Q2/26, status: done}
+        - {lane: Viewer, text: Swimlane, from: Q3/26, status: doing, link: doc-format}
+        - {lane: Viewer, text: Roadmap, from: Q2/26, to: Q3/26, status: plan}
+        - {lane: Viewer, text: Xuất PDF, from: Q3/26, status: blocked}
+      milestones: [{at: Q2/26, text: v1}]
+      caption: Ví dụ lộ trình.
+
+  - md: |
+      ## Bảng "Bên trong các khối"
+      Ô của `diagram` (và trạng thái của `statemachine`) có thể mang `details: [[nhãn, nội dung], ...]`. Nội dung được `code` và **đậm**. Có ô nào có `details` thì hình chia đôi: sơ đồ bên trái, bảng bên phải, mỗi ô một dòng đầu nhóm (chữ của ô) rồi các dòng của nó, theo thứ tự ô. Màn hẹp thì bảng xuống dưới hình. Đổi tiêu đề bảng bằng `details_title` (mặc định "Bên trong các khối").
+
+  - diagram:
+      caption: Đường đi của một gói qua middleware bảo vệ gói tin.
+      nodes:
+        - id: p
+          text: ① Chuẩn bị nội dung
+          details:
+            - [Vào, "payload nghiệp vụ và `device_id`"]
+            - [Làm, "nén, đánh số `seq`, gắn dấu thời gian"]
+        - id: e
+          text: ② Đóng phong bì
+          details:
+            - [Mã hóa, "AEAD với khóa phiên"]
+            - [Ký, "chữ ký máy trên phần đầu và nội dung"]
+        - {id: t, text: ③ Gửi trong TLS}
+        - id: g
+          text: ④ Chặn cửa
+          tone: warn
+          details:
+            - [Thứ tự, "kiểm rẻ trước, đắt sau"]
+            - [Từ chối, "một mã chung, không lộ lý do"]
+        - {id: ok, text: "Chữ ký máy đúng?", shape: decision, tone: warn}
+        - {id: biz, text: Giao cho nghiệp vụ, tone: ok}
+        - {id: rej, text: Từ chối, tone: bad}
+      edges: [[p, e], [e, t], [t, g], [g, ok], [ok, biz, đúng], [ok, rej, sai]]

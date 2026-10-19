@@ -1,19 +1,18 @@
 """HTTP server: C4 viewer, pages and their JSON APIs. All data comes from the DB."""
 import http.server, json, mimetypes, pathlib, re, sqlite3, threading
 from urllib.parse import parse_qs, unquote, urlsplit
-from strata import blocks, c4, db
+from strata import blocks, c4, db, service
 
 VIEWER = pathlib.Path(__file__).resolve().parent.parent / "viewer"
-STATIC = {"/": "app.html", "/app.js": "app.js", "/app.css": "app.css", "/c4": "index.html", "/index.html": "index.html", "/page.js": "page.js", "/page.css": "page.css"}
-TYPES = {".html": "text/html", ".js": "application/javascript", ".css": "text/css", ".json": "application/json"}
+STATIC = {"/": "app.html", "/app.js": "app.js", "/app.css": "app.css", "/c4": "index.html", "/index.html": "index.html", "/page.js": "page.js", "/swimlane.js": "swimlane.js", "/roadmap.js": "roadmap.js", "/page.css": "page.css"}
+TYPES = {".html": "text/html", ".md": "text/plain", ".yaml": "text/plain", ".js": "application/javascript", ".css": "text/css", ".json": "application/json"}
 SHOW = {"item": "id,project,kind,title,status,priority,owner", "decision": "id,project,title,status"}
 ITEM_KINDS = ("rule", "task", "issue", "knowledge", "draft", "note")
 ITEM_STATUS = ("proposed", "approved", "open", "doing", "done", "rejected")
 CLOSED = "('done','rejected')"
-SRC_TABLE = {"item": "item", "decision": "decision", "page": "page", "doc": "doc"}
 
 
-def make_server(db_path=None, project=None, port=0):
+def make_server(db_path=None, project=None, port=0, host="127.0.0.1"):
     db.init(db_path).close()
     conn = sqlite3.connect(db.db_path(db_path), check_same_thread=False)  # one long-lived conn: data_version needs it
     conn.row_factory = sqlite3.Row
@@ -22,6 +21,18 @@ def make_server(db_path=None, project=None, port=0):
     def rows(sql, args=()):
         with lock: return [dict(r) for r in conn.execute(sql, args)]
 
+    stamps = {}  # project -> docs_dir fingerprint at last scan
+
+    def autoscan():
+        """Re-scan any project whose docs_dir changed, so new or edited docs show up without `doc scan`."""
+        with lock:
+            for r in conn.execute("SELECT id,docs_dir FROM project WHERE docs_dir IS NOT NULL").fetchall():
+                base = pathlib.Path(r["docs_dir"])
+                if not base.is_dir(): continue
+                st = db.docs_stamp(base)
+                if stamps.get(r["id"]) != st:
+                    db.scan_docs(conn, r["id"]); stamps[r["id"]] = st
+
     def default_project():
         ps = rows("SELECT project FROM c4_meta")
         return project or (ps[0]["project"] if len(ps) == 1 else None)
@@ -29,19 +40,21 @@ def make_server(db_path=None, project=None, port=0):
     class H(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
             port = self.server.server_address[1]
-            if self.headers.get("Host") not in (f"127.0.0.1:{port}", f"localhost:{port}"):
+            if host in ("127.0.0.1", "localhost") and self.headers.get("Host") not in (f"127.0.0.1:{port}", f"localhost:{port}"):
                 return self.send_error(403)  # DNS rebinding guard
             u = urlsplit(self.path)
             q = {k: v[-1] for k, v in parse_qs(u.query, keep_blank_values=True).items()}
             parts = [unquote(x) for x in u.path.split("/")]  # ['', 'api', ...]
             p = u.path
             if p in STATIC: return self.file(VIEWER / STATIC[p])
+            if p in ("/api/projects", "/api/docs", "/api/doc", "/api/search"): autoscan()
+            if p == "/api/doc": return self.doc(q)
             if p == "/api/projects": return self.json(self.projects())
             if p == "/api/items": return self.items(q)
             if p == "/api/decisions":
                 return self.json(rows("SELECT * FROM decision" + (" WHERE project=?" if q.get("project") else "") + " ORDER BY id DESC", (q["project"],) if q.get("project") else ()))
             if p == "/api/docs":
-                return self.json(rows("SELECT project,path,title,feature,kind,status,ord,updated_at FROM doc" + (" WHERE project=?" if q.get("project") else "")
+                return self.json(rows("SELECT project,path,title,feature,kind,status,ord,updated_at,summary,json(code) code FROM doc" + (" WHERE project=?" if q.get("project") else "")
                                       + " ORDER BY project,ord,path", (q["project"],) if q.get("project") else ()))
             if p == "/api/audit": return self.audit(q)
             if p == "/api/search": return self.search(q)
@@ -68,6 +81,7 @@ def make_server(db_path=None, project=None, port=0):
                         "SELECT DISTINCT l.object_id FROM c4_link l JOIN item t ON t.id=l.ref_id WHERE l.project=? AND l.ref_kind='item' "
                         f"AND t.project=? AND t.kind='issue' AND t.status NOT IN {CLOSED} ORDER BY l.object_id", (proj, proj))] if m else []
                 if not m: return self.send_error(404)
+                m.pop("interfaces")  # already nested under each object
                 issues = c4.issues_by_object(m, pathlib.Path(m.pop("root")))
                 meta = {k: m.pop(k) for k in ("name", "layout", "tags") if k in m}
                 return self.json({"meta": meta, **m, "issues": issues, "links": links, "open_issues": open_issues})
@@ -109,6 +123,18 @@ def make_server(db_path=None, project=None, port=0):
             sql = f"SELECT {SHOW[src]} FROM {src}" + (" WHERE " + " AND ".join(f"{k}=?" for k in where) if where else "") + " ORDER BY id LIMIT ?"
             self.json(rows(sql, (*where.values(), int(limit))))
 
+        def doc(self, q):
+            """One YAML doc, parsed and validated, ready for the block renderer."""
+            with lock: r = rows("SELECT docs_dir FROM project WHERE id=?", (q.get("project", ""),))
+            path = q.get("path", "")
+            if not r or not r[0]["docs_dir"] or not path.endswith(".yaml") or any(x.startswith(".") for x in path.split("/")): return self.send_error(404)
+            try:
+                root = pathlib.Path(r[0]["docs_dir"]).resolve(); f = (root / path).resolve()
+                if not (f.is_relative_to(root) and f.is_file()): return self.send_error(404)
+                d, errs = blocks.load_doc(f.read_text(encoding="utf-8", errors="replace"))
+            except (ValueError, OSError): return self.send_error(404)
+            self.json({**d, "errors": errs, "mtime": f.stat().st_mtime_ns})
+
         def projects(self):
             out = rows("SELECT id,name,description,parent,status FROM project ORDER BY id")
             for r in out:
@@ -143,17 +169,9 @@ def make_server(db_path=None, project=None, port=0):
                            (*((q["project"],) if q.get("project") else ()), int(limit))))
 
         def search(self, q):
-            terms = re.findall(r"\w+", db.fold(q.get("q", "")))
-            if not terms: return self.send_error(400, "empty q")
-            match = " ".join(f'"{t}"' for t in terms) + "*"  # quoted terms: no FTS syntax from user input; prefix on the last
-            proj = q.get("project")
-            hits = rows("SELECT src,ref,project,snippet(search,1,'','','…',12) snippet FROM search WHERE search MATCH ?" + (" AND project=?" if proj else "")
-                        + " ORDER BY bm25(search) LIMIT 30", (match, proj) if proj else (match,))
-            for h in hits:  # real title/key from the source row (the index holds the folded copy)
-                col = {"item": "kind", "decision": "''", "page": "slug", "doc": "path"}[h["src"]]
-                key = "id" if h["src"] in ("item", "decision") else "rowid"
-                r = rows(f"SELECT title, {col} AS k FROM {SRC_TABLE[h['src']]} WHERE {key}=?", (h["ref"],))
-                h["title"], h["key"] = (r[0]["title"], r[0]["k"]) if r else ("", "")
+            try:
+                with lock: hits = service.search(conn, q.get("q", ""), q.get("project"))
+            except ValueError: return self.send_error(400, "empty q")
             self.json(hits)
 
         def file(self, f, ctype=None):
@@ -178,4 +196,4 @@ def make_server(db_path=None, project=None, port=0):
 
         def log_message(self, *a): pass
 
-    return http.server.ThreadingHTTPServer(("127.0.0.1", port), H)
+    return http.server.ThreadingHTTPServer((host, port), H)

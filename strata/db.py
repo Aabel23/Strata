@@ -1,6 +1,6 @@
-import datetime, html.parser, json, os, pathlib, sqlite3
+import datetime, html.parser, json, os, pathlib, re, sqlite3
 
-DEFAULT_DB = "/home/abel/.secondbrain/strata.db"
+DEFAULT_DB = "/home/abel/project/tools/strata/strata.db"
 SCHEMA = pathlib.Path(__file__).with_name("schema.sql")
 
 def db_path(path=None):
@@ -17,12 +17,35 @@ def init(path=None):
     c = connect(path)
     if c.execute("SELECT 1 FROM sqlite_master WHERE name='research'").fetchone() and c.execute("SELECT 1 FROM research").fetchone():
         raise RuntimeError("table research is not empty: move rows to page(kind='research') first")
-    cols = [r["name"] for r in c.execute("PRAGMA table_info(c4_connection)")]
-    if cols and "description" not in cols:  # DB created before T2
-        c.execute("ALTER TABLE c4_connection ADD COLUMN description TEXT")
+    rebuild = _migrate(c)
     c.executescript(SCHEMA.read_text())
+    if rebuild:  # copy rows from the old-CHECK table into the new one
+        cols = ",".join(r["name"] for r in c.execute("PRAGMA table_info(c4_object_old)"))
+        c.execute(f"INSERT INTO c4_object({cols}) SELECT {cols} FROM c4_object_old")
+        c.execute("DROP TABLE c4_object_old")
     c.commit()
     return c
+
+# columns added after a table was first created: (table, column, type)
+ADDED = [("c4_connection", "description", "TEXT"), ("c4_connection", "feature", "TEXT"), ("c4_connection", "interface", "TEXT"),
+         ("c4_connection", "payload", "JSON"), ("c4_connection", "kind", "TEXT"),
+         ("c4_object", "responsibilities", "JSON"), ("c4_object", "state", "TEXT"),
+         ("doc", "summary", "TEXT"), ("doc", "code", "JSON")]
+
+def _migrate(c):
+    """ALTER old tables up to the current schema. Returns True if c4_object was renamed to c4_object_old
+    (its type CHECK predates 'file'/'function' and SQLite cannot alter a CHECK) for init to copy back."""
+    for t, col, typ in ADDED:
+        cols = [r["name"] for r in c.execute(f"PRAGMA table_info({t})")]
+        if cols and col not in cols: c.execute(f"ALTER TABLE {t} ADD COLUMN {col} {typ}")
+    t = c.execute("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='decision_ai'").fetchone()
+    if t and "rejected_options" not in t["sql"]:  # old index body lacks rejected options: schema.sql recreates the trigger, reindex here
+        c.execute("DROP TRIGGER decision_ai"); c.execute("DELETE FROM search WHERE src='decision'")
+        c.execute("INSERT INTO search SELECT replace(replace(title,'đ','d'),'Đ','D'), replace(replace(trim(coalesce(context,'')||' '||coalesce(decision,'')||' '||coalesce(consequences,'')||' '||coalesce(rejected_options,'')),'đ','d'),'Đ','D'), 'decision', id, project FROM decision")
+    r = c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='c4_object'").fetchone()
+    if r and "'function'" not in r["sql"]:
+        c.execute("ALTER TABLE c4_object RENAME TO c4_object_old"); return True
+    return False
 
 def fold(q):
     """Fold đ/Đ in an FTS query the same way the triggers fold indexed text."""
@@ -52,9 +75,9 @@ def list_pages(c, project=None):
 def now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="microseconds")
 
-def audit(c, project, tool, target, before=None, after=None):
+def audit(c, project, tool, target, before=None, after=None, role="cli"):
     c.execute("INSERT INTO audit(project,actor_role,tool,target,before,after) VALUES(?,?,?,?,?,?)",
-              (project, "cli", tool, target, json.dumps(before, ensure_ascii=False), json.dumps(after, ensure_ascii=False)))
+              (project, role, tool, target, json.dumps(before, ensure_ascii=False), json.dumps(after, ensure_ascii=False)))
 
 def add_project(c, id, name, root=None, docs_dir=None, parent=None, description=None):
     if docs_dir and root and not os.path.isabs(docs_dir): docs_dir = os.path.join(root, docs_dir)
@@ -63,19 +86,19 @@ def add_project(c, id, name, root=None, docs_dir=None, parent=None, description=
     c.execute("INSERT INTO project(id,name,description,root,docs_dir,parent) VALUES(:id,:name,:description,:root,:docs_dir,:parent)", r)
     audit(c, id, "project.add", id, None, r); c.commit()
 
-def add_item(c, project, kind, title, body=None, priority=None, status="open"):
+def add_item(c, project, kind, title, body=None, priority=None, status="open", role="cli"):
     t = now()
-    cur = c.execute("INSERT INTO item(project,kind,title,body,status,priority,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,'cli',?,?)",
-                    (project, kind, title, body, status, priority, t, t))
-    audit(c, project, "item.add", f"item:{cur.lastrowid}", None, {"kind": kind, "title": title, "status": status})
+    cur = c.execute("INSERT INTO item(project,kind,title,body,status,priority,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                    (project, kind, title, body, status, priority, role, t, t))
+    audit(c, project, "item.add", f"item:{cur.lastrowid}", None, {"kind": kind, "title": title, "status": status}, role)
     c.commit(); return cur.lastrowid
 
-def set_item(c, id, status=None, priority=None):
+def set_item(c, id, status=None, priority=None, role="cli"):
     r = c.execute("SELECT project,status,priority FROM item WHERE id=?", (id,)).fetchone()
     if not r: raise KeyError(f"no item {id}")
     new = {"status": status or r["status"], "priority": priority if priority is not None else r["priority"]}
     c.execute("UPDATE item SET status=?,priority=?,updated_at=?,version=version+1 WHERE id=?", (new["status"], new["priority"], now(), id))
-    audit(c, r["project"], "item.set", f"item:{id}", {"status": r["status"], "priority": r["priority"]}, new); c.commit()
+    audit(c, r["project"], "item.set", f"item:{id}", {"status": r["status"], "priority": r["priority"]}, new, role); c.commit()
 
 class _Text(html.parser.HTMLParser):
     def __init__(self):
@@ -91,27 +114,52 @@ class _Text(html.parser.HTMLParser):
         if self.cur: setattr(self, self.cur, getattr(self, self.cur) + d)
         if self.cur != "title": self.out.append(d)
 
+def doc_files(base):
+    """*.html and *.md under base, skipping assets/, plan/archive/ and dot paths."""
+    for f in sorted([*base.rglob("*.yaml"), *base.rglob("*.html"), *base.rglob("*.md")]):
+        parts = f.relative_to(base).parts
+        if any(x.startswith(".") for x in parts) or parts[0] == "assets" or parts[:2] == ("plan", "archive"): continue
+        yield f
+
+def docs_stamp(base):
+    """Cheap fingerprint of docs_dir: changes when a doc is added, removed or edited."""
+    return tuple((str(f), f.stat().st_mtime_ns, f.stat().st_size) for f in doc_files(base))
+
 def scan_docs(c, project):
-    """Walk docs_dir for *.html; upsert changed docs, mark vanished ones missing. Returns (found, missing)."""
+    """Walk docs_dir for *.yaml (the default doc format), *.html and *.md; upsert changed docs, mark vanished ones missing. Returns (found, missing)."""
     r = c.execute("SELECT docs_dir FROM project WHERE id=?", (project,)).fetchone()
     if not r or not r["docs_dir"] or not os.path.isdir(r["docs_dir"]): raise ValueError(f"project {project}: docs_dir not set or not a directory")
-    base = pathlib.Path(r["docs_dir"]); seen = set()
-    for f in sorted(base.rglob("*.html")):
+    base = pathlib.Path(r["docs_dir"]); seen = set(); changed = 0
+    for f in doc_files(base):
         rel = f.relative_to(base); parts = rel.parts
-        if any(x.startswith(".") for x in parts[:-1]) or parts[0] == "assets" or parts[:2] == ("plan", "archive") or f.name.startswith("."): continue
-        p = _Text(); p.feed(f.read_text(encoding="utf-8", errors="replace"))
-        text = " ".join(" ".join(p.out).split())
-        title = (p.title or p.h1 or rel.stem).strip() or rel.stem
+        src = f.read_text(encoding="utf-8", errors="replace")
+        summary = None; code = None
+        if f.suffix == ".yaml":
+            from strata.blocks import load_doc, page_text
+            d, _ = load_doc(src)
+            title = d["title"] if isinstance(d["title"], str) and d["title"] else rel.stem
+            summary = d["summary"] if isinstance(d["summary"], str) else None
+            code = d["code"] if all(isinstance(x, str) for x in d["code"]) else []  # metadata only; the TOC groups by folder
+            text = " ".join(" ".join(filter(None, [summary, page_text(d["blocks"])])).split())
+        elif f.suffix == ".md":
+            h = re.search(r"^# +(.+)$", src, re.M); title = h[1].strip() if h else rel.stem; text = " ".join(src.split())
+        else:
+            p = _Text(); p.feed(src)
+            text = " ".join(" ".join(p.out).split())
+            title = (p.title or p.h1 or rel.stem).strip() or rel.stem
         kind = parts[0] if len(parts) > 1 and parts[0] in ("research", "architect", "review", "plan") else "other"
         path = rel.as_posix(); seen.add(path)
-        old = c.execute("SELECT title,kind,text,status FROM doc WHERE project=? AND path=?", (project, path)).fetchone()
-        if old and (old["title"], old["kind"], old["text"]) == (title, kind, text) and old["status"] != "missing": continue
-        c.execute("INSERT INTO doc(project,path,title,kind,text,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(project,path) DO UPDATE SET "
-                  "title=excluded.title,kind=excluded.kind,text=excluded.text,updated_at=excluded.updated_at,"
-                  "status=CASE WHEN doc.status='missing' THEN 'current' ELSE doc.status END", (project, path, title, kind, text, now()))
+        cj = json.dumps(code, ensure_ascii=False) if code is not None else None
+        old = c.execute("SELECT title,kind,text,status,summary,code FROM doc WHERE project=? AND path=?", (project, path)).fetchone()
+        if old and (old["title"], old["kind"], old["text"], old["summary"], old["code"]) == (title, kind, text, summary, cj) and old["status"] != "missing": continue
+        changed += 1
+        c.execute("INSERT INTO doc(project,path,title,kind,text,updated_at,summary,code) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(project,path) DO UPDATE SET "
+                  "title=excluded.title,kind=excluded.kind,text=excluded.text,updated_at=excluded.updated_at,summary=excluded.summary,code=excluded.code,"
+                  "status=CASE WHEN doc.status='missing' THEN 'current' ELSE doc.status END", (project, path, title, kind, text, now(), summary, cj))
     gone = [x["path"] for x in c.execute("SELECT path FROM doc WHERE project=? AND status!='missing'", (project,)) if x["path"] not in seen]
     for path in gone: c.execute("UPDATE doc SET status='missing',updated_at=? WHERE project=? AND path=?", (now(), project, path))
-    audit(c, project, "doc.scan", project, None, {"found": len(seen), "missing": len(gone)}); c.commit()
+    if changed or gone: audit(c, project, "doc.scan", project, None, {"found": len(seen), "changed": changed, "missing": len(gone)})
+    c.commit()
     return len(seen), len(gone)
 
 def set_doc(c, project, path, feature=None, status=None, ord=None):

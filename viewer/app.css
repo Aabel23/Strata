@@ -19,10 +19,14 @@ kbd{font-family:var(--body);font-size:11px;line-height:18px;min-width:18px;displ
   -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;opacity:.75}
 @supports not ((mask-composite:exclude) or (-webkit-mask-composite:xor)){.edge::before{background:none;border:1px solid var(--accent-soft);padding:0}}
 
-#shell{display:grid;grid-template-columns:244px 1fr;height:100%}
-body.collapsed #shell{grid-template-columns:0 1fr}
+#shell{--side-width:244px;display:grid;grid-template-columns:var(--side-width) 5px minmax(0,1fr);height:100%}
+body.collapsed #shell{grid-template-columns:0 0 minmax(0,1fr)}
 body.collapsed #side{visibility:hidden}
 #side{background:var(--side);border-right:1px solid var(--line-soft);overflow-y:auto;display:flex;flex-direction:column;padding:0 8px 8px;min-width:0}
+#side-resize{position:relative;z-index:2;cursor:col-resize;touch-action:none;outline:none}
+#side-resize::after{content:"";position:absolute;top:0;bottom:0;left:2px;width:1px;background:transparent;transition:background 100ms}
+#side-resize:hover::after,#side-resize:focus-visible::after,body.resizing #side-resize::after{background:var(--accent)}
+body.resizing{cursor:col-resize;user-select:none}
 #brand{position:relative;display:flex;align-items:center;gap:8px;height:64px;margin:0 -8px 4px;padding:0 16px;text-decoration:none;font-family:var(--display);font-size:26px;font-weight:600;letter-spacing:.02em;overflow:hidden}
 #brand::after{content:"";position:absolute;left:12px;right:12px;bottom:0;height:1px;background:var(--foil-line)}
 #side #moon svg{width:24px;height:24px}
@@ -107,19 +111,22 @@ body.collapsed #side{visibility:hidden}
 /* hero art (scripts/trace_hero.py): mountains (b = opaque bodies, r/l* = strokes, s = stars) anchored right at a fixed height,
    waves in a wide right-aligned viewBox at the same height so they line up with the mountain bases and reach any width */
 .page{--hh:clamp(260px,min(38vh,(100vw - 244px)*.2),460px)}
-.herobg{position:absolute;left:0;right:0;top:0;height:calc(var(--hh) + 50px);pointer-events:none;overflow:hidden;
-  -webkit-mask:linear-gradient(#000 78%,transparent);mask:linear-gradient(#000 78%,transparent)}
+.herobg{position:absolute;left:0;right:0;top:0;height:calc(var(--hh) + 130px);pointer-events:none;overflow:hidden;
+  -webkit-mask:linear-gradient(#000 92%,transparent);mask:linear-gradient(#000 92%,transparent)}
 .mtn,.waves{position:absolute;top:6px;height:var(--hh);color:var(--gold)}
 .hero{min-height:calc(var(--hh) + 10px)}
-.mtn{right:0;aspect-ratio:604/190;-webkit-mask:linear-gradient(90deg,transparent,#000 35%);mask:linear-gradient(90deg,transparent,#000 35%)}
-.waves{left:0;right:0;-webkit-mask:linear-gradient(90deg,transparent,rgba(0,0,0,.3) 8%,rgba(0,0,0,.3) 35%,#000 62%,#000 97%,transparent);mask:linear-gradient(90deg,transparent,rgba(0,0,0,.3) 8%,rgba(0,0,0,.3) 35%,#000 62%,#000 97%,transparent)}
+.mtn{right:0;aspect-ratio:604/190;-webkit-mask:linear-gradient(90deg,transparent 2%,#000 22%);mask:linear-gradient(90deg,transparent 2%,#000 22%)}
+.waves{left:0;right:0;-webkit-mask:linear-gradient(90deg,transparent,rgba(0,0,0,.3) 8%,rgba(0,0,0,.3) 35%,#000 62%);mask:linear-gradient(90deg,transparent,rgba(0,0,0,.3) 8%,rgba(0,0,0,.3) 35%,#000 62%)}
 .mtn svg,.waves svg{width:100%;height:100%;display:block}
+.waves{height:calc(var(--hh) + 120px)}.waves svg{overflow:visible;height:var(--hh)}
 .mtn .b{fill:var(--bg)}
 .herobg path{vector-effect:non-scaling-stroke}
 .mtn .r,.mtn .l1,.mtn .l2,.mtn .l3,.waves path{fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round}
 .mtn .r{stroke-width:1.5}.mtn .l1{stroke-width:1.05;opacity:.9}.mtn .l2{stroke-width:.9;opacity:.6}.mtn .l3{stroke-width:.8;opacity:.35}
-.mtn .s{fill:currentColor}
-.waves .w1{stroke-width:1.4;opacity:.9}.waves .w2{stroke-width:1.1;opacity:.55}.waves .w3{stroke-width:1;opacity:.3}
+.mtn .s,.waves .s{fill:currentColor;stroke:none}
+.mtn .h path{fill:currentColor;opacity:.45}
+.mtn .b path{stroke:currentColor;stroke-width:1.3;stroke-linejoin:round}
+.waves .w1{stroke-width:1.4;opacity:.9}.waves .w2{stroke-width:1.1;opacity:.85}.waves .w3{stroke-width:1;opacity:.65}
 .hero h1{position:relative;font-size:2.6rem}
 .hero p{position:relative;margin-top:4px}
 .props{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:10px}
@@ -153,6 +160,7 @@ body.collapsed #side{visibility:hidden}
 
 /* docs reader / c4: flat, full width */
 .reader{display:grid;grid-template-rows:44px 1fr;height:100%}
+.reader.c4{grid-template-rows:1fr}
 .tbar{display:flex;align-items:center;gap:6px;padding:0 12px;border-bottom:1px solid var(--line-soft);min-width:0}
 .tbar .ttl{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
 .tbar a.ib{text-decoration:none}
@@ -208,6 +216,7 @@ body.collapsed #side{visibility:hidden}
 @media (max-width:1023px){.row .x .pill,.row.doc .desc{display:none}}
 @media (max-width:767px){
   #shell{grid-template-columns:1fr}
+  #side-resize{display:none}
   #side{position:fixed;inset:0 auto 0 0;width:min(85vw,300px);z-index:15;transform:translateX(-100%);transition:transform 200ms var(--ease)}
   body.menu #side{transform:none;visibility:visible}
   body.menu #scrim{display:block;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:14}
@@ -225,3 +234,65 @@ body.collapsed #side{visibility:hidden}
   .fbar input{margin-left:0;flex:1}
 }
 .page>:not(.herobg){position:relative}
+.frame.mdoc{overflow:auto;background:var(--bg);padding:24px max(24px,calc((100% - 860px)/2))}
+.frame.mdoc table{border-collapse:collapse;margin:12px 0;font-size:.92em}
+.frame.mdoc th,.frame.mdoc td{border:1px solid var(--line,#8884);padding:5px 9px;text-align:left;vertical-align:top}
+
+/* ---------- mục lục ---------- */
+.toch{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:4px 24px;padding-bottom:18px;margin-bottom:22px;position:relative}
+.toch::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:var(--foil-line)}
+.toch .eyebrow,.toch h1,.toch p{grid-column:1}
+.toch h1{font-size:2.6rem;line-height:1.1}
+.toch p{margin:0}
+.toch input{grid-column:2;grid-row:1/4;align-self:end;width:240px;height:30px;padding:0 10px;font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:var(--r)}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--gold);display:flex;flex-wrap:wrap;gap:6px}
+.toc{display:grid;grid-template-columns:220px minmax(0,1fr);gap:32px;align-items:start}
+.ctree{position:sticky;top:0;display:flex;flex-direction:column;gap:1px;max-height:calc(100vh - 120px);overflow-y:auto;padding-right:4px}
+.ctree .slabel{padding:0 8px 6px}
+.tn{--d:0;display:flex;align-items:center;gap:6px;height:28px;padding:0 8px 0 calc(8px + var(--d) * 14px);border:0;border-radius:var(--r);text-align:left;color:var(--muted);font-family:var(--mono);font-size:12px;
+  background:repeating-linear-gradient(90deg,var(--line) 0 1px,transparent 1px 14px) 13px 0/calc(var(--d) * 14px) 100% no-repeat}
+.tn:hover{background-color:var(--hover);color:var(--fg)}
+.tn.on{background-color:var(--sel);color:var(--fg)}
+.tn.on .tg{color:var(--accent)}
+.tn.root{font-family:var(--body);font-size:13px;font-weight:500}
+.tn .tg{width:10px;color:var(--faint);flex:none}
+.tn .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tn .n{color:var(--faint);font-variant-numeric:tabular-nums}
+.chapters{display:grid;gap:30px;min-width:0}
+.chap h2{display:flex;align-items:baseline;gap:12px;margin:0 0 6px;padding:0 12px 8px;border-bottom:1px solid var(--line-soft)}
+.chap h2 code{font-family:var(--mono);font-size:13px;font-weight:500;color:var(--gold);letter-spacing:.02em}
+.chap h2 .n{font-family:var(--body);font-size:12px;font-weight:400;color:var(--faint)}
+.chap ol{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.entry{display:grid;gap:3px;padding:10px 12px;border-radius:var(--r);color:var(--fg);text-decoration:none}
+.entry:hover{background:var(--hover)}
+.entry .line{display:flex;align-items:baseline;gap:10px;min-width:0}
+.entry .tt{font-family:var(--display);font-size:1.3rem;font-weight:600;line-height:1.25;min-width:0}
+.entry:hover .tt{color:var(--accent)}
+.entry .dots{flex:1;min-width:24px;border-bottom:1px dotted var(--line);transform:translateY(-4px)}
+.entry .d{flex:none;font-size:12px;color:var(--faint);font-variant-numeric:tabular-nums}
+.entry .sum{color:var(--muted);max-width:70ch}
+.entry .em{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:2px}
+.entry .em code,.eyebrow code{font-family:var(--mono);font-size:11px;padding:1px 6px;border:1px solid var(--line);border-radius:var(--r-sm);color:var(--muted);text-transform:none;letter-spacing:0}
+.entry .fmt{font-family:var(--mono);font-size:11px;color:var(--faint);text-transform:uppercase}
+@media (max-width:760px){
+  .toch{grid-template-columns:1fr}.toch input{grid-column:1;grid-row:auto;width:100%;margin-top:10px}
+  .toc{grid-template-columns:1fr}.ctree{position:static;max-height:none;flex-direction:row;flex-wrap:wrap}
+  .tn{padding-left:8px;background:var(--card)}
+}
+
+/* ---------- doc YAML ---------- */
+.frame.mdoc article.doc{max-width:780px;margin:0 auto;display:grid;gap:28px}
+article.doc header{display:grid;gap:8px;padding-bottom:16px;position:relative}
+article.doc header::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:var(--foil-line)}
+article.doc h1{font-size:2.5rem;line-height:1.1}
+article.doc .lede{font-size:1.05rem;color:var(--muted);margin:0}
+article.doc .eyebrow code{color:var(--gold);border-color:var(--accent-soft)}
+.docerr{border:1px solid var(--err);border-radius:var(--r);padding:10px 14px;color:var(--fg)}
+.docerr ul{margin:6px 0 0;padding-left:18px;font-family:var(--mono);font-size:12px;color:var(--muted)}
+.frame.mdoc article.doc{grid-template-columns:minmax(0,1fr)}
+article.doc>section{min-width:0}
+article.doc .md h3{font-size:1.45rem;margin:4px 0 8px}
+article.doc .md h4{font-size:1.15rem}
+article.doc table{width:100%}
+.chap h2 .cn{font-family:var(--display);font-size:1.6rem;font-weight:600;color:var(--fg)}
+.chap h3.sub{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--gold);margin:14px 12px 2px}

@@ -3,6 +3,8 @@
 Kiến trúc C4 viết dưới dạng code. Bạn mô tả hệ thống trong một file YAML, rồi xem nó qua một viewer có thể zoom qua các tầng.
 Ý tưởng lấy từ IcePanel: **model trước, sơ đồ sau**.
 
+Tài liệu viết bằng YAML thuần nội dung, đặt trong `docs_dir`; server tự quét và vẽ (xem `docs/architect/doc-format.yaml`). Ngoài ra: [docs/architect/ARCHITECTURE.md](docs/architect/ARCHITECTURE.md) (kiến trúc, dữ liệu, server, cách mở rộng) · [docs/AGENT_C4.md](docs/AGENT_C4.md) (agent vẽ/sửa map).
+
 Dữ liệu nằm trong SQLite (`$STRATA_DB`, hoặc `--db FILE`). YAML chỉ là định dạng nhập.
 
 ```
@@ -12,7 +14,7 @@ python3 strata.py serve --project project1           # http://127.0.0.1:8740
 ```
 
 Viewer cần server (`/api/c4`), không mở trực tiếp file HTML được nữa. Link tới code lấy gốc từ `root` trong YAML, đổi thành đường dẫn tuyệt đối lúc import.
-Nhúng: `/c4?project=P&focus=<id>&embed=1` (zoom vào object, ẩn khung điều khiển).
+Map C4 chỉ hiện trong tab Kiến trúc của app shell (`/#/p/P/c4`); mở `/c4?project=P` trực tiếp sẽ chuyển về đó.
 
 ## App shell nhiều project
 
@@ -39,7 +41,10 @@ Route (GET): `/` shell, `/c4` viewer C4, `/pages`, `/page/<p>/<slug>`, `/api/pro
 python3 strata.py c4 link --project P --object X --item ID        # hoặc --decision ID; unlink cùng cú pháp
 python3 strata.py c4 links --project P --object X                  # liệt kê item/decision đã gắn
 python3 strata.py c4 context --project P [--object X] [--max-tokens 2000]   # văn bản gọn cho agent
+python3 strata.py c4 flow --project P [--id F]                              # trace từng bước của flow
 ```
+
+Agent thiết kế/sửa map: đọc [docs/AGENT_C4.md](docs/AGENT_C4.md) trước.
 
 `link/unlink` có audit (`c4.link`/`c4.unlink`); link trùng không ghi thêm. `context` không có `--object` thì in tổng quan cả map (kèm số issue mở); có `--object` thì in object, chuỗi cha, con, connection đã gộp, item/decision liên quan, flow; quá `--max-tokens` (ước len/4) thì cắt từ flow ngược lên, phần cắt ghi `... (cắt: <phần>)`.
 `/api/c4` trả thêm `issues` (dead_link/no_link/no_desc theo object), `links` và `open_issues`; viewer vẽ huy hiệu "!" cho object có vấn đề, viền đỏ cho object có issue mở, và có ô tìm object.
@@ -48,7 +53,7 @@ python3 strata.py c4 context --project P [--object X] [--max-tokens 2000]   # v�
 
 **Chuẩn bị**
 - `python3 strata.py import-yaml FILE.yaml --project P` nạp model vào DB.
-- `python3 strata.py serve --project P` rồi mở `http://127.0.0.1:8740/c4?project=P`, hoặc tab Kiến trúc trong app shell (`/#/p/P/c4`).
+- `python3 strata.py serve --project P` rồi mở tab Kiến trúc trong app shell (`/#/p/P/c4`).
 
 **Đọc một ô**: icon, tên, nhãn loại (Người dùng / Hệ thống / Ứng dụng / Kho dữ liệu / Thành phần), technology và 1–2 dòng mô tả. Rê chuột vào ô để xem mô tả đầy đủ. Ô có chồng thẻ phía sau và dòng "N thành phần bên trong ›" ở chân là ô mở ra được. Ô nét đứt ghi "Bên ngoài tầng này". Hộp "Chú giải" ở góc phải trên canvas giải thích các ký hiệu, gập/mở được (nhớ lựa chọn).
 
@@ -74,9 +79,8 @@ python3 strata.py c4 context --project P [--object X] [--max-tokens 2000]   # v�
 
 **Huy hiệu "!"** (góc trên phải object): object có vấn đề chất lượng model: link code chết (`dead_link`), không có link (`no_link`), thiếu mô tả (`no_desc`). Rê chuột để xem lý do. **Viền đỏ**: object có issue mở gắn vào.
 
-**Toàn màn hình**: trong tab Kiến trúc bấm "Toàn màn hình" (Fullscreen API); bấm lại nút (nay là "Thoát toàn màn hình") hoặc `Esc` để thoát. "Mở tab mới" mở `/c4?project=P` riêng; trang đó có link "← Strata" ở header để về `/#/p/P/c4`.
 
-**Nhúng**: `/c4?project=P&focus=<id>&embed=1`. Chế độ embed chỉ giữ một thanh mảnh gồm ← →, breadcrumb và sơ đồ; các phần khác ẩn.
+Trong tab Kiến trúc: map, chú giải, tag/tìm object và panel Chi tiết/Flow; lên tầng bằng `Esc`, vào trong bằng bấm đúp.
 
 **Phím tắt** (không có tác dụng khi đang gõ trong ô nhập hoặc select):
 
@@ -103,9 +107,10 @@ python3 strata.py c4 context --project P [--object X] [--max-tokens 2000]   # v�
 | `actor`, `system` | 1 Context | top level, `group` |
 | `app`, `store` | 2 Container | `system` |
 | `component` | 3 Component | `app` |
-| `group` | gom nhóm (domain) | bất kỳ |
+| `file`, `function` | 4 Code | `component`, `file` |
+| `group` | gom nhóm (domain) | top level, `group`, `system`, `app` |
 
-Tầng 4 không vẽ. Mỗi object có `links:` trỏ tới file code thật, và lệnh `validate` báo link nào đã chết.
+Mỗi object có `links:` trỏ tới file code thật, và lệnh `validate` báo link nào đã chết.
 
 ## Model
 
@@ -118,7 +123,7 @@ objects:
 connections:
   - {id?, from, to, name?, technology?, status?, direction?: outgoing|bidirectional|none, tags?}
 flows:
-  - {id, name, steps: [{connection: id, text}]}
+  - {id, name, steps: [{id?, connection: id, reverse?: true | at: object id, text?, payload?, interface?}]}   # xem docs/AGENT_C4.md
 ```
 
 ## Viewer
