@@ -1,10 +1,8 @@
 """Roadmap on top of items (decision 27): step = item kind 'step', gate = item kind 'gate' (item_dep on its steps),
 content = one page kind 'plan'. Step lifecycle uses the normal item verbs; only import and gate pass write here."""
 import hashlib, html.parser, json, pathlib, re
-from strata import db
+from strata import db, service
 
-# phase -> gate, copied from the source project's roadmap_progress.py; stored in the page so the data is self-describing
-GATE_PHASES = {"G0": [0], "G1": [1, 2], "G2": [3, 4], "G3": [5, 6], "G4": [7]}
 PROG_STATUS = {"todo": "approved", "doing": "doing", "review": "review", "done": "done", "blocked": "approved"}
 RANK = {"approved": 0, "doing": 1, "review": 2, "done": 3}
 RAW_KEYS = {"lead", "body", "intro", "guide", "callout"}  # fields the source page renders as HTML; the rest are escaped text
@@ -80,13 +78,19 @@ def _check_inputs(plan, prog):
     return ids
 
 
-def _build_page(plan, roadmap):
-    page = _convert({k: v for k, v in plan.items()})
+def parse_gates(text):
+    """'G0=0;G1=1,2' -> {'G0': [0], 'G1': [1, 2]}"""
+    try: return {g.strip(): [int(x) for x in ph.split(",")] for g, ph in (part.split("=") for part in text.split(";") if part.strip())}
+    except ValueError: raise ValueError(f"bad --gates {text!r}, expected 'G0=0;G1=1,2'")
+
+
+def _build_page(plan, roadmap, gates):
+    page = _convert({k: v for k, v in plan.items() if k != "gates"})
     for sec in page["sections"]:
         for p in sec.get("phases", []):
             p["n"] = int(re.sub(r"\D", "", p["anchor"])); p["steps"] = [s["id"] for s in p["steps"]]
     page["roadmap"] = roadmap
-    page["gates"] = [{"id": g, "phases": ph} for g, ph in GATE_PHASES.items()]
+    page["gates"] = [{"id": g, "phases": ph} for g, ph in gates.items()]
     return page
 
 
@@ -141,13 +145,15 @@ def _upsert(c, project, kind, base, prog_row, st_default="approved"):
     return "updated", row["id"]
 
 
-def import_plan(c, project, roadmap, plan_file, progress_file=None):
+def import_plan(c, project, roadmap, plan_file, progress_file=None, gates=None):
     """Upsert steps by step_key (never delete; missing ones become orphan), gates and the 'plan' page. Returns counts."""
     if not c.execute("SELECT 1 FROM project WHERE id=?", (project,)).fetchone(): raise KeyError(f"no project {project}")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", roadmap or ""): raise ValueError("bad roadmap id")
     plan = _load_file(plan_file); prog = _load_file(progress_file) if progress_file else {}
     ids = _check_inputs(plan, prog)
-    page = _build_page(plan, roadmap); counts = {"created": 0, "updated": 0, "same": 0, "orphan": 0, "gates": 0}
+    gates = plan.get("gates") or (parse_gates(gates) if gates else {})  # plan key wins over --gates
+    if not isinstance(gates, dict) or not all(isinstance(v, list) and all(isinstance(x, int) for x in v) for v in gates.values()): raise ValueError('plan: "gates" must be {"G0": [0], ...}')
+    page = _build_page(plan, roadmap, gates); counts = {"created": 0, "updated": 0, "same": 0, "orphan": 0, "gates": 0}
     try:
         keyid = {}
         for p in _phases(plan):
@@ -165,7 +171,7 @@ def import_plan(c, project, roadmap, plan_file, progress_file=None):
                 _w(c, project, row["id"], {"orphan": False}, {"orphan": True, "status": row["status"], "version": row["version"] + 1}); counts["orphan"] += 1
         route = {m.group(0): r for sec in page["sections"] for r in sec.get("route", []) if (m := re.match(r"G\d+", r.get("code", "")))}
         step_phase = {k: int(k.split(".")[0]) for k in keyid}
-        for g, phases in GATE_PHASES.items():
+        for g, phases in gates.items():
             deps = [keyid[k] for k in keyid if step_phase[k] in phases]
             pg = prog.get("gates", {}).get(g); approved = bool(pg and pg.get("approved"))
             if approved and any(c.execute("SELECT status FROM item WHERE id=?", (d,)).fetchone()[0] != "done" for d in deps):
@@ -174,6 +180,9 @@ def import_plan(c, project, roadmap, plan_file, progress_file=None):
             prow = {"status": "done", **{k: pg.get(k, "") for k in PROGRESS_KEYS if k != "note"}} if approved else None
             r, gid = _upsert(c, project, "gate", base, prow); counts["gates"] += r != "same"
             for d in deps: c.execute("INSERT OR IGNORE INTO item_dep VALUES(?,?)", (gid, d))
+        for row in c.execute("SELECT id,spec FROM item WHERE project=? AND kind='gate' AND status NOT IN ('done','rejected') AND json_extract(spec,'$.roadmap')=?", (project, roadmap)).fetchall():
+            if json.loads(row["spec"])["step_key"] not in gates:
+                service.transition(c, "main", row["id"], "rejected", note="gate removed from plan"); counts["gates"] += 1
         db.put_page(c, project, f"roadmap-{roadmap}", page["header"]["title"], "plan", page)
     except Exception: c.rollback(); raise
     return {"steps": len(ids), **counts}
@@ -183,6 +192,7 @@ def _load(c, project, roadmap):
     rows = c.execute("SELECT * FROM item WHERE project=? AND kind IN ('step','gate') AND json_extract(spec,'$.roadmap')=? ORDER BY id", (project, roadmap)).fetchall()
     steps, gates = [], []
     for r in rows:
+        if r["kind"] == "gate" and r["status"] == "rejected": continue  # removed from plan
         sp = json.loads(r["spec"])
         d = {"id": r["id"], "key": sp["step_key"], "title": r["title"], "body": r["body"], "status": r["status"], "owner": r["owner"], "claimed_at": r["claimed_at"],
              "version": r["version"], "blocked": sp.get("blocked"), "stale": bool(sp.get("stale")), "orphan": bool(sp.get("orphan")),

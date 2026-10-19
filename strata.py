@@ -18,7 +18,7 @@
   strata.py task context ID [--budget N] [--db]   ticket + rules + decisions + c4 + paths in one budgeted text
   strata.py item add --project P --kind task|issue|step|gate --title T [--body --priority --status --spec FILE|-] | set ID [--status --priority]
   strata.py item list [--project --kind --status --owner --ready] | show ID | edit ID [--title --body --spec FILE|- --priority] | ready [--project]
-  strata.py roadmap import PLAN.json [--progress PROGRESS.json] --project P --roadmap ID | check --project P --roadmap ID [--json]
+  strata.py roadmap import PLAN.json [--progress PROGRESS.json] [--gates "G0=0;G1=1,2"] --project P --roadmap ID | check --project P --roadmap ID [--json]
   strata.py roadmap gate pass GATE --project P --roadmap ID --as user [--evidence E] | reaccept STEP ... --as user   (steps use the item verbs)
   strata.py item claim ID --as NAME | submit ID --note N [--as NAME] | rework ID --note N | close ID --note N | approve ID [--note --as] | reject ID --note N | release ID | dep add|rm ID DEP   (all: --json)
 """
@@ -93,7 +93,7 @@ def cmd_roadmap(a):
     try:
         c = db.init(a.db)
         if a.action == "import":
-            r = roadmap.import_plan(c, a.project, a.roadmap, a.file, a.progress)
+            r = roadmap.import_plan(c, a.project, a.roadmap, a.file, a.progress, a.gates)
             print("imported {}/{}: {steps} steps ({created} new, {updated} updated, {same} unchanged, {orphan} orphan), {gates} gates changed".format(a.project, a.roadmap, **r))
         elif a.action == "check":
             r = roadmap.check(c, a.project, a.roadmap); print(json.dumps(r, ensure_ascii=False) if a.json else roadmap.check_text(r))
@@ -185,7 +185,7 @@ def main(argv=None):
                    "dep": [(["op"], {"choices": ["add", "rm"]}), idp, (["dep"], {"type": int}), js]})
     group("task", {"context": [(["id"], {"type": int}), (["--budget"], {"type": int, "default": 12000})]})
     rm = sub.add_parser("roadmap"); rs = rm.add_subparsers(dest="action", required=True)
-    for n, args in {"import": [(["file"], {}), (["--progress"], {})], "check": [(["--json"], {"action": "store_true"})],
+    for n, args in {"import": [(["file"], {}), (["--progress"], {}), (["--gates"], {})], "check": [(["--json"], {"action": "store_true"})],
                     "gate": [(["op"], {"choices": ["pass"]}), (["id"], {}), (["--evidence"], {})], "reaccept": [(["id"], {})]}.items():
         p = rs.add_parser(n); p.add_argument("--db"); p.add_argument("--project", required=True); p.add_argument("--roadmap", required=True)
         if n in ("gate", "reaccept"): p.add_argument("--as", dest="as_")

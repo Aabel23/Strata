@@ -6,6 +6,7 @@ ROOT = pathlib.Path(__file__).parent.parent
 sp = importlib.util.spec_from_file_location("cli", ROOT / "strata.py"); cli = importlib.util.module_from_spec(sp); sp.loader.exec_module(cli)
 SRC = pathlib.Path("/home/abel/project/internproj/project1_app/documentation/plan")
 PLAN, PROG = SRC / "plan.json", SRC / "progress" / "roadmap-progress.json"
+REAL_GATES = "G0=0;G1=1,2;G2=3,4;G3=5,6;G4=7"
 real = pytest.mark.skipif(not (PLAN.is_file() and PROG.is_file()), reason="project1_app plan not available")
 
 
@@ -28,7 +29,7 @@ def mini(tmp_path, proof="old proof", body="<b>bold</b> <code>x</code> <a href=\
                     "steps": [{"id": k, "title": f"T{k}", "body": body, "proof": proof} for k in steps if k.startswith(f"{n}.")]}
     plan = {"version": 1, "banner": "b", "header": {"eyebrow": "e", "title": "Mini", "lead": "l", "meta": []}, "summary": [], "progress": {"title": "t", "intro": "i", "guide": "g"},
             "sections": [{"id": "ban-do", "title": "2", "route": [{"href": "#p0", "code": "G0", "title": "Gate zero", "detail": "d"}, {"href": "#p1", "code": "G1", "title": "Gate one", "detail": "d"}]},
-                         {"id": "chi-tiet", "title": "3", "phases": [ph(0), ph(1)]}]}
+                         {"id": "chi-tiet", "title": "3", "phases": [ph(0), ph(1)]}], "gates": {"G0": [0], "G1": [1]}}
     f = tmp_path / "plan.json"; f.write_text(json.dumps(plan)); return f, plan
 
 
@@ -134,7 +135,7 @@ def test_uniqueness_index(tmp_path, dbp, capsys):
 def test_real_plan_matches_progress(tmp_path, dbp, capsys):
     plan, pj = json.loads(PLAN.read_text()), json.loads(PROG.read_text())
     keys = [s["id"] for ph in next(s for s in plan["sections"] if s["id"] == "chi-tiet")["phases"] for s in ph["steps"]]
-    assert rm(capsys, dbp, "import", PLAN, "--progress", PROG)[0] == 0
+    assert rm(capsys, dbp, "import", PLAN, "--progress", PROG, "--gates", REAL_GATES)[0] == 0
     c = db.connect(dbp)
     items = {json.loads(r["spec"])["step_key"]: r for r in c.execute("SELECT * FROM item WHERE kind='step'")}
     assert sorted(items) == sorted(keys) and set(pj["steps"]) <= set(keys)
@@ -148,13 +149,13 @@ def test_real_plan_matches_progress(tmp_path, dbp, capsys):
     # a source link became markdown
     assert "](" in items["0.1"]["body"] and "<a" not in items["0.1"]["body"]
     # gates: G0 approved in progress.json
-    assert {g: item(c, g, "gate")["status"] for g in roadmap.GATE_PHASES} == {"G0": "done", "G1": "approved", "G2": "approved", "G3": "approved", "G4": "approved"}
+    assert {g: item(c, g, "gate")["status"] for g in ("G0", "G1", "G2", "G3", "G4")} == {"G0": "done", "G1": "approved", "G2": "approved", "G3": "approved", "G4": "approved"}
     pg = db.get_page(c, "p", "roadmap-r")
     assert pg["kind"] == "plan" and pg["blocks"]["gates"][1] == {"id": "G1", "phases": [1, 2]} and [s["id"] for s in pg["blocks"]["sections"]] == ["hien-trang", "ban-do", "chi-tiet", "song-song", "can-ban", "nguon"]
     assert all(isinstance(s, str) for ph in pg["blocks"]["sections"][2]["phases"] for s in ph["steps"]) and "<" not in pg["blocks"]["sections"][0]["facts"][0]["body"]
     # re-import: nothing changes
     n, v = c.execute("SELECT count(*) FROM audit").fetchone()[0], c.execute("SELECT sum(version) FROM item").fetchone()[0]
-    assert "65 unchanged" in rm(capsys, dbp, "import", PLAN, "--progress", PROG)[1]
+    assert "65 unchanged" in rm(capsys, dbp, "import", PLAN, "--progress", PROG, "--gates", REAL_GATES)[1]
     assert c.execute("SELECT sum(version) FROM item").fetchone()[0] == v and c.execute("SELECT count(*) FROM audit").fetchone()[0] == n + 1
     # the step imported in review can be approved by someone else with the normal verb
     rid = items["1.1"]["id"]
@@ -163,7 +164,7 @@ def test_real_plan_matches_progress(tmp_path, dbp, capsys):
 
 @real
 def test_real_check_and_api(tmp_path, dbp, capsys):
-    rm(capsys, dbp, "import", PLAN, "--progress", PROG)
+    rm(capsys, dbp, "import", PLAN, "--progress", PROG, "--gates", REAL_GATES)
     rc, out = rm(capsys, dbp, "check")
     assert rc == 0 and "r: 4/65 steps done" in out and "phase 0: 4/4" in out and "phase 4: 0/18" in out and "gate G0 (phases 0): 4/4 [passed]" in out and "gate G2 (phases 3,4): 0/26 [open]" in out
     j = json.loads(rm(capsys, dbp, "check", "--json")[1])
@@ -188,3 +189,28 @@ def test_real_check_and_api(tmp_path, dbp, capsys):
         req = urllib.request.Request(f"http://127.0.0.1:{port}/api/roadmap?project=p", method="POST")
         with pytest.raises(urllib.error.HTTPError): urllib.request.urlopen(req)
     finally: srv.shutdown()
+
+
+def test_gates_sources_and_removal(tmp_path, dbp, capsys):
+    f, plan = mini(tmp_path); rm(capsys, dbp, "import", f); c = db.connect(dbp)  # plan key
+    assert item(c, "G0", "gate") and item(c, "G1", "gate")["spec"]["phases"] == [1]
+    del plan["gates"]; put(f, plan)  # no key, no flag: G0/G1 no longer declared -> rejected, none created
+    rm(capsys, dbp, "import", f)
+    assert {k: item(c, k, "gate")["status"] for k in ("G0", "G1")} == {"G0": "rejected", "G1": "rejected"}
+    assert db.get_page(c, "p", "roadmap-r")["blocks"]["gates"] == []
+    assert roadmap.check(c, "p", "r")["gates"] == []
+    rm(capsys, dbp, "import", f, "--gates", "G2=0,1"); assert item(c, "G2", "gate")["spec"]["phases"] == [0, 1]  # flag
+    plan["gates"] = {"G2": [0]}; put(f, plan); rm(capsys, dbp, "import", f, "--gates", "G2=1")  # plan key wins
+    assert item(c, "G2", "gate")["spec"]["phases"] == [0]
+
+
+def test_no_gates_and_done_gate_kept(tmp_path, dbp, capsys):
+    f, plan = mini(tmp_path); g = plan.pop("gates"); put(f, plan); rm(capsys, dbp, "import", f)
+    assert not c_gates(dbp) and rm(capsys, dbp, "import", f, "--gates", "bad")[0] == 1
+    plan["gates"] = g; put(f, plan); rm(capsys, dbp, "import", f, "--progress", prog(tmp_path, **{"0.1": "done", "0.2": "done"}))
+    c = db.connect(dbp); c.execute("UPDATE item SET status='done' WHERE kind='gate' AND json_extract(spec,'$.step_key')='G0'"); c.commit()
+    del plan["gates"]; put(f, plan); rm(capsys, dbp, "import", f)
+    assert item(c, "G0", "gate")["status"] == "done" and item(c, "G1", "gate")["status"] == "rejected"
+
+
+def c_gates(dbp): return db.connect(dbp).execute("SELECT 1 FROM item WHERE kind='gate'").fetchall()
