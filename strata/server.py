@@ -11,7 +11,8 @@ def servable(root, segs):
     try:
         root = pathlib.Path(root).resolve(); f = (root / "/".join(segs)).resolve()
     except (ValueError, OSError): return None
-    return f if f.is_relative_to(root) and f.suffix.lower() in SERVE_EXT and f.is_file() else None
+    if not f.is_relative_to(root) or any(x.startswith(".") for x in f.relative_to(root).parts): return None  # symlink into a dot-dir
+    return f if f.suffix.lower() in SERVE_EXT and f.is_file() else None
 
 VIEWER = pathlib.Path(__file__).resolve().parent.parent / "viewer"
 STATIC = {"/": "app.html", "/app.js": "app.js", "/app.css": "app.css", "/c4": "index.html", "/index.html": "index.html", "/page.js": "page.js", "/swimlane.js": "swimlane.js", "/roadmap.js": "roadmap.js", "/page.css": "page.css"}

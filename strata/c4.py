@@ -34,7 +34,7 @@ def load(path):
 def ancestors(byid, id):
     """(parent ids above `id`, bad): bad is the id where the chain hits a cycle or a missing id, else None."""
     seen, out, p = {id}, [], (byid.get(id) or {}).get("parent")
-    while p is not None:
+    while p is not None and isinstance(p, str):
         if p in seen or p not in byid: return out, p
         seen.add(p); out.append(p); p = byid[p].get("parent")
     return out, None
@@ -67,6 +67,8 @@ def check(m, root):
     for o in objs.values():
         t, p = o.get("type"), o.get("parent")
         if not o.get("name"): errs.append(f"{o.get('id')}: thiếu name")
+        if p is not None and not isinstance(p, str):
+            errs.append(f"{o.get('id')}: parent phải là chuỗi"); continue
         bad = ancestors(objs, o.get("id"))[1]
         if bad in objs: errs.append(f"{o.get('id')}: chuỗi parent bị vòng tại '{bad}'")
         if t not in TYPES: errs.append(f"{o['id']}: type '{t}' không hợp lệ")
@@ -115,7 +117,7 @@ def check(m, root):
             if ends and prev and not _related(objs, prev[1], ends[0]):
                 warns.append(f"{where}: đứt mạch, bắt đầu ở '{ends[0]}' nhưng bước trước kết thúc ở '{prev[1]}'")
             prev = ends or prev
-    parents = {o.get("parent") for o in objs.values()}
+    parents = {o.get("parent") for o in objs.values() if isinstance(o.get("parent"), (str, type(None)))}
     for oid in objs:
         if oid not in used and oid not in parents: warns.append(f"{oid}: không có kết nối nào")
     return errs, warns, len(objs), len(conns)

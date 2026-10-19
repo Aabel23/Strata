@@ -107,7 +107,15 @@ def test_parent_cycle_and_dangling(dbp):
     c4.import_yaml(c, _write(dbp.parent / "ok.yaml", M()), "p")
     c.execute("UPDATE c4_object SET parent='b' WHERE id='a' AND project='p'")
     c.execute("UPDATE c4_object SET parent='a' WHERE id='b' AND project='p'"); c.commit()
-    assert "# a" in c4.context_text(c, "p", "a")
+    import concurrent.futures as cf
+    ex = cf.ThreadPoolExecutor(1)  # a hang must fail, not block pytest
+    try: assert "# a" in ex.submit(lambda: c4.context_text(db.init(dbp), "p", "a")).result(timeout=5)
+    finally: ex.shutdown(wait=False)
+
+
+def test_parent_not_string():
+    m = M(); m["objects"][0]["parent"] = ["x"]; m["objects"][1]["parent"] = {"k": 1}
+    assert sum("parent phải là chuỗi" in e for e in c4.check(m, ROOT)[0]) == 2
 
 
 def _write(p, m):

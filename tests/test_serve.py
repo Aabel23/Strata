@@ -129,6 +129,12 @@ def test_servable_allowlist(srv, tmp_path):
     assert server.servable(code, ["sub", "n.md"]) and not server.servable(code, ["sub", ""]) and not server.servable(code, [])
 
 
+def test_servable_symlink_into_dot_dir(tmp_path):
+    (tmp_path / ".secret").mkdir(); (tmp_path / ".secret" / "k.json").write_text("{}")
+    (tmp_path / "link.json").symlink_to(tmp_path / ".secret" / "k.json")
+    assert server.servable(tmp_path, ["link.json"]) is None
+
+
 def test_decision_insert_or_replace_blocked(tmp_path):
     c = db.init(tmp_path / "d.db")
     ins = "INSERT OR REPLACE INTO decision(id,project,title,status,rejected_options) VALUES(?, 'p','t','proposed','[1]')"
