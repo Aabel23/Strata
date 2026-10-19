@@ -214,3 +214,16 @@ def test_no_gates_and_done_gate_kept(tmp_path, dbp, capsys):
 
 
 def c_gates(dbp): return db.connect(dbp).execute("SELECT 1 FROM item WHERE kind='gate'").fetchall()
+
+
+def test_minimal_plan_imports_and_serves(tmp_path, dbp, capsys):
+    """Optional plan fields (meta, summary, progress, gate label, titles) may all be absent; the viewer defaults them."""
+    f = tmp_path / "plan.json"
+    f.write_text(json.dumps({"version": 1, "header": {"title": "Min"}, "sections": [{"id": "chi-tiet", "phases": [{"anchor": "p0", "title": "P0", "steps": [{"id": "0.1", "title": "S"}]}]}]}))
+    assert rm(capsys, dbp, "import", f)[0] == 0
+    srv = server.make_server(dbp, "p", 0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        d = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{srv.server_address[1]}/api/roadmap?project=p&roadmap=r").read())
+        assert [s["key"] for s in d["steps"]] == ["0.1"] and d["gates"] == [] and "summary" not in d["plan"]
+    finally: srv.shutdown()

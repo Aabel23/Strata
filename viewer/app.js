@@ -529,26 +529,27 @@ function ltStep(s,p){
   li.append(body);return li;
 }
 function ltPhase(ph,d,p,lastGate){
-  const keys=ph.steps.filter(k=>d.steps.some(s=>s.key===k)), extra=d.steps.filter(s=>s.phase===ph.n&&!ph.steps.includes(s.key));
+  const keys=(ph.steps||[]).filter(k=>d.steps.some(s=>s.key===k)), extra=d.steps.filter(s=>s.phase===ph.n&&!(ph.steps||[]).includes(s.key));
   const ss=[...keys.map(k=>d.steps.find(s=>s.key===k)),...extra], live=ss.filter(s=>!s.orphan), n=live.filter(s=>s.status==="done"&&!s.stale).length;
-  const a=el("article","lt-phase");a.id="lt-"+ph.anchor;
-  const h=el("div","lt-phead"), t=el("div");t.append(el("h3","",ph.title),ltMd("p","lt-intro",ph.intro),el("span","lt-mark",ph.mark));
+  const a=el("article","lt-phase");a.id="lt-"+(ph.anchor||ph.n);
+  const h=el("div","lt-phead"), t=el("div");t.append(el("h3","",ph.title));if(ph.intro)t.append(ltMd("p","lt-intro",ph.intro));if(ph.mark)t.append(el("span","lt-mark",ph.mark));
   const ring=el("div","lt-ring");ring.style.setProperty("--pct",ltPct(n,live.length)+"%");ring.title=n+"/"+live.length+" bước đạt";ring.append(el("span","",n+"/"+live.length));
   h.append(t,ring);a.append(h);
   const ol=el("ol","lt-steps");ss.forEach(s=>ol.append(ltStep(s,p)));a.append(ol);
-  const g=el("div","lt-gate"+(lastGate&&lastGate.status==="done"?" passed":""));
-  g.append(el("b","",ph.gate.label),ltMd("span","",ph.gate.body));
-  if(lastGate)g.append(ltGateTag(lastGate));
-  a.append(g);return a;
+  if(ph.gate||lastGate){const g=el("div","lt-gate"+(lastGate&&lastGate.status==="done"?" passed":""));
+    if(ph.gate)g.append(el("b","",ph.gate.label),ltMd("span","",ph.gate.body));
+    if(lastGate)g.append(ltGateTag(lastGate));
+    a.append(g)}
+  return a;
 }
 function ltGateTag(g){
   const x=el("span","lt-gtag"+(g.status==="done"?" passed":g.ready?" ready":""));
   x.textContent=g.key+" · "+(g.status==="done"?"đã qua":g.ready?"đủ bước, chờ user duyệt":g.done+"/"+g.total+" bước");return x;
 }
 function ltSection(sec,d,p,root){
-  const s=el("section","lt-sec");s.id="lt-"+sec.id;s.append(el("h2","",sec.title));
+  const s=el("section","lt-sec");s.id="lt-"+sec.id;if(sec.title)s.append(el("h2","",sec.title));
   if(sec.intro)s.append(ltMd("p","lt-intro",sec.intro));
-  const gate=Object.fromEntries(d.gates.map(g=>[g.key,g]));
+  const gate=Object.fromEntries((d.gates||[]).map(g=>[g.key,g]));
   if(sec.facts){const g=el("div","lt-facts");sec.facts.forEach(f=>{const a=el("article","lt-fact");a.append(el("span","lt-flag f-"+(LT_FLAG[f.flagClass]||"todo"),f.flag),el("h3","",f.title),ltMd("p","",f.body));g.append(a)});s.append(g)}
   if(sec.route){const g=el("div","lt-route");sec.route.forEach(r=>{
       const id=(/^G\d+/.exec(r.code)||[""])[0], gt=gate[id], b=el("button","lt-gate-card"+(gt&&gt.status==="done"?" passed":gt&&gt.ready?" ready":""));
@@ -559,7 +560,7 @@ function ltSection(sec,d,p,root){
     sec.table.rows.forEach(r=>{const tr=el("tr");r.forEach(x=>tr.append(el("td","",x)));const pp=d.progress.phases.find(x=>String(x.phase)===r[0]);tr.append(el("td","",pp?pp.done+"/"+pp.total:"-"));tb.append(tr)});
     t.append(tb);w.append(t);s.append(w)}
   if(sec.callout)s.append(ltMd("div","lt-callout",sec.callout));
-  if(sec.phases){const last={};d.gates.forEach(g=>last[Math.max(...g.phases)]=g);sec.phases.forEach(ph=>s.append(ltPhase(ph,d,p,last[ph.n])))}
+  if(sec.phases){const last={};(d.gates||[]).forEach(g=>{if((g.phases||[]).length)last[Math.max(...g.phases)]=g});sec.phases.forEach(ph=>s.append(ltPhase(ph,d,p,last[ph.n])))}
   if(sec.workstreams){const g=el("div","lt-ws");sec.workstreams.forEach(w=>{const a=el("article","lt-card");a.append(el("h3","",w.title));const ul=el("ul");w.items.forEach(i=>ul.append(ltMd("li","",i)));a.append(ul);g.append(a)});s.append(g)}
   if(sec.decisions){const g=el("div","lt-dec");sec.decisions.forEach(x=>{const a=el("article");a.append(el("b","",x.label),ltMd("p","",x.body));g.append(a)});s.append(g)}
   if(sec.sources){const ol=el("ol","lt-src");sec.sources.forEach(x=>ol.append(ltMd("li","",x)));s.append(ol)}
@@ -567,21 +568,24 @@ function ltSection(sec,d,p,root){
 }
 function roadmapDoc(d,p){
   const pl=d.plan, root=el("div","lt"), c={};d.steps.forEach(s=>{if(!s.orphan)c[s.state]=(c[s.state]||0)+(s.state==="done"&&s.stale?0:1)});
-  const hd=el("header","lt-head");hd.append(el("div","eyebrow",pl.header.eyebrow),el("h1","foil",pl.header.title),ltMd("p","lt-lead",pl.header.lead));
-  const meta=el("div","lt-meta");pl.header.meta.forEach(m=>{const s=el("span");s.append(el("b","",m.label+" "),m.value);meta.append(s)});hd.append(meta);
+  const H=pl.header||{}, hd=el("header","lt-head");
+  if(H.eyebrow)hd.append(el("div","eyebrow",H.eyebrow));
+  hd.append(el("h1","foil",H.title||d.title));if(H.lead)hd.append(ltMd("p","lt-lead",H.lead));
+  if((H.meta||[]).length){const meta=el("div","lt-meta");H.meta.forEach(m=>{const s=el("span");s.append(el("b","",m.label+" "),m.value);meta.append(s)});hd.append(meta)}
   root.append(hd);
   if(pl.banner)root.append(el("p","lt-banner",pl.banner));
-  const top=el("div","lt-top");pl.summary.forEach(x=>{const a=el("article","lt-card");a.append(el("b","",x.label),ltMd("p","",x.body));top.append(a)});root.append(top);
+  if((pl.summary||[]).length){const top=el("div","lt-top");pl.summary.forEach(x=>{const a=el("article","lt-card");a.append(el("b","",x.label),ltMd("p","",x.body));top.append(a)});root.append(top)}
+  const PG=pl.progress||{};
   const pr=el("section","lt-prog"), ph=el("div","lt-ptop"), tx=el("div"), done=d.progress.done, tot=d.progress.total;
-  tx.append(el("h2","",pl.progress.title),ltMd("p","lt-intro",pl.progress.intro));
+  tx.append(el("h2","",PG.title||"Tiến độ"));if(PG.intro)tx.append(ltMd("p","lt-intro",PG.intro));
   const cnt=el("div","lt-count",done+"/"+tot);cnt.append(el("small","","bước đạt"));ph.append(tx,cnt);
   const bar=el("div","bar lt-bar"), b1=el("i","b-done"), b2=el("i","b-doing");b1.style.width=ltPct(done,tot)+"%";b2.style.width=ltPct((c.doing||0)+(c.review||0),tot)+"%";bar.append(b1,b2);
   const st=el("div","lt-stats");["done","review","doing","approved","blocked"].forEach(k=>{if(c[k]){const x=ltStatus({state:k});x.append(" "+c[k]);st.append(x)}});
   const nst=d.steps.filter(s=>s.stale).length, nor=d.steps.filter(s=>s.orphan).length;
   if(nst)st.append(tag(nst+" cần duyệt lại","stale"));if(nor)st.append(tag(nor+" ngoài kế hoạch","block"));
-  pr.append(ph,bar,st,ltMd("p","lt-guide",pl.progress.guide));root.append(pr);
+  pr.append(ph,bar,st);if(PG.guide)pr.append(ltMd("p","lt-guide",PG.guide));root.append(pr);
   const nav=el("nav","lt-nav");nav.setAttribute("aria-label","Các phần của lộ trình");
-  pl.sections.forEach(s=>{const b=el("button","",s.title);b.onclick=()=>ltGo(root,s.id);nav.append(b)});root.append(nav);
+  pl.sections.forEach(s=>{const b=el("button","",s.title||s.id);b.onclick=()=>ltGo(root,s.id);nav.append(b)});root.append(nav);
   pl.sections.forEach(s=>root.append(ltSection(s,d,p,root)));
   return root;
 }
