@@ -49,7 +49,6 @@ Strata (`/home/abel/project/tools/strata`, DB `/home/abel/project/tools/strata/s
 - **Sơ đồ (bước 2):** C4 YAML + flow theo `docs/AGENT_C4.md`, `validate` sạch rồi `import-yaml`. Không vẽ sơ đồ rời.
 - **Research (bước 3):** doc YAML trong `<docs_dir>/research/` (mục Docs của viewer), chỉ chat chính ghi, theo skill `research-stage`. Mọi tài liệu user yêu cầu mặc định ghi vào Strata Docs, không vào vault hay Claude Docs.
 - **Tài liệu đã chốt (sau bước 3):** YAML chỉ nội dung theo `docs/architect/doc-format.yaml`, đặt trong `docs_dir` của project (`architect/`, `plan/`, `review/`). Không viết HTML/CSS/JS cho tài liệu.
-- **Quyết định:** user chốt xong thì `decision add` (kèm phương án đã loại). Note research chỉ giữ câu hỏi và phương án.
 - **Task (bước 4) / lỗi (bước 6):** `item add --kind task|issue`, gắn object C4 bằng `c4 link` khi có object tương ứng. Coder tự nhận/nộp qua MCP/CLI (`item claim`/`item submit`); chỉ chat chính đặt `done`.
 - **Ngoại lệ:** `project1_app` giữ `documentation/plan/plan.json` tới hết luồng đang chạy; luồng mới mới dùng Strata.
 - RAM.md và OPEN.md vẫn ở vault tới khi Strata thay được. Coder/reviewer nhận gói `task context` (khi có) thay vì đọc vault.

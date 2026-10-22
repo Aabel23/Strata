@@ -82,7 +82,7 @@ Agent đồng thuận với nhau không thay cho user chốt.
 
 Mặc định (user chốt 22/10/2026): research ghi thành doc YAML trong `<docs_dir>/research/` của project, hiện ở mục **Docs** của viewer Strata. Không ghi vào vault, không dùng Claude Docs. Chỉ chat chính ghi.
 
-1. **Đối chiếu quyết định đã chốt** (RAM.md, chat, C4, `decision` của project) để doc không đi ngược. Doc phải **tự đứng được**: không nhắc nhãn nội bộ ("phương án 3", "agent research"). Giải thích bằng lý do kỹ thuật và chuẩn công khai; dẫn đường dẫn code được.
+1. **Đối chiếu quyết định đã chốt** (RAM.md, chat, C4) để doc không đi ngược. Doc phải **tự đứng được**: không nhắc nhãn nội bộ ("phương án 3", "agent research"). Giải thích bằng lý do kỹ thuật và chuẩn công khai; dẫn đường dẫn code được.
 2. **Trước khi tạo, tra trùng:** `ls <docs_dir>/research/` và `strata.py search "<chủ đề>" --project P --src doc`. Đã có doc cùng chủ đề thì sửa doc đó, không tạo bản mới.
 3. **Tên:** `<docs_dir>/research/<chu-de>.yaml`; `<chu-de>` tiếng Anh, chữ thường, nối `-`, danh từ cụ thể, không ngày tháng (vd `token-refresh-flow`).
 4. **Định dạng:** theo `/home/abel/project/tools/strata/docs/architect/doc-format.yaml`: `title`, `summary` (1 câu, chứa từ khóa tra cứu), `code: [...]`, `blocks` (`md`, `table`, `question`, `diagram`, `mermaid`...). Câu hỏi cần quyết dùng block `question` (`options`, `recommend`).
@@ -93,7 +93,7 @@ Mặc định (user chốt 22/10/2026): research ghi thành doc YAML trong `<doc
    - Tính năng có thể mổ xẻ (3b), câu hỏi cần quyết (block `question`), lỗi phát hiện (file:dòng, "chưa sửa, chờ user"), để sau MVP, nguồn.
 6. **Kiểm và đăng ký:** `strata.py doc validate FILE` (0 lỗi) → `strata.py doc scan --project P` → `strata.py doc set --project P research/<chu-de>.yaml --status draft`.
 
-Khi user chốt chủ đề: `decision add` cho từng câu đã chốt, viết doc chính thức trong `<docs_dir>/architect/`, đặt doc research `--status outdated` (hoặc giữ `current` nếu còn dùng).
+Khi user chốt chủ đề: viết doc chính thức trong `<docs_dir>/architect/`, đặt doc research `--status outdated` (hoặc giữ `current` nếu còn dùng).
 
 ## 6. Bàn giao
 

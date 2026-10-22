@@ -1,6 +1,6 @@
 ---
 name: strata
-description: Sổ tay dùng app Strata (SQLite + CLI strata.py + viewer http://127.0.0.1:8740) để ghi/đọc task, issue, decision, doc, sơ đồ C4 và flow của bất kỳ project nào. Dùng khi user nhắc "strata", "ghi task", "tạo issue", "đổi trạng thái task", "vẽ C4", "sửa map", "flow", "viết doc", "project add", "viewer 8740", "strata.db"; hoặc khi đi qua bước 2 (sơ đồ), 3 (research/doc), 4 (duyệt → task), 6 (lỗi → issue) của luồng làm việc.
+description: Sổ tay dùng app Strata (SQLite + CLI strata.py + viewer http://127.0.0.1:8740) để ghi/đọc task, issue, doc, sơ đồ C4 và flow của bất kỳ project nào. Dùng khi user nhắc "strata", "ghi task", "tạo issue", "đổi trạng thái task", "vẽ C4", "sửa map", "flow", "viết doc", "project add", "viewer 8740", "strata.db"; hoặc khi đi qua bước 2 (sơ đồ), 3 (research/doc), 4 (duyệt → task), 6 (lỗi → issue) của luồng làm việc.
 ---
 
 # Strata
@@ -30,7 +30,6 @@ Hiện có: `internproj`; `project1_app` (cha internproj, root `/home/abel/proje
 |---|---|
 | Danh sách project | `curl -s localhost:8740/api/projects` (Host phải là `127.0.0.1:8740` hoặc `localhost:8740`) |
 | Task/issue | `curl -s 'localhost:8740/api/items?project=P'` (lọc thêm `&kind=task\|issue`, `&status=...`, `&id=N`) |
-| Decision | `curl -s 'localhost:8740/api/decisions?project=P'` |
 | Doc | `curl -s 'localhost:8740/api/docs?project=P'`; một doc: `/api/doc?project=P&path=research/x.yaml` (kèm `errors`) |
 | Tìm kiếm | `curl -s 'localhost:8740/api/search?q=từ+khoá&project=P'` |
 | Thêm task/issue | `$S item add --project P --kind task --title "..." [--body "..." --priority high --status approved]` → in `ok: item N` |
@@ -42,13 +41,12 @@ Hiện có: `internproj`; `project1_app` (cha internproj, root `/home/abel/proje
 | Item rework/close | main: `$S item rework N --note "..."` (review → doing, trả coder); `$S item close N --note "..."` (open → done, vd issue). `approve` chỉ từ proposed/review, trạng thái khác báo ERROR |
 | Item release | `$S item release N` (doing → approved, bỏ claim) |
 | Item dep | `$S item dep add\|rm N DEP` (N phụ thuộc DEP) |
-| Thêm decision | `$S decision add --project P --title T --context C --decision D --consequences Q --rejected R [--supersedes N]`; đổi trạng thái: `$S decision set N --status S` |
-| Tìm kiếm (CLI) | `$S search Q [--project P --src item\|decision\|page\|doc --limit N]` |
+| Tìm kiếm (CLI) | `$S search Q [--project P --src item\|page\|doc --limit N]` |
 | MCP server | `$S mcp --role main\|coder\|reviewer` (stdio) |
 | Gắn item vào object C4 | `$S c4 link --project P --object OBJ --item N` (gỡ: `unlink`; xem: `c4 links --project P --object OBJ`) |
 | Roadmap import | `$S roadmap import PLAN.json [--progress P.json] [--gates "G0=0;G1=1,2"] --project P --roadmap ID` (gates: khoá `"gates"` trong plan, không có thì `--gates`, không có nữa thì 0 gate; gate bỏ khỏi plan mà chưa done → rejected) |
 | Roadmap check/gate/reaccept | `$S roadmap check --project P --roadmap ID [--json]`; user: `$S roadmap gate pass G0 --project P --roadmap ID --as user [--evidence E]`; `$S roadmap reaccept STEP --project P --roadmap ID --as user` |
-| Gói ngữ cảnh task | `$S task context ID [--budget 12000]` (ticket, luật cứng, decision, c4, đường dẫn; quá ngân sách thì cắt, cảnh báo stderr) |
+| Gói ngữ cảnh task | `$S task context ID [--budget 12000]` (ticket, luật cứng, c4, đường dẫn; quá ngân sách thì cắt, cảnh báo stderr) |
 | Đọc map | `$S c4 context --project P [--object OBJ] [--max-tokens 2000]` |
 | Đọc flow | `$S c4 flow --project P` (liệt kê) / `$S c4 flow --project P --id FLOW` |
 | Sửa map | sửa thư mục `docs/c4` → `$S c4 validate docs/c4` (0 lỗi) → `$S c4 import docs/c4 --project P`. Chi tiết: `docs/AGENT_C4.md` |
@@ -83,7 +81,7 @@ Kiểm lỗi: mở viewer (trang hiện khung lỗi) hoặc `curl -s 'localhost:
 
 ## Luồng 6 bước → Strata
 - **B2 sơ đồ**: viết/sửa thư mục C4 (map, contracts, flows) → `c4 validate` → `c4 import`.
-- **B3 research**: mỗi research-stage là một doc YAML trong `<docs_dir>/research/` (chat chính ghi, theo skill `research-stage`); user chốt xong thì `decision add`.
+- **B3 research**: mỗi research-stage là một doc YAML trong `<docs_dir>/research/` (chat chính ghi, theo skill `research-stage`).
 - **B4 user duyệt**: `item add --kind task --status approved` + `c4 link` vào object liên quan.
 - **B5 làm**: coder `item claim N --as coder` → `item submit N --as coder --note "..."`; main `item approve N`.
 - **B6 lỗi**: `item add --kind issue` (+ `c4 link`).
