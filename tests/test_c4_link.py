@@ -11,8 +11,6 @@ def dbp(tmp_path):
     assert run(p, "c4", "import", str(FIX), "--project", "p")[0] == 0
     run(p, "item", "add", "--project", "p", "--kind", "issue", "--title", "Lỗi relay")   # item 1
     run(p, "item", "add", "--project", "p", "--kind", "task", "--title", "Làm mail")      # item 2
-    c = db.connect(p)
-    c.execute("INSERT INTO decision(project,title,status,rejected_options,created_at) VALUES('p','Dùng HPKE','accepted','[\"x\"]','t')"); c.commit()
     return p
 
 

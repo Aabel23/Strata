@@ -213,7 +213,7 @@ _PK = {"object": "id", "connection": "id", "contract": "id", "behavior": "module
 
 
 def diff_model(c, m, project):
-    """What importing model `m` would change: {table: {added, changed, removed: [ids]}} (table 'link' = connection) + 'dropped_links' (task/decision links of vanished objects)."""
+    """What importing model `m` would change: {table: {added, changed, removed: [ids]}} (table 'link' = connection) + 'dropped_links' (task links of vanished objects)."""
     new, out = _rows(m, project), {}
     for t, pk in _PK.items():
         old = {r[pk]: dict(r) for r in c.execute(f"SELECT * FROM c4_{t} WHERE project=?", (project,))}
@@ -222,7 +222,7 @@ def diff_model(c, m, project):
             "changed": [k for k, r in new[t].items() if k in old and any(old[k].get(f) != v for f, v in r.items())]}
     gone = [r for r in c.execute("SELECT object_id,ref_kind,ref_id FROM c4_link WHERE project=?", (project,)) if r["object_id"] not in new["object"]]
     out["dropped_links"] = [{"object": r["object_id"], "kind": r["ref_kind"], "id": r["ref_id"],
-                             "title": (c.execute(f"SELECT title FROM {r['ref_kind']} WHERE id=?", (r["ref_id"],)).fetchone() or [None])[0]} for r in gone]
+                             "title": (c.execute("SELECT title FROM item WHERE id=?", (r["ref_id"],)).fetchone() or [None])[0]} for r in gone]
     return out
 
 
@@ -236,12 +236,12 @@ def diff_text(df):
         if t == "dropped_links": continue
         lines.append(f"{t}: +{len(v['added'])} ~{len(v['changed'])} -{len(v['removed'])}")
         lines += [f"  {s} {i}" for s, k in (("+", "added"), ("~", "changed"), ("-", "removed")) for i in v[k]]
-    if df["dropped_links"]: lines.append("dropped task/decision links:\n" + _dropped_text(df))
+    if df["dropped_links"]: lines.append("dropped task links:\n" + _dropped_text(df))
     return "\n".join(lines)
 
 
 def import_dir(c, d, project, force=False, dry_run=False, yes=False):
-    """Audited upsert of a layered folder into `project`; rows absent from the folder are deleted, and task/decision links to objects that no longer exist. Atomic.
+    """Audited upsert of a layered folder into `project`; rows absent from the folder are deleted, and task links to objects that no longer exist. Atomic.
     Returns the new counts, or the diff when dry_run. Refuses (ValueError) when links would be dropped and not `yes`."""
     m, errs = load(d)
     if m is not None: errs += check(m, d)[0]
@@ -250,7 +250,7 @@ def import_dir(c, d, project, force=False, dry_run=False, yes=False):
     df = diff_model(c, m, project)
     if dry_run: return df
     if df["dropped_links"] and not yes:
-        raise ValueError("import sẽ mất link task/decision, không ghi gì (--yes để chấp nhận):\n" + _dropped_text(df))
+        raise ValueError("import sẽ mất link task, không ghi gì (--yes để chấp nhận):\n" + _dropped_text(df))
     pr, new = m["project"], _rows(m, project)
     with c:
         before = _counts(c, project)
@@ -394,7 +394,7 @@ def context_text(c, project, object=None, max_tokens=2000):
             r = m["contracts"].get(x["detail"]) if x["detail"] else None
             if r: out += [f"    {r['transport'] or '-'}", f"    {_ends(r)}"]
         lk = db.links_for(c, project, object)
-        rel = [f"- {i['kind']} #{i['id']} [{i['status']}] {i['title']}" for i in lk["items"]] + [f"- decision #{d['id']} [{d['status']}] {d['title']}" for d in lk["decisions"]]
+        rel = [f"- {i['kind']} #{i['id']} [{i['status']}] {i['title']}" for i in lk["items"]]
         if rel: out += ["Liên quan:"] + rel
         def touches(s):
             x = m["links"].get(s.get("link"))
