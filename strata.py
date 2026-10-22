@@ -8,7 +8,7 @@
   strata.py doc validate FILE                     check a doc YAML (no DB)
   strata.py doc scan --project P | set --project P PATH [--feature --status --ord]
   strata.py c4 link|unlink|links --project P --object X --item ID   (links: list only)
-  strata.py c4 import DIR --project P [--force] [--dry-run] [--yes] | diff DIR --project P [--json] | export DIR --project P | validate DIR   layered folder (map.yaml + contracts/ behavior/ flows/)
+  strata.py c4 import DIR --project P [--force] [--dry-run] [--yes] | diff DIR --project P [--json] | export DIR --project P | validate DIR [--json] [--strict]   layered folder (map.yaml + contracts/ behavior/ flows/)
   strata.py c4 context --project P [--object X] [--max-tokens N]
   strata.py c4 flow --project P [--id F]          numbered step trace (no --id: list flows)
   strata.py c4 contract ID --project P            one contract of a layered project
@@ -165,7 +165,7 @@ def cmd_write(a):
             print(f"imported {a.project}: " + ", ".join(f"{v} {k}" for k, v in n.items()))
         elif a.cmd == "c4" and a.action == "diff":
             m, errs = c4_layered.load(a.dir)
-            if m is None: raise ValueError(errs[0])
+            if m is None: raise ValueError(c4_layered.fmt(errs[0]))
             df = c4_layered.diff_model(c, m, a.project)
             print(json.dumps(df, ensure_ascii=False, indent=1) if a.json else c4_layered.diff_text(df))
         elif a.cmd == "c4" and a.action == "export":
@@ -246,14 +246,14 @@ def main(argv=None):
                     "import": [(["dir"], {}), (["--project"], req), (["--force"], {"action": "store_true"}),
                                (["--dry-run"], {"action": "store_true"}), (["--yes"], {"action": "store_true"})],
                     "diff": [(["dir"], {}), (["--project"], req), (["--json"], {"action": "store_true"})],
-                    "export": [(["dir"], {}), (["--project"], req)], "validate": [(["dir"], {}), (["--project"], {})]}.items():
+                    "export": [(["dir"], {}), (["--project"], req)], "validate": [(["dir"], {}), (["--project"], {}), (["--json"], {"action": "store_true"}), (["--strict"], {"action": "store_true"})]}.items():
         p = gs4.add_parser(n); p.add_argument("--db")
         for x in args: p.add_argument(*x[0], **x[1])
     a = ap.parse_args(argv)
     if a.cmd == "doc" and a.action == "validate": return cmd_doc_validate(a)
     if a.cmd == "roadmap": return cmd_roadmap(a)
     if a.cmd == "sym": return cmd_sym(a)
-    if a.cmd == "c4" and a.action == "validate": return c4_layered.report(a.dir, _idx(a))
+    if a.cmd == "c4" and a.action == "validate": return c4_layered.report(a.dir, _idx(a), json_out=a.json, strict=a.strict)
     if a.cmd in ("project", "doc", "item", "c4", "search", "task"): return cmd_write(a)
     if a.cmd == "mcp":
         from strata import mcp
