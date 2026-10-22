@@ -137,6 +137,24 @@ python3 strata.py c4 export OUT_DIR --project P             # DB -> folder (roun
 | `C4-SYMBOL-UNRESOLVED` | warn | fix `path::Qual.name` to match the code, or create the symbol |
 | `C4-TRANSITION` | warn | add the transition to the object's behavior, or fix the id |
 | `C4-FLOW-BREAK` | warn | add a bridging step or reorder the steps (the `đứt mạch` gap) |
+| `C4-PERSON-TARGET` | warn | link the actor to an app or system |
+| `C4-COMP-PARENT` | warn | set parent so the chain reaches one app |
+| `C4-COMP-CROSS` | warn | link the apps, or move the link to app level |
+| `C4-PARENT-LEVEL` | warn | app goes under system; component under app/component/group; actor and store hold nothing |
+| `C4-SELF-LINK` | warn | remove the link or point it at another object |
+| `C4-LINK-NOLABEL` | warn | add a name that says what flows |
+| `C4-LINK-NOPROTO` | warn | set transport in the detail contract or name the protocol in the link name |
+| `C4-LINK-DIR` | warn | keep one direction per interaction, or name each as request and reply |
+| `C4-LINK-DUP` | warn | merge or rename the duplicate |
+| `C4-FILE-OBJECT` | warn | make it a component folder or drop it; files belong in owns |
+| `C4-STORE-SHARED` | warn | give the store one owner app and let others call that app |
+| `C4-ORPHAN` | warn | link it to the rest or remove it |
+| `C4-CYCLE-APP` | warn | break the cycle: invert or drop one dependency |
+| `C4-CONTRACT-ORPHAN` | warn | set it as a link's detail or delete it |
+| `C4-BEHAVIOR-UNREACHABLE` | warn | add a transition into it or delete the state |
+| `C4-VIEW-SIZE` | warn | group children under intermediate objects |
+
+The semantic rules from `C4-PERSON-TARGET` to `C4-VIEW-SIZE` are warnings only; they fail the check only under `--strict`.
 
 - Data changes only need a viewer reload. Restart the service only after Python changes.
 - Task links: `c4 link|unlink --project P --object X --item ID`, `c4 links --project P --object X`.
