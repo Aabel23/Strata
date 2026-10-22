@@ -53,7 +53,7 @@ CREATE TRIGGER IF NOT EXISTS item_ad AFTER DELETE ON item BEGIN
 
 CREATE TABLE IF NOT EXISTS page(
   project TEXT NOT NULL, slug TEXT NOT NULL, title TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK(kind IN ('research','discussion','note','plan')),
+  kind TEXT NOT NULL CHECK(kind IN ('research','note','plan')),
   blocks JSON NOT NULL CHECK(json_valid(blocks)), text TEXT, updated_at TEXT,
   PRIMARY KEY(project,slug));
 

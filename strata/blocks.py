@@ -2,7 +2,7 @@
 import re
 
 STATUS = ("done", "plan")
-KINDS = ("research", "discussion", "note")
+KINDS = ("research", "note")
 # Columns a query block / /api/query may filter on, per source table.
 QUERY_COLS = {"item": {"id", "project", "kind", "status", "priority", "owner", "always_load", "core"}}
 SLUG = re.compile(r"^[\w.-]+$")
@@ -240,6 +240,6 @@ def validate_doc(doc, conn=None):
     if not _dict(doc): return ["page file must be a JSON object"], []
     errs = [f"missing '{k}'" for k in ("project", "slug", "title") if not _isstr(doc.get(k))]
     if _isstr(doc.get("slug")) and not SLUG.match(doc["slug"]): errs.append("slug may only contain letters, digits, _ . -")
-    if doc.get("kind") not in KINDS: errs.append("kind must be research|discussion|note")
+    if doc.get("kind") not in KINDS: errs.append("kind must be research|note")
     e2, w = validate(doc.get("blocks"), conn, doc.get("project"))
     return errs + e2, w

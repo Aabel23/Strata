@@ -53,7 +53,7 @@ def test_html_to_md():
 
 def test_page_kind_migration_keeps_rows(tmp_path):
     p = str(tmp_path / "old.db"); c = sqlite3.connect(p)
-    c.executescript(db.SCHEMA.read_text().replace("'discussion','note','plan'", "'discussion','note'"))
+    c.executescript(db.SCHEMA.read_text().replace("'note','plan'", "'note'"))
     c.execute("INSERT INTO page(project,slug,title,kind,blocks,text) VALUES('p','a','Alpha','note','[]','findme')"); c.commit(); c.close()
     c = db.init(p); c = db.init(p)  # second run is a no-op
     assert c.execute("SELECT slug,kind FROM page").fetchall()[0][:] == ("a", "note")
