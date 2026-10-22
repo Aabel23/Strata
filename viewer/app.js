@@ -2,7 +2,7 @@
 // App shell. Read-only. All text goes through textContent (el() from page.js); never assigns markup.
 // el, get, enc and renderPage come from page.js (STRATA_SHELL makes it skip its own routing).
 const $=id=>document.getElementById(id);
-const TABS=[["overview","Overview","o"],["task","Task","t"],["roadmap","Roadmap","m"],["issue","Issue","i"],["pages","Discussion","p"],["docs","Docs","r"],["c4","Architecture","a"],["audit","Log","l"]];
+const TABS=[["overview","Overview","o"],["task","Task","t"],["roadmap","Roadmap","m"],["issue","Issue","i"],["docs","Docs","r"],["c4","Architecture","a"],["audit","Log","l"]];
 const TAB_LABEL=Object.fromEntries(TABS.map(t=>[t[0],t[1]]));
 const ST_ITEM=["proposed","approved","open","doing","review","done","rejected"];
 const ST_DOC=["current","draft","outdated","missing"], KIND_DOC=["research","architect","review","plan","other"];
@@ -51,7 +51,7 @@ const PRI={low:'<rect x="2" y="10" width="3" height="4" rx="1" fill="currentColo
 const priIcon=p=>{const e=svg(S("0 0 16 16",PRI[p]||PRI.none,'class="pri"')), t=document.createElementNS("http://www.w3.org/2000/svg","title");t.textContent=p||"no priority";e.append(t);return e};
 const IC={overview:'<path d="M2.5 13.5h11M4 11V7M8 11V3.5M12 11V6"/>',task:'<circle cx="8" cy="8" r="5.5"/><path d="M5.6 8.1l1.6 1.6 3.2-3.4"/>',
   issue:'<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.5M8 10.8v.2"/>',
-  pages:'<path d="M3 3.5h10v7H7l-3 2.5v-2.5H3z"/>',docs:'<path d="M4 2.5h5.5L12 5v8.5H4z"/><path d="M6 8h4M6 10.5h4"/>',
+  docs:'<path d="M4 2.5h5.5L12 5v8.5H4z"/><path d="M6 8h4M6 10.5h4"/>',
   c4:'<rect x="2.5" y="2.5" width="4" height="4" rx="1"/><rect x="9.5" y="9.5" width="4" height="4" rx="1"/><path d="M6.5 4.5h3a2 2 0 0 1 2 2v3"/>',
   roadmap:'<path d="M3.5 14V2.5M3.5 3h8.5l-1.7 2.8L12 8.5H3.5"/>',audit:'<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',folder:'<path d="M2.5 4.5h4l1.5 1.5h5.5v6.5h-11z"/>',proj:'<path d="M2 12.5l3.5-6 2.5 3.5 2-2.5 4 5z"/>',
   chev:'<path d="M6 4l4 4-4 4"/>',prev:'<path d="M10 4L6 8l4 4"/>',reload:'<path d="M13 8a5 5 0 1 1-1.5-3.5M13 3v2.5h-2.5"/>',
@@ -76,7 +76,7 @@ function route(){
   return {p:(PROJ.find(x=>!x.parent)||PROJ[0]||{}).id,tab:"overview",id:""};
 }
 const total=o=>Object.values(o||{}).reduce((a,b)=>a+b,0);
-function counts(p){return {task:total(p.tasks),issue:p.issues_open,pages:p.pages,docs:p.docs}}
+function counts(p){return {task:total(p.tasks),issue:p.issues_open,docs:p.docs}}
 let CUR={};
 
 /* ---------- sidebar + breadcrumb ---------- */
@@ -167,8 +167,8 @@ const PHASE_DESC=["Ideas and discussion; nothing committed yet.","Diagram and re
 
 const VIEW={
   async overview(box,p){
-    const [tasks,issues,pages,docs]=await Promise.all([get("/api/items?kind=task&project="+enc(p)),get("/api/items?kind=issue&project="+enc(p)),
-      get("/api/pages?project="+enc(p)),get("/api/docs?project="+enc(p))]);
+    const [tasks,issues,docs]=await Promise.all([get("/api/items?kind=task&project="+enc(p)),get("/api/items?kind=issue&project="+enc(p)),
+      get("/api/docs?project="+enc(p))]);
     const pr=byId[p], done=pr.tasks.done||0, doing=pr.tasks.doing||0, all=total(pr.tasks), pct=all?Math.round(100*done/all):0;
     const hero=el("div","hero");// full-bleed hero art behind the content column: traced mountains anchored right + fitted waves edge to edge
     const bg=el("div","herobg");bg.setAttribute("aria-hidden","true");const mt=el("div","mtn"), wv=el("div","waves");bg.append(wv,mt);box.append(bg);
@@ -194,8 +194,7 @@ const VIEW={
       const c=link("",hashFor(s.id,"overview"),"card edge pcard");c.append(orn("topo",contours(hash(s.id))),el("b","",s.name),
         el("span","",total(s.tasks)+" task · "+s.issues_open+" open issues · "+s.docs+" docs"));g.append(c)});box.append(g)}
     const open=issues.filter(x=>x.status!=="done"&&x.status!=="rejected");
-    const recent=[...pages.map(x=>[null,x.title,hashFor(p,"pages",x.slug),x.updated_at]),
-      ...docs.filter(x=>x.status!=="missing").map(x=>[x.status,x.title,hashFor(p,"docs",x.path),x.updated_at])]
+    const recent=[...docs.filter(x=>x.status!=="missing").map(x=>[x.status,x.title,hashFor(p,"docs",x.path),x.updated_at])]
       .sort((a,b)=>(b[3]||"").localeCompare(a[3]||"")).slice(0,6);
     const tone=x=>["done","approved","accepted"].includes(x)?"done":["doing","review","open"].includes(x)?"doing":"todo";
     const st=x=>el("span","st "+tone(x),LBL[x]||x||"");
@@ -218,18 +217,6 @@ const VIEW={
   task:(box,p,id)=>boardView(box,p,id),
   roadmap:(box,p,id)=>roadmapView(box,p,id),
   issue:(box,p,id)=>itemView(box,p,id,"issue"),
-  async pages(box,p,id){
-    if(id){
-      box.className="page narrow";
-      const root=el("article");root.id="pg";box.append(root);
-      renderPage(await get("/api/page/"+enc(p)+"/"+enc(id)),root);
-      return;
-    }
-    const ps=(await get("/api/pages?project="+enc(p))).filter(x=>x.kind!=="plan"); // plan pages live under Roadmap
-    box.append(head("Discussion",ps.length));
-    if(!ps.length)return box.append(empty("No pages yet","Pages are written via the strata CLI or MCP."));
-    ps.forEach(x=>{const a=link("",hashFor(p,"pages",x.slug),"row pg");a.append(icon("pages"),el("span","t",x.title),el("span","kind",x.kind),dateCell(x.updated_at));box.append(a)});
-  },
   async docs(box,p,id){
     const docs=await get("/api/docs?project="+enc(p));
     docs.forEach(x=>{try{x.code=JSON.parse(x.code||"[]")||[]}catch{x.code=[]}});
@@ -791,7 +778,7 @@ async function roadmapView(box,p,id){
 }
 
 /* ---------- command palette ---------- */
-const SRC={item:["Task","task"],issue:["Issue","issue"],page:["Discussion","pages"],doc:["Docs","docs"]};
+const SRC={item:["Task","task"],issue:["Issue","issue"],doc:["Docs","docs"]};
 let hits=[], sel=0, qtok=0, timer=null, mouseMoved=false;
 function openPal(){closeKeys();$("pal").hidden=false;$("q").value="";hits=navHits();sel=0;drawHits();$("q").focus()}
 function closePal(){$("pal").hidden=true}
