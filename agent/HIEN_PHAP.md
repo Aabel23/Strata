@@ -43,7 +43,7 @@
 
 Strata (`/home/abel/project/tools/strata`, DB `/home/abel/project/tools/strata/strata.db`) là nơi lưu kết quả của luồng. Dùng phần CLI đã có, không chờ phần chưa làm. Cách dùng từng lệnh: skill `strata` (nạp trước khi chạm Strata).
 
-- **Chỉ chat chính ghi Strata** (qua `strata.py` hoặc MCP). Subagent trả kết quả dạng văn bản; chat chính ghi. Ghi DB qua CLI không tính là "tự code". Ngoại lệ: reviewer được `item add` issue (vào trạng thái `proposed`, user duyệt) và đổi trạng thái qua tool MCP của vai reviewer; coder claim/submit qua tool MCP của vai coder.
+- **Chỉ chat chính ghi Strata** (qua `strata.py` hoặc MCP). Subagent trả kết quả dạng văn bản; chat chính ghi. Ghi DB qua CLI không tính là "tự code". Ngoại lệ: reviewer được thêm task nhãn `issue` (vào trạng thái `proposed`, user duyệt), không đổi trạng thái; chỉ chat chính approve/reject/rework; coder claim/submit qua tool MCP của vai coder.
 - **Agent có MCP thì dùng MCP thay CLI** (khi đã đăng ký); CLI là đường dự phòng của chat chính.
 - Project chưa có trong Strata thì `project add` trước khi vào bước 2.
 - **Sơ đồ (bước 2):** C4 YAML + flow theo `docs/AGENT_C4.md`, `validate` sạch rồi `import-yaml`. Không vẽ sơ đồ rời.
