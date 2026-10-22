@@ -41,3 +41,12 @@ def test_tech_missing_rule():
     subj = lambda m: {f["subject"] for f in L.check(m, ".")[1] if f["id"] == "C4-TECH-MISSING"}
     assert subj(mk()) == {"a"}          # app without tech warns; store with tech and component do not
     assert subj(mk(tech="Python")) == set()
+
+
+def test_read_model_includes_tech(folder, tmp_path):
+    m = _tech(folder, **{yaml.safe_load((folder / "map.yaml").read_text())["objects"][0]["id"]: "Go"})
+    dbp = tmp_path / "t.db"
+    assert run(dbp, "c4", "import", str(folder), "--project", "p")[0] == 0
+    objs = {o["id"]: o for o in L.read_model(db.connect(dbp), "p")["objects"]}
+    assert objs[m["objects"][0]["id"]]["tech"] == "Go"
+    assert "tech" not in objs[m["objects"][1]["id"]]

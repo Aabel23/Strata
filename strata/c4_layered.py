@@ -443,7 +443,7 @@ def read_model(c, project):
     q = lambda t: c.execute(f"SELECT * FROM c4_{t} WHERE project=? ORDER BY rowid", (project,)).fetchall()
     return {"name": meta["name"], "root": meta["root"],
             "objects": [clean({"id": o["id"], "type": o["type"], "name": o["name"], "parent": o["parent"], "description": o["description"],
-                               "tags": jl(o["tags"]), "status": o["status"], "owns": jl(o["owns"]), "behavior": o["behavior"]}) for o in q("object")],
+                               "tags": jl(o["tags"]), "status": o["status"], "owns": jl(o["owns"]), "behavior": o["behavior"], "tech": o["technology"]}) for o in q("object")],
             "connections": [clean({"id": x["id"], "from": x["from_id"], "to": x["to_id"], "name": x["name"], "description": x["description"],
                                    "detail": x["detail"], "status": x["status"]}) for x in q("connection")],
             "flows": [clean({"id": f["id"], "name": f["name"], "steps": jl(f["steps"]) or []}) for f in q("flow")]}
