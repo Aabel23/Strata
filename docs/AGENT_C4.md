@@ -104,6 +104,7 @@ python3 strata.py c4 validate docs/c4                       # 0 errors required;
 python3 strata.py c4 import docs/c4 --project strata        # upsert; rows missing from the folder are deleted
 python3 strata.py c4 flow --project strata --id <flow>      # read the trace back
 python3 strata.py c4 export OUT_DIR --project P             # DB -> folder (round trip)
+python3 strata.py c4 coverage --project P [--json]          # code files owned by no object
 ```
 
 - `import` writes nothing if validation reports errors (`--force` skips that check). It also removes task links
@@ -153,9 +154,13 @@ python3 strata.py c4 export OUT_DIR --project P             # DB -> folder (roun
 | `C4-CONTRACT-ORPHAN` | warn | set it as a link's detail or delete it |
 | `C4-BEHAVIOR-UNREACHABLE` | warn | add a transition into it or delete the state |
 | `C4-VIEW-SIZE` | warn | group children under intermediate objects |
+| `C4-OWNS-EMPTY` | warn | fix the path or glob, or remove the entry |
+| `C4-OWNS-OVERLAP` | warn | narrow the owns of one object so each file has a single owner |
 
-The semantic rules from `C4-PERSON-TARGET` to `C4-VIEW-SIZE` are warnings only; they fail the check only under `--strict`.
+The semantic rules from `C4-PERSON-TARGET` to `C4-OWNS-OVERLAP` are warnings only; they fail the check only under `--strict`.
 
+- `c4 coverage --project P [--json]` lists code files that no object owns, grouped by directory (hidden directories and
+  `venv`, `.venv`, `.git`, `node_modules`, `__pycache__` are skipped; vendored copies elsewhere still count). Text output ends with `N files unowned in M directories`. Use it to find code the map does not cover.
 - Data changes only need a viewer reload. Restart the service only after Python changes.
 - Task links: `c4 link|unlink --project P --object X --item ID`, `c4 links --project P --object X`.
   `unlink` also works for an object that was removed from the map.
