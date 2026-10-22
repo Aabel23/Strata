@@ -7,16 +7,15 @@
   strata.py project add ID --name N [--root --docs-dir --parent --description] | list
   strata.py doc validate FILE                     check a doc YAML (no DB)
   strata.py doc scan --project P | set --project P PATH [--feature --status --ord]
-  strata.py c4 link|unlink|links --project P --object X [--item ID | --decision ID]   (links: list only)
+  strata.py c4 link|unlink|links --project P --object X --item ID   (links: list only)
   strata.py c4 import DIR --project P [--force] [--dry-run] [--yes] | diff DIR --project P [--json] | export DIR --project P | validate DIR   layered folder (map.yaml + contracts/ behavior/ flows/)
   strata.py c4 context --project P [--object X] [--max-tokens N]
   strata.py c4 flow --project P [--id F]          numbered step trace (no --id: list flows)
   strata.py c4 contract ID --project P            one contract of a layered project
   strata.py sym index --project P | ls PATH|DIR --project P [--public] | show ID --project P [--sig-only --ctx N] | find PATTERN --project P   Python symbol index (cache next to the DB)
-  strata.py search Q [--project P --src item|decision|page|doc --limit N]
-  strata.py decision add --project P --title T --context C --decision D --consequences Q --rejected R [--supersedes N] | set N --status S
+  strata.py search Q [--project P --src item|page|doc --limit N]
   strata.py mcp --role main|coder|reviewer [--db]   MCP server on stdio
-  strata.py task context ID [--budget N] [--db]   ticket + rules + decisions + c4 + paths in one budgeted text
+  strata.py task context ID [--budget N] [--db]   ticket + rules + c4 + paths in one budgeted text
   strata.py item add --project P --kind task|issue|step|gate --title T [--body --priority --status --spec FILE|-] | set ID [--status --priority]
   strata.py item list [--project --kind --status --owner --ready] | show ID | edit ID [--title --body --spec FILE|- --priority] | ready [--project]
   strata.py roadmap import PLAN.json [--progress PROGRESS.json] [--gates "G0=0;G1=1,2"] --project P --roadmap ID | check --project P --roadmap ID [--json]
@@ -143,14 +142,12 @@ def cmd_write(a):
     try:
         if a.cmd == "project" and a.action == "add":
             db.add_project(c, a.id, a.name, a.root, a.docs_dir, a.parent, a.description); print("ok:", a.id)
+        elif a.cmd == "project" and a.action == "set":
+            db.set_project(c, a.id, a.root, a.docs_dir, a.name, a.description); print("ok:", a.id)
         elif a.cmd == "project":
             for r in c.execute("SELECT id,name,parent,status FROM project ORDER BY id"): print(f"{r['id']}  {r['name']}  parent={r['parent'] or '-'}  [{r['status']}]")
         elif a.cmd == "doc" and a.action == "scan":
             print("scanned {}: {} found, {} missing".format(a.project, *db.scan_docs(c, a.project)))
-        elif a.cmd == "decision" and a.action == "add":
-            print("ok: decision", service.add_decision(c, "main", a.project, a.title, a.context, a.decision, a.consequences, a.rejected, a.supersedes))
-        elif a.cmd == "decision":
-            service.set_decision_status(c, "main", a.id, a.status); print("ok")
         elif a.cmd == "search":
             for h in service.search(c, a.q, a.project, a.src, a.limit): print(f"{h['src']}#{h['ref']} {h['project']} {h['title']}")
         elif a.cmd == "task":
@@ -176,9 +173,8 @@ def cmd_write(a):
         elif a.cmd == "c4" and a.action == "links":
             l = db.links_for(c, a.project, a.object)
             for i in l["items"]: print(f"{i['kind']} #{i['id']} [{i['status']}] {i['title']}")
-            for d in l["decisions"]: print(f"decision #{d['id']} [{d['status']}] {d['title']}")
         elif a.cmd == "c4":
-            if not getattr(db, a.action)(c, a.project, a.object, a.item, a.decision): print("no change"); return 0
+            if not getattr(db, a.action)(c, a.project, a.object, a.item, None): print("no change"); return 0
             print("ok")
         elif a.cmd == "doc":
             db.set_doc(c, a.project, a.path, a.feature, a.status, a.ord); print("ok")
@@ -211,7 +207,8 @@ def main(argv=None):
             p = gs.add_parser(n); p.add_argument("--db")
             for x in args: p.add_argument(*x[0], **x[1])
     req = {"required": True}
-    group("project", {"add": [(["id"], {}), (["--name"], req), (["--root"], {}), (["--docs-dir"], {}), (["--parent"], {}), (["--description"], {})], "list": []})
+    group("project", {"add": [(["id"], {}), (["--name"], req), (["--root"], {}), (["--docs-dir"], {}), (["--parent"], {}), (["--description"], {})],
+                       "set": [(["id"], {}), (["--name"], {}), (["--root"], {}), (["--docs-dir"], {}), (["--description"], {})], "list": []})
     group("doc", {"validate": [(["file"], {})], "scan": [(["--project"], req)],
                   "set": [(["--project"], req), (["path"], {}), (["--feature"], {}), (["--status"], {"choices": ["current", "draft", "outdated", "missing"]}), (["--ord"], {"type": int})]})
     idp, asp, notep = (["id"], {"type": int}), (["--as"], {"dest": "as_"}), (["--note"], {})
@@ -236,16 +233,13 @@ def main(argv=None):
     p = rs.add_parser("criterion"); p.add_argument("op", choices=["set"]); p.add_argument("roadmap"); p.add_argument("crit"); p.add_argument("--db"); p.add_argument("--project", required=True)
     p.add_argument("--result", choices=["pass", "fail"]); p.add_argument("--value", default=""); p.add_argument("--as", dest="as_", required=True); p.add_argument("--waive")
     p = sub.add_parser("search"); p.add_argument("q"); p.add_argument("--db"); p.add_argument("--project"); p.add_argument("--limit", type=int, default=30)
-    p.add_argument("--src", choices=["item", "decision", "page", "doc"])
-    group("decision", {"add": [(["--project"], req), (["--title"], req), (["--context"], req), (["--decision"], req), (["--consequences"], req),
-                               (["--rejected"], req), (["--supersedes"], {"type": int})],
-                       "set": [(["id"], {"type": int}), (["--status"], {"required": True, "choices": ["proposed", "accepted", "superseded"]})]})
+    p.add_argument("--src", choices=["item", "page", "doc"])
     group("sym", {"index": [(["--project"], req)], "ls": [(["path"], {}), (["--project"], req), (["--public"], {"action": "store_true"})],
                   "show": [(["id"], {}), (["--project"], req), (["--sig-only"], {"action": "store_true"}), (["--ctx"], {"type": int, "default": 0})],
                   "find": [(["pattern"], {}), (["--project"], req)]})
     add("mcp", (["--role"], {"required": True, "choices": service.ROLES}))
     g4 = sub.add_parser("c4"); gs4 = g4.add_subparsers(dest="action", required=True)
-    ref = [(["--project"], req), (["--object"], req), (["--item"], {"type": int}), (["--decision"], {"type": int})]
+    ref = [(["--project"], req), (["--object"], req), (["--item"], {"type": int})]
     for n, args in {"link": ref, "unlink": ref, "links": ref[:2],
                     "context": [(["--project"], req), (["--object"], {}), (["--max-tokens"], {"type": int, "default": 2000})],
                     "flow": [(["--project"], req), (["--id"], {})], "contract": [(["id"], {}), (["--project"], req)],
@@ -260,7 +254,7 @@ def main(argv=None):
     if a.cmd == "roadmap": return cmd_roadmap(a)
     if a.cmd == "sym": return cmd_sym(a)
     if a.cmd == "c4" and a.action == "validate": return c4_layered.report(a.dir, _idx(a))
-    if a.cmd in ("project", "doc", "item", "c4", "search", "decision", "task"): return cmd_write(a)
+    if a.cmd in ("project", "doc", "item", "c4", "search", "task"): return cmd_write(a)
     if a.cmd == "mcp":
         from strata import mcp
         return mcp.serve(a.role, a.db)

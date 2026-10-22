@@ -96,27 +96,6 @@ def test_decision_immutable_but_status_and_search_rejected(c):
     assert [h["ref"] for h in service.search(c, "mongodbxyz", src="decision")] == [a]
 
 
-def test_decision_cli_and_migration(tmp_path, capsys):
-    import importlib.util, pathlib
-    sp = importlib.util.spec_from_file_location("cli", pathlib.Path(__file__).parent.parent / "strata.py"); m = importlib.util.module_from_spec(sp); sp.loader.exec_module(m)
-    p = str(tmp_path / "t.db"); c = db.init(p); db.add_project(c, "p", "P"); c.close()
-    base = ["decision", "add", "--db", p, "--project", "p", "--title", "T", "--context", "c", "--decision", "d", "--consequences", "q"]
-    assert m.main([*base, "--rejected", " "]) == 1
-    assert m.main([*base, "--rejected", "oldopt"]) == 0
-    assert m.main([*base, "--rejected", "newopt", "--supersedes", "1"]) == 0
-    assert m.main(["decision", "set", "1", "--db", p, "--status", "accepted"]) == 0
-    c = db.connect(p)
-    assert [r[0] for r in c.execute("SELECT status FROM decision ORDER BY id")] == ["accepted", "accepted"]
-    # simulate an old DB: trigger without rejected_options, stale index
-    c.execute("DROP TRIGGER decision_ai"); c.execute("DELETE FROM search WHERE src='decision'")
-    c.execute("CREATE TRIGGER decision_ai AFTER INSERT ON decision BEGIN SELECT 1; END"); c.commit(); c.close()
-    for _ in range(2):  # idempotent
-        c = db.init(p)
-        assert [h["ref"] for h in service.search(c, "oldopt", src="decision")] == [1]
-        assert len(c.execute("SELECT 1 FROM search WHERE src='decision'").fetchall()) == 2
-    assert c.execute("SELECT count(*) FROM audit WHERE tool LIKE 'decision.%'").fetchone()[0] == 3
-
-
 def test_non_main_status_rules(c):
     t = service.add_item(c, "main", "p", "task", "T")
     for st in ("approved", "open", "rejected"):

@@ -22,21 +22,19 @@ def audits(p, tool): return db.connect(p).execute("SELECT count(*) FROM audit WH
 def test_link_unlink_audit_and_dup(dbp):
     assert run(dbp, "c4", "link", "--project", "p", "--object", "relay", "--item", "1")[0] == 0
     assert run(dbp, "c4", "link", "--project", "p", "--object", "relay", "--item", "1") == (0, "no change\n")
-    assert run(dbp, "c4", "link", "--project", "p", "--object", "relay", "--decision", "1")[0] == 0
-    assert audits(dbp, "c4.link") == 2
+    assert audits(dbp, "c4.link") == 1
     code, out = run(dbp, "c4", "links", "--project", "p", "--object", "relay")
-    assert code == 0 and "Lỗi relay" in out and "Dùng HPKE" in out
+    assert code == 0 and "Lỗi relay" in out
     l = db.links_for(db.connect(dbp), "p", "relay")
     assert l["items"] == [{"id": 1, "kind": "issue", "title": "Lỗi relay", "status": "open"}]
-    assert l["decisions"][0]["title"] == "Dùng HPKE"
     assert run(dbp, "c4", "unlink", "--project", "p", "--object", "relay", "--item", "1")[0] == 0
     assert run(dbp, "c4", "unlink", "--project", "p", "--object", "relay", "--item", "1")[1] == "no change\n"
     assert audits(dbp, "c4.unlink") == 1
 
 
 @pytest.mark.parametrize("args", [
-    ["--object", "nope", "--item", "1"], ["--object", "relay", "--item", "99"], ["--object", "relay", "--decision", "99"],
-    ["--object", "relay"], ["--object", "relay", "--item", "1", "--decision", "1"]])
+    ["--object", "nope", "--item", "1"], ["--object", "relay", "--item", "99"],
+    ["--object", "relay"]])
 def test_link_errors(dbp, args):
     code, out = run(dbp, "c4", "link", "--project", "p", *args)
     assert code == 1 and out.startswith("ERROR")
