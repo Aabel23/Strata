@@ -10,6 +10,7 @@
   strata.py c4 link|unlink|links --project P --object X --item ID   (links: list only)
   strata.py c4 import DIR --project P [--force] [--dry-run] [--yes] | diff DIR --project P [--json] | export DIR --project P | validate DIR [--json] [--strict]   layered folder (map.yaml + contracts/ behavior/ flows/)
   strata.py c4 context --project P [--object X] [--max-tokens N]
+  strata.py c4 coverage --project P [--json]      code files owned by no object, by directory
   strata.py c4 flow --project P [--id F]          numbered step trace (no --id: list flows)
   strata.py c4 contract ID --project P            one contract of a layered project
   strata.py sym index --project P | ls PATH|DIR --project P [--public] | show ID --project P [--sig-only --ctx N] | find PATTERN --project P   Python symbol index (cache next to the DB)
@@ -155,6 +156,15 @@ def cmd_write(a):
             print(context.build(c, a.id, a.budget))
         elif a.cmd == "c4" and a.action == "context":
             print(c4_layered.context_text(c, a.project, a.object, a.max_tokens))
+        elif a.cmd == "c4" and a.action == "coverage":
+            r = c.execute("SELECT coalesce(p.root, m.root) FROM project p LEFT JOIN c4_meta m ON m.project=p.id WHERE p.id=?", (a.project,)).fetchone()
+            if not r or not r[0]: raise ValueError(f"project {a.project!r} chưa có root")
+            owns = {o["id"]: json.loads(o["owns"] or "[]") for o in c.execute("SELECT id, owns FROM c4_object WHERE project=?", (a.project,))}
+            cov = c4_layered.coverage(owns, r[0])
+            if a.json: print(json.dumps(cov, ensure_ascii=False, indent=1))
+            else:
+                for d, fs in cov.items(): print(f"{d}/"); [print(f"  {f}") for f in fs]
+                print(f"{sum(map(len, cov.values()))} files unowned in {len(cov)} directories")
         elif a.cmd == "c4" and a.action == "flow":
             print(c4_layered.flow_text(c, a.project, a.id))
         elif a.cmd == "c4" and a.action == "contract":
@@ -242,6 +252,7 @@ def main(argv=None):
     ref = [(["--project"], req), (["--object"], req), (["--item"], {"type": int})]
     for n, args in {"link": ref, "unlink": ref, "links": ref[:2],
                     "context": [(["--project"], req), (["--object"], {}), (["--max-tokens"], {"type": int, "default": 2000})],
+                    "coverage": [(["--project"], req), (["--json"], {"action": "store_true"})],
                     "flow": [(["--project"], req), (["--id"], {})], "contract": [(["id"], {}), (["--project"], req)],
                     "import": [(["dir"], {}), (["--project"], req), (["--force"], {"action": "store_true"}),
                                (["--dry-run"], {"action": "store_true"}), (["--yes"], {"action": "store_true"})],
