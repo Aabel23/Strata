@@ -14,7 +14,17 @@ class _Loader(yaml.SafeLoader): pass  # YAML 1.1 reads `on:` as True; behavior f
 _Loader.yaml_implicit_resolvers = {k: [(t, r) for t, r in v if t != "tag:yaml.org,2002:bool"] for k, v in yaml.SafeLoader.yaml_implicit_resolvers.items()}
 _Loader.add_implicit_resolver("tag:yaml.org,2002:bool", re.compile(r"^(?:true|false)$"), list("tf"))
 j = lambda v: json.dumps(v, ensure_ascii=False) if v is not None else None
-dump = lambda path, data: path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+
+def dump(path, data):
+    """Atomic write (temp file + os.replace); skips an unchanged file. True when written."""
+    text = yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
+    try:
+        if path.read_text(encoding="utf-8") == text: return False
+    except OSError: pass
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(text, encoding="utf-8"); os.replace(tmp, path)
+    return True
 
 
 def ancestors(byid, id):
@@ -430,6 +440,28 @@ def export_dir(c, project, d):
     for stem, rows in files.items(): dump(d / "contracts" / f"{stem}.yaml", rows)
     for r in q("behavior"): dump(d / "behavior" / f"{r['module']}.yaml", jl(r["data"]))
     for r in q("flow"): dump(d / "flows" / f"{r['id']}.yaml", keep(id=r["id"], name=r["name"], steps=jl(r["steps"])))
+
+
+def write_model(m, d):
+    """Write a loaded model (see load) into the layered folder d. Returns the changed paths, relative to d."""
+    d = pathlib.Path(d)
+    keep = lambda r, order: {k: r[k] for k in order if r.get(k) is not None}
+    for sub in ("contracts", "behavior", "flows"): (d / sub).mkdir(parents=True, exist_ok=True)
+    files = {"map.yaml": {"project": keep(m["project"], ("id", "name", "root")),
+                          "objects": [keep(o, ("id", "parent", "kind", "name", "summary", "status", "tags", "owns", "behavior", "tech")) for o in m["objects"]],
+                          "links": [keep(x, ("id", "from", "to", "name", "summary", "detail", "status")) for x in m["links"]]}}
+    by_stem = {}
+    for r in m["contracts"]:
+        stem, _, eid = r["id"].partition(".")
+        by_stem.setdefault(stem, []).append(keep({**r, "id": eid}, ("id", "transport", "body", "start", "end")))
+    files.update({f"contracts/{k}.yaml": v for k, v in by_stem.items()})
+    files.update({f"behavior/{k}.yaml": v for k, v in m["behavior"].items()})
+    files.update({f"flows/{f['id']}.yaml": keep(f, ("id", "name", "steps")) for f in m["flows"]})
+    changed = [rel for rel, data in files.items() if dump(d / rel, data)]
+    for sub in ("contracts", "behavior", "flows"):
+        for f in (d / sub).glob("*.yaml"):
+            if f"{sub}/{f.name}" not in files: f.unlink(); changed.append(f"{sub}/{f.name}")
+    return changed
 
 
 # ---- read side: text for agents (c4 flow / context / contract) ----
