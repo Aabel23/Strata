@@ -30,6 +30,7 @@
 
 - **Ticket:** coder và reviewer nhận ticket (goal / acceptance / verify / scope / open_questions) cùng gói `task context` (khi có). Chat chính viết prompt từ ticket, không từ trí nhớ.
 - **Trạng thái task:** approved → doing → review → done. Chỉ chat chính đặt `done`; reviewer khác owner.
+- **Commit sau mỗi task done:** ngay khi đặt `done`, chat chính commit đúng các file của task đó (liệt kê từng file, không `git add -A`), message `#N <tiêu đề task>`. Coder/reviewer không commit và không chạy lệnh git đổi trạng thái (`stash`, `checkout`, `restore`, `reset`). File của task lẫn thay đổi cũ chưa commit thì báo user trước khi commit.
 - **Vai:** định nghĩa ở `agent/agents/` (model và tools được ép bằng allowlist, không bằng lời trong prompt).
 - **Coder:** chạy tuần tự mặc định; song song chỉ khi `isolation: worktree`. Dòng đầu prompt bắt buộc gọi skill `ponytail` (mức full). Bug nằm trong spec thì sửa và ghi chú.
 - **Reviewer:** BẮT BUỘC chạy lại `verify` của ticket, báo pass/fail từng tiêu chí. Ngoài ra chỉ phân tích tĩnh khi chưa có sandbox; cần chạy thử thì ghi `needs_validation`. Full audit (`security-audit` đủ 6 phase) chỉ khi user gọi.
