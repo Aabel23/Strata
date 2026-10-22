@@ -1,0 +1,125 @@
+id: phase_roadmap
+name: Phase-based orientation
+steps:
+- link: a_rm_tpl
+  text: main builds the roadmap from the template
+- link: rm_tpl_w
+  text: write the 5-phase skeleton into docs/plan
+- link: rm_tpl_w
+  reverse: true
+- link: a_rm_tpl
+  reverse: true
+  text: skeleton ready
+- link: a_plan_edit
+  text: edit goal, level, C4 blocks, criteria
+- link: a_plan_edit
+  reverse: true
+- link: a_rm_import
+  text: load the roadmap
+- link: rm_imp_load
+  text: read YAML
+- link: rm_imp_load
+  reverse: true
+- at: roadmapmod
+  text: import_plan calls within roadmap
+- link: rm_val_c4
+  text: a block must point to a real C4 object
+- link: rm_val_c4
+  reverse: true
+- at: roadmapmod
+  text: valid, gate declared
+- at: roadmapmod
+  text: import_plan calls within roadmap
+- link: rm_blk_db
+  text: store phase, block, C4 link
+- link: rm_blk_db
+  reverse: true
+- link: rm_blk_task
+  text: create a task for each block of the current phase
+- link: rm_blk_task
+  reverse: true
+- at: roadmapmod
+  text: import_plan calls within roadmap
+- link: a_rm_import
+  reverse: true
+  text: print the number of phases, tasks
+- link: a_cli_set
+  text: coder finishes, sets the task to done; reviewer approves
+- link: cs_set_item
+- at: service
+  text: 'set_item: coder changes task status; reviewer adds an issue if there is a defect'
+- link: cs_set_item
+  reverse: true
+- link: a_cli_set
+  reverse: true
+- link: a_cli_add
+  text: add a new issue/task
+- link: cs_add_item
+- at: service
+  text: determine the phase of the item
+- at: service
+  text: 'resolve_phase: bug: current phase; outside the current phase: flag off-roadmap, do not block'
+- at: service
+  text: add_item calls within service
+- link: cs_add_item
+  reverse: true
+- link: a_cli_add
+  reverse: true
+  text: print id, off-roadmap flag if any
+- link: u_confirm
+  text: main presents the criteria to confirm
+- link: u_confirm
+  reverse: true
+  text: user confirms each criterion
+- link: a_cli_confirm
+  text: record the confirmation
+- link: cs_confirm
+- link: rm_conf_db
+  text: update the criterion with audit
+- link: rm_conf_db
+  reverse: true
+- link: cs_confirm
+  reverse: true
+- link: a_cli_confirm
+  reverse: true
+- link: a_cli_gate
+  text: main asks to pass the end-of-phase gate
+- link: cs_gate
+- at: roadmapmod
+  text: steps done, criteria confirmed, block tasks done?
+- link: rm_chk_db
+- link: rm_chk_db
+  reverse: true
+- at: roadmapmod
+  text: coverage
+- at: roadmapmod
+  text: 'gate_pass: if any condition is missing, reject and stay in the phase'
+- link: rm_gate_db
+  text: write gate pass, move to the next phase
+- link: rm_gate_db
+  reverse: true
+- link: cs_gate
+  reverse: true
+- link: a_cli_gate
+  reverse: true
+  text: the next phase becomes current
+- link: u_confirm
+  text: tell the user the gate has passed
+- link: u_roadmap
+  text: view phase progress
+- link: rv_api
+  text: load the roadmap
+- at: handler
+  text: 'do_GET: check Host, route /api/roadmap'
+- link: g_rm
+- at: roadmapmod
+  text: compute coverage
+- at: roadmapmod
+  text: api calls within roadmap
+- link: g_rm
+  reverse: true
+- link: rv_api
+  reverse: true
+  text: phase JSON
+- at: rview
+  text: 'render phase cards: draw phase cards: blocks, criteria, coverage'

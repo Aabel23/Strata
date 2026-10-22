@@ -1,0 +1,23 @@
+- id: m_imp
+  transport: in-process
+  body:
+    signature: import_yaml(c, path, project) -> dict counts
+    purpose: Replace the project's model with the YAML
+    errors:
+    - ValueError when validation fails
+  start: strata.py::main
+  end: strata/c4.py::import_yaml
+- id: g_read
+  transport: in-process
+  body:
+    signature: read_model(c, project) -> dict | None
+  start: strata/server.py::make_server
+  end: strata/c4.py::read_model
+- id: g_iss
+  transport: in-process
+  start: strata/server.py::make_server
+  end: strata/c4.py::issues_by_object
+- id: rm_val_c4
+  transport: in-process
+  start: strata/roadmap.py::check
+  end: strata/c4.py::read_model

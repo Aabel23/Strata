@@ -1,0 +1,36 @@
+id: import_map
+name: Agent imports the C4 map
+steps:
+- link: a_main
+  text: Agent runs import-yaml
+- link: m_init
+  text: Open the DB, migrate if columns are missing
+- link: m_init
+  reverse: true
+  text: returns the connection
+- link: m_imp
+- at: c4mod
+  text: import_yaml calls within c4
+- link: load_yaml
+  text: read YAML, compute root
+- link: load_yaml
+  reverse: true
+- at: c4mod
+  text: returns (model, root)
+- at: c4mod
+  text: check references, steps, continuity
+- at: c4mod
+  text: 'check: on errors → stop, write nothing'
+- at: c4mod
+  text: returns errors + warnings
+- link: imp_db
+  text: upsert object/connection/interface/flow, delete leftovers
+- link: imp_db
+  reverse: true
+  text: commit
+- link: m_imp
+  reverse: true
+  text: returns the counts
+- link: a_main
+  reverse: true
+  text: prints imported P, N objects

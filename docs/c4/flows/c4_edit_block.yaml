@@ -1,0 +1,36 @@
+id: c4_edit_block
+name: Add and configure a C4 block, then export and copy its prompt (design)
+steps:
+- link: u_c4_edit
+  text: Open the proposed editor; this UI is not implemented
+- link: c4_add_block
+  text: Choose a reusable hand-drawn block or generate L4 blocks from repository files on demand
+- link: c4_block_added
+  text: Place the block on the canvas
+- link: c4_ports_select
+  text: Choose an endpoint using existing C4 type plus planned kind subtype
+- link: c4_ports_return
+- link: u_c4_connect
+  text: Create a link from the selected output port to the selected input port
+- link: c4_link_edit
+  text: Configure from/to, name, kind, technology, interface, status, and description in the side panel
+- link: c4_submit_edit
+  text: Submit through the proposed write route; this currently conflicts with the read-only/API restrictions in CLAUDE.md
+- link: c4_validate_edit
+  text: Run model and typed-port validation before persistence
+- at: c4_drc
+  text: On errors, return findings and do not write; on success, continue
+- link: c4_validation_result
+- link: c4_write_call
+  text: Pass the validated operation to the future permission-checked write service
+- link: c4_write_db
+  text: Commit the validated change to the DB source of truth
+- link: c4_export_model
+  text: Read the saved DB model for structured YAML export
+- link: c4_export_file
+  text: Write an export file; SQLite remains the source of truth
+- link: c4_export_done
+- link: c4_prompt_render
+  text: Render prompt text from the saved block context
+- link: c4_prompt_copy
+  text: Copy generated prompt for the agent

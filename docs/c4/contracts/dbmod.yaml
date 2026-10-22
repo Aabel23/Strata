@@ -1,0 +1,4 @@
+- id: m_init
+  transport: in-process
+  start: strata.py::main
+  end: strata/db.py::init

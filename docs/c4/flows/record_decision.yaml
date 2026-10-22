@@ -1,0 +1,28 @@
+id: record_decision
+name: Agent records a decision via MCP (design)
+steps:
+- link: a_mcp_rec
+  text: agent calls the add_decision tool
+- link: mr_svc
+  text: forward with the process's fixed role
+- at: service
+  text: check permission by role
+- at: service
+  text: allowed; non-main role → proposed
+- at: service
+  text: 'add_decision: force status = proposed unless main'
+- link: svc_wr
+  text: write the decision
+- link: svc_wr
+  reverse: true
+  text: returns the id
+- link: svc_audit
+  text: 'write audit: role, action, id'
+- link: svc_audit
+  reverse: true
+- link: mr_svc
+  reverse: true
+  text: returns id, status proposed
+- link: a_mcp_rec
+  reverse: true
+  text: tool result

@@ -1,0 +1,18 @@
+id: search_ctx
+name: Agent searches for context via MCP or CLI (design)
+steps:
+- link: a_mcp_search
+  text: agent calls the search tool (or CLI search Q)
+- link: ms_svc
+  text: CLI/server /api/search call the same function
+- link: svc_fts
+  text: FTS5 MATCH, filter by project/src, rank by BM25
+- link: svc_fts
+  reverse: true
+  text: ranked rows
+- link: ms_svc
+  reverse: true
+  text: result list
+- link: a_mcp_search
+  reverse: true
+  text: tool result

@@ -1,0 +1,71 @@
+id: worker_report
+name: '[stale] Worker claims work and reports via MCP (design)'
+steps:
+- link: a_mcp_claim
+  text: coder calls item_claim with a branch
+- link: mc_svc_claim
+  text: forward with role coder, branch, worktree
+- at: service
+  text: check permission by role
+- at: service
+  text: claim_item calls within service
+- at: service
+  text: 'claim_item: todo to doing, attach branch/worktree'
+- link: svc_claim_db
+  text: store status and workspace on the item
+- link: svc_claim_db
+  reverse: true
+- link: mc_svc_claim
+  reverse: true
+  text: returns task context
+- link: a_mcp_claim
+  reverse: true
+  text: context with workspace
+- link: a_mcp_report
+  text: coder reports checkpoint or stuck
+- link: mr_svc_report
+- at: service
+  text: a coder may only report items they hold
+- at: service
+  text: report calls within service
+- link: svc_report_db
+  text: write state, note, artifacts, role, time
+- link: svc_report_db
+  reverse: true
+- link: mr_svc_report
+  reverse: true
+  text: returns the report id
+- link: a_mcp_report
+  reverse: true
+  text: tool result
+- link: a_cli_attention
+  text: main lists items needing attention
+- link: cs_attention
+- link: svc_att_db
+  text: latest report is needs_input or stuck
+- link: svc_att_db
+  reverse: true
+- link: cs_attention
+  reverse: true
+- link: a_cli_attention
+  reverse: true
+  text: list of items that are stuck or need input
+- link: a_mcp_report
+  text: coder reports done
+- link: mr_svc_report
+- at: service
+  text: 'report: done moves doing to review like submit'
+- link: svc_report_db
+  text: write the done report
+- link: svc_report_db
+  reverse: true
+- link: svc_report_item
+  text: change item status to review
+- link: svc_report_item
+  reverse: true
+- link: mr_svc_report
+  reverse: true
+  text: returns id, item is in review
+- link: a_mcp_report
+  reverse: true
+  text: item moved to review

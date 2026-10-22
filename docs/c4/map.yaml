@@ -1,0 +1,1019 @@
+project:
+  id: strata
+  name: strata
+  root: ../..
+objects:
+- id: agent
+  kind: actor
+  name: Agent
+  summary: Claude/Codex read and write data through the CLI
+- id: argp
+  parent: cli
+  kind: component
+  name: main
+  summary: Subcommand dispatch
+  owns:
+  - strata.py
+- id: blocks
+  parent: cli
+  kind: component
+  name: blocks
+  summary: Validates the 8 page block types
+  owns:
+  - strata/blocks.py
+- id: c4_conn_editor
+  parent: viewer
+  kind: component
+  name: Connection side panel
+  summary: 'DESIGN; kind=connections. Edits existing connection fields: from, to, name, kind, technology, interface, status, description.'
+  status: future
+  owns:
+  - viewer/index.html
+- id: c4_drc
+  parent: viewer
+  kind: component
+  name: Map rules and DRC
+  summary: DESIGN; kind=rules. Validates references, typed endpoints, required connection fields, and model consistency before a proposed write.
+  status: future
+  owns:
+  - strata/c4.py
+- id: c4_editor
+  parent: viewer
+  kind: component
+  name: C4 map editor
+  summary: DESIGN; kind=editor. Proposed UI only; existing viewer remains read-only until the guarded write path is implemented.
+  status: future
+  owns:
+  - viewer/index.html
+- id: c4_health
+  parent: viewer
+  kind: component
+  name: Map health
+  summary: DESIGN; kind=health. Summarizes completeness, stale links, and DRC findings for the selected map.
+  status: future
+  owns:
+  - strata/c4.py
+- id: c4_library
+  parent: viewer
+  kind: component
+  name: Reusable block library
+  summary: DESIGN; kind=block-library. Offers hand-drawn reusable key blocks and on-demand L4 blocks generated from repository files.
+  status: future
+  owns:
+  - viewer/index.html
+- id: c4_lvs
+  parent: viewer
+  kind: component
+  name: Map LVS
+  summary: DESIGN; kind=lvs. Compares declared map structure and links with repository-derived structure; reports differences without changing
+    the model.
+  status: future
+  owns:
+  - strata/c4.py
+- id: c4_ports
+  parent: viewer
+  kind: component
+  name: Typed ports
+  summary: DESIGN; kind=ports. Suggests valid connection endpoints from existing C4 object types plus a planned kind subtype; does not add a new
+    C4 type.
+  status: future
+  owns:
+  - viewer/index.html
+- id: c4_prompt
+  parent: viewer
+  kind: component
+  name: Prompt rendering
+  summary: DESIGN; kind=prompt. Renders selected DB-backed C4 context into copyable agent prompt text.
+  status: future
+  owns:
+  - strata/context.py
+- id: c4_write_api
+  parent: server
+  kind: component
+  name: C4 write API
+  summary: DESIGN; kind=write-api. Proposed authenticated/authorized mutation route for editor changes; no POST C4 API currently exists and current
+    server is GET-only.
+  status: future
+  owns:
+  - strata/server.py
+- id: c4_write_service
+  parent: cli
+  kind: component
+  name: C4 write service
+  summary: DESIGN; kind=write-service. Proposed permission-checked, validated transactional SQLite write path with an audit entry; YAML is exported
+    from the DB source of truth. Not implemented.
+  status: future
+  owns:
+  - strata/service.py
+- id: c4_yaml
+  parent: viewer
+  kind: component
+  name: Structured YAML export
+  summary: DESIGN; kind=export. Exports the current DB source of truth to the existing C4 YAML model format; import remains through the CLI.
+  status: future
+  owns:
+  - strata/c4.py
+- id: c4mod
+  parent: cli
+  kind: component
+  name: c4
+  summary: C4 model - import, validate, context, flow
+  owns:
+  - strata/c4.py
+- id: c4view
+  parent: viewer
+  kind: component
+  name: c4 viewer
+  summary: Map C4 IcePanel-style
+  owns:
+  - viewer/index.html
+- id: cc_hooks
+  parent: strata
+  kind: app
+  name: Claude Code hooks
+  summary: 'DESIGN: Claude Code PreToolUse hooks enforce role boundaries: subagents do not use the CLI path, the main chat does not edit code'
+  status: future
+  owns:
+  - agent/hooks
+- id: cli
+  parent: strata
+  kind: app
+  name: CLI
+  summary: The only write path; every change leaves an audit entry
+  tags:
+  - write
+  owns:
+  - strata.py
+- id: ctxmod
+  parent: cli
+  kind: component
+  name: context
+  summary: Task context; DESIGN adds role prompts
+  owns:
+  - strata/context.py
+- id: dbmod
+  parent: cli
+  kind: component
+  name: db
+  summary: SQLite access and migration
+  owns:
+  - strata/db.py
+- id: handler
+  parent: server
+  kind: component
+  name: Handler
+  summary: BaseHTTPRequestHandler.do_GET
+  owns:
+  - strata/server.py
+- id: hk_cli
+  parent: cc_hooks
+  kind: component
+  name: block_subagent_strata_cli
+  summary: 'DESIGN: file agent/hooks/block_subagent_strata_cli.py; blocks subagents from running strata.py write commands via Bash'
+  status: future
+  owns:
+  - agent/hooks
+- id: hk_edit
+  parent: cc_hooks
+  kind: component
+  name: block_main_code_edit
+  summary: 'DESIGN: file agent/hooks/block_main_code_edit.py; blocks the main chat from editing code files, code work is delegated to the coder'
+  status: future
+  owns:
+  - agent/hooks
+- id: item_report
+  parent: strata
+  kind: store
+  name: item_report
+  summary: 'DESIGN: worker report table, lives in SQLite (a store cannot be nested so it is placed alongside sqlite); columns item, state (checkpoint|needs_input|stuck|done),
+    note, artifacts, actor role, time; item also has branch, worktree columns (workspace at claim)'
+  status: future
+  owns:
+  - strata/schema.sql
+- id: laya
+  kind: system
+  name: Laya
+  summary: Local multilingual decision engine (/home/abel/project/tools/laya); library, HTTP server and MCP server
+- id: laya_agent
+  parent: laya_lib
+  kind: component
+  name: Agent
+  summary: Runs one checkpoint
+  owns:
+  - ../laya/laya/agent.py
+- id: laya_backends
+  parent: laya_lib
+  kind: component
+  name: backends
+  summary: Execution backends for the forward pass
+  owns:
+  - ../laya/laya/backends/base.py
+  - ../laya/laya/backends/eager.py
+- id: laya_container
+  parent: laya
+  kind: app
+  name: laya container
+  summary: Compose service laya; one-shot quickstart image, entrypoint loads *_FILE secrets; CUDA/ModelScope/Spark variants
+  owns:
+  - ../laya/Dockerfile
+  - ../laya/compose.yaml
+  - ../laya/docker/entrypoint.py
+- id: laya_hooks
+  parent: laya_lib
+  kind: component
+  name: hooks and presets
+  summary: Extension points and presets
+  owns:
+  - ../laya/laya/hooks.py
+  - ../laya/laya/presets.py
+- id: laya_http
+  parent: laya_serve_app
+  kind: component
+  name: HTTP API
+  summary: create_app routes
+  owns:
+  - ../laya/laya/serve.py
+- id: laya_lang
+  parent: laya_lib
+  kind: component
+  name: lang
+  summary: Language detection helpers
+  owns:
+  - ../laya/laya/lang.py
+- id: laya_lib
+  parent: laya
+  kind: app
+  name: laya Python package
+  summary: In-process library and CLI (laya, laya-train, laya-evals); Router and Agent run typed decisions in one forward pass
+  owns:
+  - ../laya/laya/__init__.py
+  - ../laya/pyproject.toml
+- id: laya_mcp_app
+  parent: laya
+  kind: app
+  name: laya-mcp-server
+  summary: MCP tools laya_status, laya_route, laya_predict, laya_predict_batch; runs a local Router or forwards to laya-serve
+  owns:
+  - ../laya/laya/mcp/server.py
+- id: laya_mcp_remote
+  parent: laya_mcp_app
+  kind: component
+  name: RemoteRouter
+  summary: Used when a remote base URL is configured
+  owns:
+  - ../laya/laya/mcp/remote.py
+- id: laya_mcp_tools
+  parent: laya_mcp_app
+  kind: component
+  name: MCP tools
+  summary: Tool handlers
+  owns:
+  - ../laya/laya/mcp/server.py
+  - ../laya/laya/mcp/tools.py
+- id: laya_models
+  parent: laya
+  kind: store
+  name: Model cache
+  summary: Checkpoints laya (English), laya-multilingual and others, downloaded on first use and pinned by revision/digest
+  owns:
+  - ../laya/laya/revisions.py
+- id: laya_router
+  parent: laya_lib
+  kind: component
+  name: Router
+  summary: Picks the checkpoint and delegates to an Agent
+  owns:
+  - ../laya/laya/router.py
+- id: laya_serve_app
+  parent: laya
+  kind: app
+  name: laya-serve
+  summary: HTTP API (compose service laya-serve, loopback port 8000); Jev-compatible /v1/systemone endpoints
+  owns:
+  - ../laya/laya/serve.py
+  - ../laya/compose.http.yaml
+- id: mcp
+  parent: strata
+  kind: app
+  name: MCP server
+  summary: 'DESIGN: strata.py mcp --role R; the role is fixed at startup, each role has its own MCP config entry, and the agent cannot change
+    its role'
+  status: future
+  tags:
+  - write
+  owns:
+  - strata/mcp.py
+- id: mcp_tools
+  parent: mcp
+  kind: component
+  name: tools
+  summary: 'DESIGN: tool wrappers that call service'
+  status: future
+  owns:
+  - strata/mcp.py
+- id: plan_yaml
+  parent: repo
+  kind: store
+  name: Roadmap YAML (docs/plan)
+  summary: 'DESIGN: <docs_dir>/plan/*.yaml, one file per major version; a phase has goal, level, blocks, criteria; the agent drafts, the CLI imports'
+  owns:
+  - docs/plan
+- id: repo
+  kind: system
+  name: Project repo
+  summary: Code and documents of the managed projects
+- id: roadmapmod
+  parent: cli
+  kind: component
+  name: roadmap
+  summary: 'Long-term phase roadmap: import, check, gate; templates and blocks are a new design'
+  owns:
+  - strata/roadmap.py
+- id: rview
+  parent: viewer
+  kind: component
+  name: Roadmap tab
+  summary: Roadmap page in the app shell
+  owns:
+  - viewer/roadmap.js
+- id: server
+  parent: strata
+  kind: app
+  name: Server
+  summary: GET only; blocks unknown Host and traversal
+  owns:
+  - strata/server.py
+- id: service
+  parent: cli
+  kind: component
+  name: service
+  summary: 'DESIGN: add_item, set_item, add_decision, set_decision_status, search; every function takes a role'
+  status: future
+  owns:
+  - strata/service.py
+- id: shell
+  parent: viewer
+  kind: component
+  name: app shell
+  summary: Project sidebar, tabs, Ctrl+K
+  owns:
+  - viewer/app.js
+- id: sqlite
+  parent: strata
+  kind: store
+  name: SQLite
+  summary: /home/abel/project/tools/strata/strata.db; single source of truth
+  owns:
+  - strata/schema.sql
+- id: strata
+  kind: system
+  name: Strata
+  summary: Manages projects, tasks, decisions, documents and the C4 map
+- id: user
+  kind: actor
+  name: User
+  summary: View projects, the C4 map and flows in the browser
+- id: viewer
+  parent: strata
+  kind: app
+  name: Viewer
+  summary: Multi-project app shell and a zoomable C4 map
+  owns:
+  - viewer/app.html
+  - viewer/index.html
+links:
+- id: u_browse
+  from: user
+  to: viewer
+  name: Open page
+  summary: User opens the map in the browser.
+- id: a_cli
+  from: agent
+  to: cli
+  name: Run command
+  summary: Agent runs CLI commands in a shell.
+- id: cli_db
+  from: cli
+  to: sqlite
+  name: Read/write
+  summary: CLI reads and writes the database.
+- id: v_srv
+  from: viewer
+  to: server
+  name: Call API
+  summary: Viewer calls the server over local HTTP.
+- id: srv_db
+  from: server
+  to: sqlite
+  name: Read
+  summary: Server reads the database.
+- id: sh_api
+  from: shell
+  to: server
+  name: Fetch projects, items and docs
+  summary: App shell loads project lists, items and docs.
+- id: m_blocks
+  from: argp
+  to: blocks
+  name: Validate pages
+  summary: Main checks page blocks through the blocks module.
+- id: srv_repo
+  from: server
+  to: repo
+  name: Serve code and docs
+  summary: Server serves code and docs files from the repo.
+- id: cli_repo
+  from: cli
+  to: repo
+  name: Read YAML and scan docs
+  summary: CLI reads YAML files and scans docs in the repo.
+- id: a_main
+  from: agent
+  to: argp
+  name: Import C4 map
+  summary: Agent imports a C4 map through the CLI.
+- id: m_init
+  from: argp
+  to: dbmod
+  name: Open database
+  detail: dbmod.m_init
+  summary: Main opens the database and migrates it when needed.
+- id: m_imp
+  from: argp
+  to: c4mod
+  name: Import map
+  detail: c4mod.m_imp
+  summary: Main hands the map file to the c4 module for import.
+- id: load_yaml
+  from: c4mod
+  to: repo
+  name: Read map file
+  summary: c4 module reads the map file from the repo.
+- id: imp_db
+  from: c4mod
+  to: sqlite
+  name: Write map
+  summary: Import upserts the map and deletes rows missing from it.
+- id: v_api
+  from: c4view
+  to: handler
+  name: Load map
+  detail: handler.v_api
+  summary: Map viewer loads the project model from the server.
+- id: g_read
+  from: handler
+  to: c4mod
+  name: Read model
+  detail: c4mod.g_read
+  summary: Server asks the c4 module for the project model.
+- id: r_db
+  from: c4mod
+  to: sqlite
+  name: Read map rows
+  summary: c4 module reads the map rows from the database.
+- id: g_iss
+  from: handler
+  to: c4mod
+  name: Find map issues
+  detail: c4mod.g_iss
+  summary: Server asks the c4 module which objects have problems.
+- id: iss_repo
+  from: c4mod
+  to: repo
+  name: Check linked files
+  summary: c4 module checks that linked files exist in the repo.
+- id: u_step
+  from: user
+  to: c4view
+  name: Step through flow
+  summary: User steps through a flow with Next and arrow keys.
+- id: m_svc
+  from: argp
+  to: service
+  name: Use service
+  status: future
+  summary: Main calls the service layer instead of the database directly.
+- id: a_mcp_rec
+  from: agent
+  to: mcp_tools
+  name: Record decision
+  summary: Agent calls MCP tool add_decision {title, context, decision, consequences, rejected, supersedes}; PermissionError if denied.
+  status: future
+- id: a_mcp_search
+  from: agent
+  to: mcp_tools
+  name: Search
+  summary: Agent calls MCP tool search {q, project, src, limit}.
+  status: future
+- id: mcp_svc
+  from: mcp
+  to: service
+  name: Call service
+  status: future
+  summary: MCP tools call the service with the process's fixed role.
+- id: mr_svc
+  from: mcp_tools
+  to: service
+  name: Record decision
+  status: future
+  detail: service.mr_svc
+  summary: MCP forwards the decision to the service.
+- id: ms_svc
+  from: mcp_tools
+  to: service
+  name: Search
+  status: future
+  detail: service.ms_svc
+  summary: MCP forwards the search to the service.
+- id: cs_svc
+  from: argp
+  to: service
+  name: Search
+  status: future
+  detail: service.cs_svc
+  summary: CLI search runs through the service.
+- id: a_cli_search
+  from: agent
+  to: argp
+  name: Search
+  summary: Agent searches items, decisions and docs from the CLI.
+  status: future
+- id: gs_svc
+  from: handler
+  to: service
+  name: Search
+  status: future
+  detail: service.gs_svc
+  summary: Server's search route calls the service.
+- id: svc_wr
+  from: service
+  to: sqlite
+  name: Store decision
+  summary: Service stores the new decision.
+  status: future
+- id: svc_audit
+  from: service
+  to: sqlite
+  name: Write audit
+  summary: Service records who did what in the audit log.
+  status: future
+- id: svc_fts
+  from: service
+  to: sqlite
+  name: Full-text search
+  summary: Service runs full-text search over the database, ranked by relevance.
+  status: future
+- id: cs_add_item
+  from: argp
+  to: service
+  name: Add item
+  status: future
+  detail: service.cs_add_item
+  summary: CLI adds a task or issue through the service.
+- id: cs_set_item
+  from: argp
+  to: service
+  name: Update item
+  status: future
+  detail: service.cs_set_item
+  summary: CLI changes an item's status or priority through the service.
+- id: cs_set_dec
+  from: argp
+  to: service
+  name: Update decision
+  status: future
+  detail: service.cs_set_dec
+  summary: CLI changes a decision's status through the service.
+- id: svc_db
+  from: service
+  to: sqlite
+  name: Read/write
+  status: future
+  summary: Service reads and writes the database.
+- id: a_rm_tpl
+  from: agent
+  to: roadmapmod
+  name: Create roadmap template
+  summary: Agent creates a roadmap skeleton from the template.
+  status: future
+- id: rm_tpl_w
+  from: roadmapmod
+  to: plan_yaml
+  name: Write skeleton
+  summary: Roadmap module writes the 5-phase skeleton into the plan folder.
+  status: future
+- id: a_plan_edit
+  from: agent
+  to: plan_yaml
+  name: Edit YAML per project
+  status: future
+  summary: Agent edits the roadmap YAML for each project.
+- id: a_rm_import
+  from: agent
+  to: roadmapmod
+  name: Import roadmap
+  summary: Agent loads a roadmap file through the CLI.
+- id: rm_imp_load
+  from: roadmapmod
+  to: plan_yaml
+  name: Read roadmap
+  summary: Roadmap module reads the roadmap YAML.
+  status: future
+- id: rm_val_c4
+  from: roadmapmod
+  to: c4mod
+  name: Check map objects
+  status: future
+  detail: c4mod.rm_val_c4
+  summary: Roadmap checks that each block points to a real map object.
+- id: rm_blk_db
+  from: roadmapmod
+  to: sqlite
+  name: Store phases and blocks
+  summary: Roadmap stores phases, blocks and their map links in the database.
+  status: future
+- id: rm_blk_task
+  from: roadmapmod
+  to: service
+  name: Create tasks
+  status: future
+  detail: service.rm_blk_task
+  summary: Roadmap creates one task per block through the service.
+- id: a_cli_set
+  from: agent
+  to: argp
+  name: Set status
+  summary: Agent changes a task's status from the CLI.
+  status: future
+- id: a_cli_add
+  from: agent
+  to: argp
+  name: Add item
+  summary: Agent adds an issue or task from the CLI.
+  status: future
+- id: u_confirm
+  from: agent
+  to: user
+  name: Give criteria to the user to confirm
+  status: future
+  summary: Agent hands acceptance criteria to the user to confirm.
+- id: a_cli_confirm
+  from: agent
+  to: argp
+  name: Confirm criterion
+  summary: Agent records a criterion result from the CLI.
+  status: future
+- id: cs_confirm
+  from: argp
+  to: roadmapmod
+  name: Confirm criterion
+  status: future
+  detail: roadmapmod.cs_confirm
+  summary: CLI forwards the criterion result to the roadmap module.
+- id: rm_conf_db
+  from: roadmapmod
+  to: sqlite
+  name: Store criterion
+  summary: Roadmap stores the criterion result and an audit entry.
+  status: future
+- id: a_cli_gate
+  from: agent
+  to: argp
+  name: Pass gate
+  summary: Agent passes a roadmap gate from the CLI.
+- id: cs_gate
+  from: argp
+  to: roadmapmod
+  name: Pass gate
+  detail: roadmapmod.cs_gate
+  summary: CLI forwards the gate request to the roadmap module.
+- id: rm_chk_db
+  from: roadmapmod
+  to: sqlite
+  name: Read progress
+  summary: Roadmap reads step, criterion and item state per block.
+- id: rm_gate_db
+  from: roadmapmod
+  to: sqlite
+  name: Store gate
+  summary: Roadmap records the gate and moves to the next phase.
+- id: u_roadmap
+  from: user
+  to: rview
+  name: Open roadmap
+  summary: User opens the Roadmap tab.
+  status: future
+- id: rv_api
+  from: rview
+  to: handler
+  name: Load roadmap
+  status: future
+  detail: handler.rv_api
+  summary: Roadmap tab fetches phases from the server.
+- id: g_rm
+  from: handler
+  to: roadmapmod
+  name: Read roadmap
+  status: future
+  detail: roadmapmod.g_rm
+  summary: Server asks the roadmap module for roadmap data.
+- id: a_hk_cli
+  from: agent
+  to: hk_cli
+  name: PreToolUse Bash
+  status: future
+  summary: Claude Code hook inspects shell commands before they run.
+- id: a_hk_edit
+  from: agent
+  to: hk_edit
+  name: PreToolUse Edit/Write/NotebookEdit
+  status: future
+  summary: Claude Code hook inspects file edits before they run.
+- id: a_mcp_claim
+  from: agent
+  to: mcp_tools
+  name: Claim item
+  summary: Agent calls MCP tool item_claim to take an item.
+  status: future
+- id: mc_svc_claim
+  from: mcp_tools
+  to: service
+  name: Claim item
+  status: future
+  detail: service.mc_svc_claim
+  summary: MCP forwards the claim to the service as a status transition.
+- id: svc_claim_db
+  from: service
+  to: sqlite
+  name: Store claim
+  summary: Service moves the item to doing and records an audit entry.
+  status: future
+- id: a_mcp_report
+  from: agent
+  to: mcp_tools
+  name: Report item
+  summary: 'Stale: removed MCP tool item_report {item, state, note, artifacts}.'
+  status: future
+- id: mr_svc_report
+  from: mcp_tools
+  to: service
+  name: Report item
+  status: future
+  summary: 'Stale: removed MCP report forwarding to the service.'
+- id: svc_report_db
+  from: service
+  to: item_report
+  name: Store report
+  summary: 'Stale: removed storing of item reports.'
+  status: future
+- id: svc_report_item
+  from: service
+  to: sqlite
+  name: Move item to review
+  summary: 'Stale: removed report that moved an item to review.'
+  status: future
+- id: a_cli_report
+  from: agent
+  to: argp
+  name: Report item
+  summary: 'Stale: removed CLI item report command.'
+  status: future
+- id: cs_report
+  from: argp
+  to: service
+  name: Report item
+  status: future
+  summary: 'Stale: removed CLI report forwarding to the service.'
+- id: a_cli_attention
+  from: agent
+  to: argp
+  name: List attention
+  summary: 'Stale: removed CLI list of items needing attention.'
+  status: future
+- id: cs_attention
+  from: argp
+  to: service
+  name: List attention
+  status: future
+  summary: 'Stale: removed service call listing items needing attention.'
+- id: svc_att_db
+  from: service
+  to: item_report
+  name: Read attention
+  summary: 'Stale: removed read of stuck or needs-input reports.'
+  status: future
+- id: a_cli_prompt
+  from: agent
+  to: argp
+  name: Task prompt
+  summary: Agent builds a task prompt for a role from the CLI.
+  status: future
+- id: cs_prompt
+  from: argp
+  to: ctxmod
+  name: Build prompt
+  status: future
+  detail: ctxmod.cs_prompt
+  summary: CLI asks the context module to build a task prompt.
+- id: a_mcp_prompt
+  from: agent
+  to: mcp_tools
+  name: Task context
+  summary: Agent fetches task context through the MCP task_context tool.
+  status: future
+- id: mp_ctx
+  from: mcp_tools
+  to: ctxmod
+  name: Build prompt
+  status: future
+  detail: ctxmod.mp_ctx
+  summary: MCP asks the context module to build task context.
+- id: ctx_db
+  from: ctxmod
+  to: sqlite
+  name: Read task state
+  summary: Context module reads the item and its workspace from the database.
+  status: future
+- id: laya_agent_mcp
+  from: agent
+  to: laya_mcp_app
+  name: MCP tool call
+  summary: 'Possible: an agent could call laya-mcp-server; not configured in this setup'
+  status: future
+- id: laya_user_http
+  from: user
+  to: laya_http
+  name: POST /v1/systemone
+  summary: Any Jev-style client (curl, scripts) on 127.0.0.1:8000
+- id: laya_sys1_predict
+  from: laya_http
+  to: laya_router
+  name: Predict
+  detail: laya_router.laya_sys1_predict
+  summary: HTTP API passes the request to the router.
+- id: laya_route_lang
+  from: laya_router
+  to: laya_lang
+  name: Detect language
+  summary: Router asks lang to detect the input language.
+- id: laya_predict_agent
+  from: laya_router
+  to: laya_agent
+  name: Run agent
+  detail: laya_agent.laya_predict_agent
+  summary: Router sends the request to the agent for prediction.
+- id: laya_agent_backend
+  from: laya_agent
+  to: laya_backends
+  name: Run backend
+  summary: Agent runs a single forward pass on the backend.
+- id: laya_agent_models
+  from: laya_agent
+  to: laya_models
+  name: load checkpoint
+  summary: Agent downloads and loads model checkpoints.
+- id: laya_router_hooks
+  from: laya_router
+  to: laya_hooks
+  name: run hooks
+  summary: Router runs configured hooks.
+- id: laya_mcp_router
+  from: laya_mcp_tools
+  to: laya_router
+  name: Predict
+  summary: MCP tools call the router directly.
+- id: laya_mcp_remote_call
+  from: laya_mcp_tools
+  to: laya_mcp_remote
+  name: remote mode
+  summary: MCP tools can use remote mode.
+- id: laya_remote_http
+  from: laya_mcp_remote
+  to: laya_http
+  name: POST /v1/systemone
+  summary: Remote router calls the HTTP API.
+- id: laya_container_lib
+  from: laya_container
+  to: laya_lib
+  name: runs quickstart
+  summary: Container runs the quickstart using the library.
+- id: laya_serve_lib
+  from: laya_serve_app
+  to: laya_lib
+  name: imports Router
+  summary: HTTP server imports the Router from the library.
+- id: u_c4_edit
+  from: user
+  to: c4_editor
+  name: Edit C4 map
+  status: future
+  summary: User edits the C4 map in the editor.
+- id: c4_add_block
+  from: c4_editor
+  to: c4_library
+  name: Add reusable block
+  status: future
+  summary: Editor adds a reusable block from the library.
+- id: c4_block_added
+  from: c4_library
+  to: c4_editor
+  name: Insert block on canvas
+  status: future
+  summary: Library inserts the block onto the canvas.
+- id: c4_ports_select
+  from: c4_editor
+  to: c4_ports
+  name: Suggest typed ports
+  status: future
+  summary: Editor asks for typed port suggestions.
+- id: c4_ports_return
+  from: c4_ports
+  to: user
+  name: Show port choices to user
+  status: future
+  summary: Ports panel shows port choices to the user.
+- id: c4_link_edit
+  from: c4_editor
+  to: c4_conn_editor
+  name: Configure connection in side panel
+  status: future
+  summary: Editor opens the connection side panel.
+- id: c4_submit_edit
+  from: c4_conn_editor
+  to: c4_write_api
+  name: Submit edit
+  summary: 'Planned POST /api/c4/edit {project, operation, payload}: authorize role, validate, write via C4 service with audit; 403 unauthorized,
+    400 invalid model.'
+  status: future
+- id: c4_validate_edit
+  from: c4_write_api
+  to: c4_drc
+  name: Validate proposed change
+  status: future
+  summary: Write API asks DRC to validate the proposed change.
+- id: c4_validation_result
+  from: c4_drc
+  to: c4_write_api
+  name: Validation result
+  status: future
+  summary: DRC returns the validation result.
+- id: c4_write_call
+  from: c4_write_api
+  to: c4_write_service
+  name: Authorized C4 write
+  status: future
+  summary: Write API passes the authorized change to the write service.
+- id: c4_write_db
+  from: c4_write_service
+  to: sqlite
+  name: Persist validated change and audit transactionally
+  status: future
+  summary: Write service stores the change and audit in one transaction.
+- id: c4_export_model
+  from: sqlite
+  to: c4_yaml
+  name: Read current DB-backed model
+  status: future
+  summary: Export reads the current model from the database.
+- id: c4_export_file
+  from: c4_yaml
+  to: repo
+  name: Write YAML export
+  status: future
+  summary: Export writes the YAML file.
+- id: c4_export_done
+  from: repo
+  to: c4_yaml
+  name: YAML export written
+  status: future
+  summary: Repo confirms the YAML export was written.
+- id: c4_prompt_render
+  from: c4_yaml
+  to: c4_prompt
+  name: Render selected block prompt
+  status: future
+  summary: Prompt module renders a prompt for the selected block.
+- id: c4_prompt_copy
+  from: c4_prompt
+  to: user
+  name: Copy generated prompt
+  status: future
+  summary: User copies the generated prompt.
+- id: c4_lvs_run
+  from: c4_lvs
+  to: repo
+  name: Scan repository for comparison
+  status: future
+  summary: LVS scans the repo to compare it with the map.
+- id: c4_health_run
+  from: c4_health
+  to: c4_drc
+  name: Include validation findings
+  status: future
+  summary: Health view includes validation findings.
+- id: u_c4_connect
+  from: user
+  to: c4_editor
+  name: Create link between selected output and input ports
+  status: future
+  summary: User links a selected output port to an input port.

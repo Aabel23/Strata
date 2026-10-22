@@ -1,0 +1,31 @@
+id: laya_infer
+name: Laya HTTP inference request
+steps:
+- link: laya_user_http
+  text: send state and questions
+- at: laya_http
+  text: HTTP API calls within HTTP API
+- at: laya_http
+  text: 'POST /v1/systemone: validate body and limits'
+- link: laya_sys1_predict
+- at: laya_router
+  text: pick checkpoint
+- link: laya_route_lang
+  text: detect language
+- link: laya_route_lang
+  reverse: true
+- at: laya_router
+  text: RouteDecision
+- link: laya_predict_agent
+- link: laya_agent_backend
+  text: single forward pass
+- link: laya_agent_backend
+  reverse: true
+- link: laya_predict_agent
+  reverse: true
+  text: typed answers
+- link: laya_sys1_predict
+  reverse: true
+- link: laya_user_http
+  reverse: true
+  text: JSON answers + routing

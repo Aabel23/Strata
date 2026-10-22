@@ -1,0 +1,4 @@
+- id: laya_sys1_predict
+  transport: in-process
+  start: ../laya/laya/serve.py::POST /v1/systemone
+  end: ../laya/laya/router.py::Router.predict

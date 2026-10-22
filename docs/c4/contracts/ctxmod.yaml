@@ -1,0 +1,18 @@
+- id: cs_prompt
+  transport: in-process
+  body:
+    signature: build(c, item_id, budget=12000)
+    purpose: Role header + task context + reporting instructions
+    errors:
+    - ValueError when the role is not coder/reviewer
+  start: strata.py::main
+  end: strata/context.py::build
+- id: mp_ctx
+  transport: in-process
+  body:
+    signature: build(c, item_id, budget=12000)
+    purpose: Role header + task context + reporting instructions
+    errors:
+    - ValueError when the role is not coder/reviewer
+  start: strata/mcp.py::_context
+  end: strata/context.py::build

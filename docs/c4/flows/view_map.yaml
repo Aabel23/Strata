@@ -1,0 +1,37 @@
+id: view_map
+name: View the map and follow a flow
+steps:
+- link: u_browse
+  text: Open /c4?project=P
+- link: v_api
+  text: load the model
+- at: handler
+  text: 'do_GET: check Host, route /api/c4'
+- link: g_read
+- link: r_db
+  text: read object, connection, interface, flow
+- link: r_db
+  reverse: true
+- link: g_read
+  reverse: true
+- link: g_iss
+  text: compute the ! badge for each object
+- link: iss_repo
+- link: iss_repo
+  reverse: true
+- link: g_iss
+  reverse: true
+- link: v_api
+  reverse: true
+  text: JSON model
+- at: c4view
+  text: draw the first level
+- link: u_browse
+  reverse: true
+  text: the map appears on screen
+- link: u_step
+  text: pick a flow, press Next
+- at: c4view
+  text: 'setStep: find the level containing the step, drill to it'
+- at: c4view
+  text: highlight the edge or block of the step

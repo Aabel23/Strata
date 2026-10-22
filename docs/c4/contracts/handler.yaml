@@ -1,0 +1,14 @@
+- id: v_api
+  transport: HTTP
+  body:
+    signature: GET /api/c4?project=P
+    response: '{meta, objects, connections, flows, issues, links, open_issues}'
+    errors:
+    - 403 unknown Host
+    - 404 no model
+  start: viewer/index.html::load
+  end: strata/server.py::make_server
+- id: rv_api
+  transport: HTTP
+  start: viewer/roadmap.js::render phase cards
+  end: strata/server.py::make_server

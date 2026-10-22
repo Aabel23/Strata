@@ -1,0 +1,60 @@
+- id: mr_svc
+  transport: in-process
+  body:
+    signature: add_decision(c, role, project, title, context, decision, consequences, rejected, supersedes=None) -> id
+    purpose: Writes a decision; non-main roles are forced to status proposed; writes audit
+    errors:
+    - PermissionError
+    tool: tools/call add_decision {title, context, decision, consequences, rejected, supersedes}
+  start: strata/mcp.py::call
+  end: strata/service.py::add_decision
+- id: ms_svc
+  transport: in-process
+  body:
+    signature: search(c, q, project=None, src=None, limit=30, role='main')
+    purpose: FTS5 BM25, filter by project/src columns
+    response: '[{src, id, project, title, snippet, rank}]'
+    tool: tools/call search {q, project, src, limit}
+  start: strata/mcp.py::call
+  end: strata/service.py::search
+- id: cs_svc
+  transport: in-process
+  body:
+    signature: search(c, q, project=None, src=None, limit=30, role='main')
+    purpose: FTS5 BM25, filter by project/src columns
+    response: '[{src, id, project, title, snippet, rank}]'
+  start: strata.py::main
+  end: strata/service.py::search
+- id: gs_svc
+  transport: in-process
+  body:
+    signature: search(c, q, project=None, src=None, limit=30, role='main')
+    purpose: FTS5 BM25, filter by project/src columns
+    response: '[{src, id, project, title, snippet, rank}]'
+  start: strata/server.py::make_server
+  end: strata/service.py::search
+- id: cs_add_item
+  transport: in-process
+  start: strata.py::main
+  end: strata/service.py::add_item
+- id: cs_set_item
+  transport: in-process
+  start: strata.py::main
+  end: strata/service.py::set_item
+- id: cs_set_dec
+  transport: in-process
+  start: strata.py::main
+  end: strata/service.py::set_decision_status
+- id: rm_blk_task
+  transport: in-process
+  start: strata/roadmap.py::import_plan
+  end: strata/service.py::add_item
+  body:
+    signature: add_item(c, role, project, kind, title, body=None, priority=None, status='open', spec=None, phase=None)
+- id: mc_svc_claim
+  transport: in-process
+  body:
+    signature: transition(c, role, id, to, actor=None, note=None)
+    purpose: todo to doing, audited compare-and-swap
+  start: strata/mcp.py::call
+  end: strata/service.py::transition
