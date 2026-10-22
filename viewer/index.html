@@ -231,6 +231,7 @@ let cam={x:0,y:0,k:1}, graphBox=null, pos={};
 const ISSUE={dead_link:"Dead link",no_link:"No link",no_desc:"Missing description"};
 const NW=240, NH=108;
 const SDOT={live:["#22a06b","Live"],future:["#9aa3a0","Planned"],doing:["#e5484d","In progress"],maintenance:["#e5b318","Maintenance"],deprecated:["#e8833a","Deprecated"],removed:["#5b5f5e","Removed"]};
+const stc=v=>SDOT[v]?v:"live"; // status goes into class names: whitelist, never raw model text
 const sdot=(o,cx,cy)=>{const d=SDOT[o.status||"live"]||SDOT.live;return `<circle class="sdot" cx="${cx}" cy="${cy}" r="5" fill="${d[0]}"><title>${d[1]}</title></circle>`};
 const TYPE_LABEL={actor:"Actor",system:"System",app:"App",store:"Data store",component:"Component",group:"Group",file:"File",function:"Function"};
 const CODE=new Set(["file","function"]), CW=210, CH=50;
@@ -365,7 +366,7 @@ function render(keepCam,keepOld){
     const ge=g.edge(e.from,e.to), c0=e.list[0], ek=e.from+"→"+e.to;
     if(e.list.length>1&&expanded.has(ek)){s+=laneEdges(e,ek,ge.points,springKey===ek?0:1,hot);return}
     const hn=e.list.map(c=>hot.get(c.id)).find(v=>v!==undefined);
-    const isHot=hn!==undefined, st=e.list.length===1?(c0.status||"live"):"live";
+    const isHot=hn!==undefined, st=e.list.length===1?stc(c0.status):"live";
     const dim=(tag&&!e.list.some(c=>(c.tags||[]).includes(tag)))||(flow&&!isHot);
     const lw=Math.max(label(e).length+(isHot?3:0),tech(e).length)*6; // estimate text width
     const dir=c0.direction||"outgoing", d=curve(ge.points);
@@ -390,7 +391,7 @@ function render(keepCam,keepOld){
       ${col?`<rect x="${x+rx}" y="${y}" width="${NW-2*rx}" height="3" rx="1.5" fill="${esc(col)}"/>`:""}
       <g class="ico" transform="translate(${x+14},${y+12})" stroke="var(--${CODE.has(t)?"component":t})">${ICON[t]||ICON.component}</g>
       ${sdot(o,x+NW-14,y+14)}
-      ${M.issues[id]?`<g class="bdg"><circle cx="${x+NW}" cy="${y}" r="9"/><text x="${x+NW}" y="${y+4}">!</text></g>`:""}
+      ${M.issues[id]&&!M.layered?`<g class="bdg"><circle cx="${x+NW}" cy="${y}" r="9"/><text x="${x+NW}" y="${y+4}">!</text></g>`:""}
       <text class="t" x="${x+44}" y="${y+26}">${esc(clip(o.name||o.id,24))}</text>
       <text class="s" x="${x+44}" y="${y+42}">${esc(sub)}</text>
       ${dl.length?dl.map((l,i)=>`<text class="d" x="${x+14}" y="${y+62+i*14}">${esc(l)}</text>`).join(""):`<text class="d none" x="${x+14}" y="${y+62}">No description</text>`}
@@ -426,7 +427,7 @@ function laneEdges(e,ek,pts,f,hot){
   g0Points.set(ek,pts);
   return e.list.map((c,i)=>{const q=laneGeom(pts,i,e.list.length,f),h=hot.get(c.id),nm=(h!==undefined?`${h+1}. `:"")+clip(c.name||"",28),w=nm.length*6;
     const dir=c.direction||"outgoing",mk=(dir!=="none"?'marker-end="url(#ar)"':"")+(dir==="bidirectional"?' marker-start="url(#ar)"':"");
-    return `<g class="edge lane ${c.status||"live"} ${h!==undefined?"hot":""}" data-e="${esc(ek)}" data-c="${esc(c.id)}" data-i="${i}" data-n="${e.list.length}"><path class="hit" d="${q.d}"/><path class="ln" d="${q.d}" ${mk}/>
+    return `<g class="edge lane ${stc(c.status)} ${h!==undefined?"hot":""}" data-e="${esc(ek)}" data-c="${esc(c.id)}" data-i="${i}" data-n="${e.list.length}"><path class="hit" d="${q.d}"/><path class="ln" d="${q.d}" ${mk}/>
       <rect class="lbg" x="${q.x-w/2-3}" y="${q.y-5}" width="${w+6}" height="17" rx="3"/><text x="${q.x}" y="${q.y+9}" text-anchor="middle">${esc(nm)}</text></g>`}).join("");
 }
 // Damped spring: lanes burst out past their rest spacing, then settle — reads as weight and push.
@@ -450,7 +451,7 @@ function codeNode(n,id,p,tag){
     <rect class="box" x="${x}" y="${y}" width="${CW}" height="${CH}" rx="6"/>
     <g class="ico" transform="translate(${x+10},${y+15}) scale(.8)" stroke="var(--component)">${ICON[o.type]}</g>
     ${sdot(o,x+CW-12,y+12)}
-    ${M.issues[id]?`<g class="bdg"><circle cx="${x+CW}" cy="${y}" r="9"/><text x="${x+CW}" y="${y+4}">!</text></g>`:""}
+    ${M.issues[id]&&!M.layered?`<g class="bdg"><circle cx="${x+CW}" cy="${y}" r="9"/><text x="${x+CW}" y="${y+4}">!</text></g>`:""}
     <text class="t" x="${x+32}" y="${y+21}">${esc(clip(o.name||o.id,24))}</text>
     <text class="s" x="${x+32}" y="${y+37}">${esc(clip(sub,30))}</text></g>`;
 }
@@ -688,7 +689,7 @@ async function postC4(path,body){
 }
 async function refreshC4(keep=focus){
   const r=await fetch("/api/c4"+codeQ); if(!r.ok) throw new Error(`Could not reload model (HTTP ${r.status})`);
-  const d=await r.json(); M={...d.meta,objects:d.objects,connections:d.connections,flows:d.flows,issues:d.issues,links:d.links,open_issues:d.open_issues};
+  const d=await r.json(); M={...d.meta,objects:d.objects,connections:d.connections,flows:d.flows,issues:d.issues,links:d.links,open_issues:d.open_issues,layered:d.layered,contracts:d.contracts,behavior:d.behavior};
   byId={}; (M.objects||[]).forEach(o=>byId[o.id]=o); (M.connections||[]).forEach((c,i)=>c.id=c.id||`c${i}`);
   focus=keep&&byId[keep]&&kids(keep).length?keep:null;
   selected=selected&&byId[selected]?selected:null;
@@ -867,7 +868,7 @@ const tip=$("#tip"); let tipId=null;
 $("#stage").addEventListener("mousemove",e=>{
   const n=!drag&&!busy&&e.target.closest?.(".node"), o=n&&byId[n.dataset.id];
   if(!o){tip.hidden=true;tipId=null;return}
-  if(tipId!==o.id){tipId=o.id; const nk=kids(o.id).length, iss=M.issues[o.id];
+  if(tipId!==o.id){tipId=o.id; const nk=kids(o.id).length, iss=M.layered?null:M.issues[o.id];
     tip.innerHTML=`<b>${esc(o.name||o.id)}</b><div class="m">${esc([TYPE_LABEL[o.type]||o.type,o.technology].filter(Boolean).join(" · "))}${n.classList.contains("ext")?" · outside this level":""}</div>${o.description?`<div>${esc(o.description)}</div>`:'<div class="m">No description</div>'}${nk?`<div class="m">${nk} components inside</div>`:""}${iss?`<div class="w">${esc(iss.map(c=>ISSUE[c]||c).join("; "))}</div>`:""}`;
     tip.hidden=false}
   const w=tip.offsetWidth,h=tip.offsetHeight; tip.style.left=Math.min(e.clientX+14,innerWidth-w-8)+"px"; tip.style.top=(e.clientY+16+h>innerHeight?e.clientY-h-12:e.clientY+16)+"px";

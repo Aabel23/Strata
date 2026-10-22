@@ -336,3 +336,10 @@ def test_viewer_script_calls_only_defined_functions():
           "URLSearchParams", "RegExp", "getComputedStyle", "isFinite", "structuredClone", "FormData", "Event",
           "CustomEvent", "ResizeObserver", "MutationObserver", "URL", "Blob", "AbortController", "dagre", "mermaid"}
     assert sorted(calls - defs - ok) == []
+
+
+def test_viewer_status_class_is_whitelisted():
+    src = (ROOT / "viewer/index.html").read_text()
+    assert 'const stc=v=>SDOT[v]?v:"live"' in src
+    assert "${c.status||" not in src and "c0.status||" not in src  # raw status must not reach class="..."
+    assert src.count("stc(c.status)") == 1 and src.count("stc(c0.status)") == 1
