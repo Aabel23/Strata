@@ -17,7 +17,7 @@ def servable(root, segs):
 VIEWER = pathlib.Path(__file__).resolve().parent.parent / "viewer"
 STATIC = {"/": "app.html", "/app.js": "app.js", "/app.css": "app.css", "/c4": "index.html", "/index.html": "index.html", "/page.js": "page.js", "/swimlane.js": "swimlane.js", "/roadmap.js": "roadmap.js", "/page.css": "page.css"}
 TYPES = {".html": "text/html", ".md": "text/plain", ".yaml": "text/plain", ".js": "application/javascript", ".css": "text/css", ".json": "application/json"}
-SHOW = {"item": "id,project,kind,title,status,priority,owner"}
+SHOW = {"item": "id,project,kind,label,title,status,priority,owner"}
 ITEM_KINDS = ("rule", "task", "issue", "knowledge", "draft", "note", "step", "gate")
 ITEM_STATUS = ("proposed", "approved", "open", "doing", "review", "done", "rejected")
 CLOSED = "('done','rejected')"
@@ -99,7 +99,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                     links = db.links_for(conn, proj) if m else {}
                     open_issues = [r["object_id"] for r in conn.execute(
                         "SELECT DISTINCT l.object_id FROM c4_link l JOIN item t ON t.id=l.ref_id WHERE l.project=? AND l.ref_kind='item' "
-                        f"AND t.project=? AND t.kind='issue' AND t.status NOT IN {CLOSED} ORDER BY l.object_id", (proj, proj))] if m else []
+                        f"AND t.project=? AND t.label='issue' AND t.status NOT IN {CLOSED} ORDER BY l.object_id", (proj, proj))] if m else []
                 if not m: return self.send_error(404)
                 m.pop("root")
                 meta = {"name": m.pop("name")}
@@ -152,10 +152,10 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             out = rows("SELECT id,name,description,parent,status FROM project ORDER BY id")
             for r in out:
                 pid = r["id"]
-                r["tasks"] = {x["status"]: x["n"] for x in rows("SELECT status,count(*) n FROM item WHERE project=? AND kind='task' GROUP BY status", (pid,))}
+                r["tasks"] = {x["status"]: x["n"] for x in rows("SELECT status,count(*) n FROM item WHERE project=? AND kind='task' AND coalesce(label,'')!='issue' GROUP BY status", (pid,))}
                 one = lambda sql: rows(sql, (pid,))[0]["n"]
-                r["issues_open"] = one(f"SELECT count(*) n FROM item WHERE project=? AND kind='issue' AND status NOT IN {CLOSED}")
-                r["issues_total"] = one("SELECT count(*) n FROM item WHERE project=? AND kind='issue'")
+                r["issues_open"] = one(f"SELECT count(*) n FROM item WHERE project=? AND label='issue' AND status NOT IN {CLOSED}")
+                r["issues_total"] = one("SELECT count(*) n FROM item WHERE project=? AND label='issue'")
                 r["pages"] = one("SELECT count(*) n FROM page WHERE project=?")
                 r["docs"] = one("SELECT count(*) n FROM doc WHERE project=? AND status!='missing'")
                 r["last_update"] = rows("SELECT max(t) m FROM (SELECT max(updated_at) t FROM item WHERE project=? UNION ALL SELECT max(updated_at) FROM page WHERE project=? "
@@ -163,13 +163,13 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             return out
 
         def items(self, q):
-            """List (filters kind/status/owner/project/ready, id order; ready: priority order) or, with id, the item plus deps, links and history."""
+            """List (filters kind/label/status/owner/project/ready; kind=issue = task+label issue, id order; ready: priority order) or, with id, the item plus deps, links and history."""
             for k, ok in (("kind", ITEM_KINDS), ("status", ITEM_STATUS)):
                 if k in q and q[k] not in ok: return self.send_error(400, f"bad {k}")
             if "id" in q and not q["id"].isdigit(): return self.send_error(400, "bad id")
             ready = q.get("ready") == "1"
             with lock:
-                out = service.list_items(conn, q.get("project") or None, q.get("kind"), q.get("status"), q.get("owner") or None, ready)
+                out = service.list_items(conn, q.get("project") or None, q.get("kind"), q.get("status"), q.get("owner") or None, ready, q.get("label") or None)
                 if "id" in q: out = [r for r in out if r["id"] == int(q["id"])]
                 roadmap.annotate(conn, out)
                 if not ready: out.sort(key=lambda r: r["id"])

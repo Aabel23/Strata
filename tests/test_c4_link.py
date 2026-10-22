@@ -24,7 +24,7 @@ def test_link_unlink_audit_and_dup(dbp):
     code, out = run(dbp, "c4", "links", "--project", "p", "--object", "relay")
     assert code == 0 and "Lỗi relay" in out
     l = db.links_for(db.connect(dbp), "p", "relay")
-    assert l["items"] == [{"id": 1, "kind": "issue", "title": "Lỗi relay", "status": "open"}]
+    assert l["items"] == [{"id": 1, "kind": "task", "title": "Lỗi relay", "status": "open"}]
     assert run(dbp, "c4", "unlink", "--project", "p", "--object", "relay", "--item", "1")[0] == 0
     assert run(dbp, "c4", "unlink", "--project", "p", "--object", "relay", "--item", "1")[1] == "no change\n"
     assert audits(dbp, "c4.unlink") == 1
