@@ -1,6 +1,6 @@
 """MCP server over stdio (JSON-RPC 2.0, one JSON message per line). Role is fixed at launch; clients cannot pass one."""
 import json, pathlib, sys, traceback
-from strata import blocks, c4, db, service
+from strata import blocks, c4_layered, db, service
 
 CAP, MAX_LINE = 8000, 1 << 20
 VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
@@ -70,9 +70,9 @@ TOOLS = {
     "get_item": (_get_item, "One item with spec, deps both ways, c4 links, recent audit", schema({"id": I()}, ["id"]), ALL),
     "list_decisions": (_decisions, "Decisions of a project, newest first", schema({"project": S(), "status": S(), "limit": _lim}, ["project"]), ALL),
     "get_doc": (_get_doc, "A project doc (YAML) parsed, with validation errors", schema({"project": S(), "path": S("Relative path under docs_dir")}, ["project", "path"]), ALL),
-    "c4_context": (lambda c, role, project, object=None, max_tokens=2000: c4.context_text(c, project, object, max_tokens),
+    "c4_context": (lambda c, role, project, object=None, max_tokens=2000: c4_layered.context_text(c, project, object, max_tokens),
                    "C4 overview or one object with its links, connections and flows", schema({"project": S(), "object": S(), "max_tokens": I()}, ["project"]), ALL),
-    "c4_flow": (lambda c, role, project, id=None: c4.flow_text(c, project, id), "Numbered trace of a flow; no id lists flows", schema({"project": S(), "id": S()}, ["project"]), ALL),
+    "c4_flow": (lambda c, role, project, id=None: c4_layered.flow_text(c, project, id), "Numbered trace of a flow; no id lists flows", schema({"project": S(), "id": S()}, ["project"]), ALL),
     "audit": (_audit, "Recent audit rows of a project, newest first", schema({"project": S(), "limit": _lim}, ["project"]), ALL),
     "task_context": (_context, "Budgeted context bundle for a task: ticket, hard rules, decisions, c4, paths", schema({"id": I(), "budget": I("Max chars, default 12000")}, ["id"]), ALL),
     "search": (service.search, "Full-text search over items, decisions, pages and docs", schema(

@@ -1,6 +1,6 @@
 """task context: one budgeted text bundle for a coder (decisions 11, 28)."""
 import json, pathlib, re, sys
-from strata import c4, service
+from strata import c4_layered, service
 
 
 def _rules(root):
@@ -39,7 +39,7 @@ def build(c, item_id, budget=12000):
     left = budget - used - 2
     for n, o in enumerate(objs):
         share = left // (len(objs) - n)
-        try: t = f"## C4 {o}\n" + c4.context_text(c, i["project"], o)
+        try: t = f"## C4 {o}\n" + c4_layered.context_text(c, i["project"], o)
         except (ValueError, KeyError) as e: warn.append(f"c4 {o}: {e}"); continue
         if share < 80: warn.append(f"cut c4 {o}"); continue
         if len(t) > share: t = t[:share]; warn.append(f"truncated c4 {o}")

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="vi">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -81,8 +81,8 @@ h1{font-size:20px;margin:0 0 4px}.sub{color:var(--muted);margin-bottom:18px}
 <header id="top">
   <div class="logo">S</div>
   <div id="crumb"><b id="cp">Strata</b><span>›</span><span id="cm"></span></div>
-  <input id="q" placeholder="Lọc theo tiêu đề…" aria-label="Lọc">
-  <button id="theme" title="Đổi sáng/tối">◐</button>
+  <input id="q" placeholder="Filter by title…" aria-label="Filter">
+  <button id="theme" title="Toggle light/dark">◐</button>
 </header>
 <div id="wrap">
   <nav>
@@ -111,7 +111,7 @@ const ICON={
   c4:'<rect x="5.5" y="1.5" width="5" height="4" rx="1"/><rect x="1.5" y="10.5" width="5" height="4" rx="1"/><rect x="9.5" y="10.5" width="5" height="4" rx="1"/><path d="M8 5.5V8M4 10.5V8h8v2.5"/>',
   notes:'<path d="M3 2h10v12H3z"/><path d="M6 5h4M6 8h4"/>'
 };
-const MODULES=[["overview","Tổng quan"],["tasks","Task"],["issues","Issue"],["docs","Tài liệu"],["decisions","Quyết định"],["notes","Ghi chú & tri thức"],["c4","Kiến trúc C4"]];
+const MODULES=[["overview","Overview"],["tasks","Task"],["issues","Issue"],["docs","Docs"],["decisions","Decision"],["notes","Notes & knowledge"],["c4","C4 architecture"]];
 const TASK_COLS=["proposed","approved","open","doing","done","rejected"];
 const NOTE_KINDS=["rule","knowledge","draft","note"];
 const PALETTE=["#3dd6c6","#6ea8ff","#b49cff","#ffb15c","#5bd17a","#f07aa8","#e8d36a"];
@@ -155,7 +155,7 @@ function render(){
     r.append(av,el("span","nm",p)); if(open) r.append(el("span","chip",open));
     r.onclick=()=>nav(p,MOD); pj.append(r);
   });
-  if(!projects().length) pj.append(el("div","empty","Chưa có dữ liệu. Dùng strata.py import-yaml / page put."));
+  if(!projects().length) pj.append(el("div","empty","No data yet. Use strata.py c4 import / page put."));
   // sidebar: modules with counts
   const md=$("#modules"); md.replaceChildren();
   const cnt={tasks:kind("task").length,issues:kind("issue").length,docs:of(D.pages,P).length,decisions:of(D.decisions,P).length,notes:of(D.items,P).filter(x=>NOTE_KINDS.includes(x.kind)).length,c4:D.c4.has(P)?"●":""};
@@ -176,20 +176,20 @@ const kind=k=>of(D.items,P).filter(x=>x.kind===k);
 /* modules */
 function overview(v){
   const w=el("div","pad"); v.append(w);
-  w.append(el("h1","",P),el("div","sub","Tổng quan dự án"));
+  w.append(el("h1","",P),el("div","sub","Project overview"));
   const g=el("div","grid"); w.append(g);
   const t=kind("task"), done=t.filter(x=>x.status==="done").length, live=t.filter(x=>x.status!=="rejected").length;
   const pct=live?Math.round(done*100/live):0;
-  tile(g,"Tiến độ task",pct+"%",`${done}/${live} xong`,()=>nav(P,"tasks"),barOf(t));
-  tile(g,"Đang làm",t.filter(x=>x.status==="doing").length,"task ở trạng thái doing",()=>nav(P,"tasks"));
-  tile(g,"Issue mở",kind("issue").filter(x=>!["done","rejected"].includes(x.status)).length,`/${kind("issue").length} issue`,()=>nav(P,"issues"));
-  tile(g,"Tài liệu",of(D.pages,P).length,"trang",()=>nav(P,"docs"));
-  tile(g,"Quyết định",of(D.decisions,P).length,`${of(D.decisions,P).filter(x=>x.status==="accepted").length} đã chấp nhận`,()=>nav(P,"decisions"));
-  tile(g,"Kiến trúc C4",D.c4.has(P)?"Có":"—",D.c4.has(P)?"mở sơ đồ":"chưa import model",()=>nav(P,"c4"));
+  tile(g,"Task progress",pct+"%",`${done}/${live} done`,()=>nav(P,"tasks"),barOf(t));
+  tile(g,"In progress",t.filter(x=>x.status==="doing").length,"tasks in doing",()=>nav(P,"tasks"));
+  tile(g,"Open issues",kind("issue").filter(x=>!["done","rejected"].includes(x.status)).length,`/${kind("issue").length} issue`,()=>nav(P,"issues"));
+  tile(g,"Docs",of(D.pages,P).length,"pages",()=>nav(P,"docs"));
+  tile(g,"Decision",of(D.decisions,P).length,`${of(D.decisions,P).filter(x=>x.status==="accepted").length} accepted`,()=>nav(P,"decisions"));
+  tile(g,"C4 architecture",D.c4.has(P)?"Yes":"—",D.c4.has(P)?"open diagram":"model not imported",()=>nav(P,"c4"));
   const doing=t.filter(x=>x.status==="doing"||x.status==="open").slice(0,8);
-  list(w,"Task đang mở",doing,x=>[x.title,x.status,"#"+x.id],()=>nav(P,"tasks"));
+  list(w,"Open tasks",doing,x=>[x.title,x.status,"#"+x.id],()=>nav(P,"tasks"));
   const pg=[...of(D.pages,P)].sort((a,b)=>String(b.updated_at).localeCompare(a.updated_at)).slice(0,6);
-  list(w,"Tài liệu mới cập nhật",pg,x=>[x.title,x.kind,(x.updated_at||"").slice(0,10)],x=>nav(P,"docs",x.slug));
+  list(w,"Recently updated docs",pg,x=>[x.title,x.kind,(x.updated_at||"").slice(0,10)],x=>nav(P,"docs",x.slug));
 }
 function tile(g,k,v,h,on,extra){const t=el("div","tile");t.append(el("div","k",k),el("div","v",v),el("div","h",h));if(extra)t.append(extra);t.onclick=on;g.append(t)}
 function barOf(items){
@@ -200,16 +200,16 @@ function barOf(items){
 }
 function list(w,title,rows,cols,on){
   const l=el("div","list");l.append(el("h3","",title));w.append(l);
-  if(!rows.length) return l.append(el("div","empty","Không có."));
+  if(!rows.length) return l.append(el("div","empty","None."));
   rows.forEach(x=>{const [t,s,m]=cols(x), r=el("div","row");r.append(el("span","t",t),el("span","chip s-"+s,s),el("span","m",m));r.onclick=()=>on(x);l.append(r)});
 }
 function board(k){
   return v=>{
     const w=el("div","pad");w.style.maxWidth="none";v.append(w);
     const all=kind(k).filter(x=>match(x.title));
-    w.append(el("h1","",k==="task"?"Task":"Issue"),el("div","sub",`${all.length} mục · kéo ngang để xem các cột`));
+    w.append(el("h1","",k==="task"?"Task":"Issue"),el("div","sub",`${all.length} items · scroll sideways to see columns`));
     const tb=el("div","toolbar"), own=el("select");
-    own.append(new Option("Mọi owner",""),...[...new Set(all.map(x=>x.owner).filter(Boolean))].map(o=>new Option(o,o)));
+    own.append(new Option("All owners",""),...[...new Set(all.map(x=>x.owner).filter(Boolean))].map(o=>new Option(o,o)));
     own.value=SUB||""; own.onchange=()=>nav(P,MOD,own.value); tb.append(own,barOf(all));tb.lastChild.style.cssText="flex:1;margin:0";w.append(tb);
     const items=all.filter(x=>!SUB||x.owner===SUB);
     const b=el("div","board");w.append(b);
@@ -231,26 +231,26 @@ function docs(v){
   const groups={};pages.forEach(x=>(groups[x.kind]=groups[x.kind]||[]).push(x));
   Object.keys(groups).sort().forEach(k=>{l.append(el("div","sec",k));groups[k].forEach(x=>{
     const r=el("div","row"+(x.slug===SUB?" on":""));r.append(el("span","t",x.title));r.onclick=()=>nav(P,"docs",x.slug);l.append(r)})});
-  if(!pages.length) l.append(el("div","empty","Chưa có trang nào."));
+  if(!pages.length) l.append(el("div","empty","No pages yet."));
   const cur=pages.find(x=>x.slug===SUB)||pages[0];
   if(cur){const f=el("iframe");f.title=cur.title;f.src=`/page/${enc(P)}/${enc(cur.slug)}`;body.append(f);body.style.minHeight="0"}
-  else body.append(el("div","empty","Chọn một tài liệu."));
+  else body.append(el("div","empty","Select a doc."));
 }
 function decisions(v){
   const w=el("div","pad");v.append(w);
   const xs=of(D.decisions,P).filter(x=>match(x.title));
-  w.append(el("h1","","Quyết định (ADR)"),el("div","sub","Nhật ký chỉ ghi thêm; chỉ trạng thái được đổi."));
-  list(w,`${xs.length} quyết định`,xs,x=>[x.title,x.status,"ADR-"+x.id],()=>{});
+  w.append(el("h1","","Decisions (ADR)"),el("div","sub","Append-only log; only status can change."));
+  list(w,`${xs.length} decisions`,xs,x=>[x.title,x.status,"ADR-"+x.id],()=>{});
 }
 function notes(v){
   const w=el("div","pad");v.append(w);
-  w.append(el("h1","","Ghi chú & tri thức"),el("div","sub","rule · knowledge · draft · note"));
+  w.append(el("h1","","Notes & knowledge"),el("div","sub","rule · knowledge · draft · note"));
   NOTE_KINDS.forEach(k=>{const xs=kind(k).filter(x=>match(x.title));if(xs.length)list(w,k,xs,x=>[x.title,x.status,"#"+x.id],()=>{})});
-  if(!NOTE_KINDS.some(k=>kind(k).length)) w.append(el("div","empty","Chưa có ghi chú."));
+  if(!NOTE_KINDS.some(k=>kind(k).length)) w.append(el("div","empty","No notes yet."));
 }
 function c4(v){
-  if(!D.c4.has(P)){const w=el("div","pad");w.append(el("h1","","Kiến trúc C4"),el("div","sub","Project này chưa có model C4."));
-    const c=el("code","",`python3 strata.py import-yaml model.strata.yaml --project ${P}`);w.append(c);return v.append(w)}
+  if(!D.c4.has(P)){const w=el("div","pad");w.append(el("h1","","C4 architecture"),el("div","sub","No C4 map (layered format) for this project."));
+    const c=el("code","",`python3 strata.py c4 import docs/c4 --project ${P}`);w.append(c);return v.append(w)}
   v.className="full"; const f=el("iframe");f.title="C4";f.src=`/?project=${enc(P)}&shell=1`;v.append(f);
 }
 

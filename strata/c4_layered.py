@@ -1,8 +1,9 @@
 """Layered C4 folder: map.yaml + contracts/ + behavior/ + flows/ <-> DB (design: docs/research/c4-layered-map-format.yaml)."""
 import ast, json, os, pathlib, re
 import yaml
-from strata import c4, symbols
+from strata import symbols
 
+STATUS = {"live", "future", "doing", "maintenance", "deprecated", "removed"}
 KINDS = {"actor", "system", "app", "store", "component", "group"}
 KEYS = {"objects": {"id", "parent", "kind", "name", "summary", "status", "tags", "owns", "behavior"},
         "links": {"id", "from", "to", "name", "summary", "detail", "status"},
@@ -14,6 +15,39 @@ _Loader.yaml_implicit_resolvers = {k: [(t, r) for t, r in v if t != "tag:yaml.or
 _Loader.add_implicit_resolver("tag:yaml.org,2002:bool", re.compile(r"^(?:true|false)$"), list("tf"))
 j = lambda v: json.dumps(v, ensure_ascii=False) if v is not None else None
 dump = lambda path, data: path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+
+def ancestors(byid, id):
+    """(parent ids above `id`, bad): bad is the id where the chain hits a cycle or a missing id, else None."""
+    seen, out, p = {id}, [], (byid.get(id) or {}).get("parent")
+    while p is not None and isinstance(p, str):
+        if p in seen or p not in byid: return out, p
+        seen.add(p); out.append(p); p = byid[p].get("parent")
+    return out, None
+
+
+def step_ends(s, conns, objs):
+    """(start, end) of a flow step and an error text or None. Step forms: {connection, reverse?} | {at}; reverse walks the link backwards."""
+    if not isinstance(s, dict): return None, "bước phải là object"
+    has_c, has_at = s.get("connection") is not None, s.get("at") is not None
+    if has_c + has_at != 1: return None, "cần đúng một trong connection | at"
+    if s.get("reverse") and not has_c: return None, "reverse chỉ dùng với connection"
+    if has_at:
+        return ((s["at"], s["at"]), None) if s["at"] in objs else (None, f"at '{s['at']}' không tồn tại")
+    c = conns.get(s["connection"])
+    if c is None: return None, f"connection '{s['connection']}' không tồn tại"
+    a, b = c.get("from"), c.get("to")
+    return ((b, a) if s.get("reverse") else (a, b)), None
+
+
+def _related(objs, a, b):
+    """a == b or one is an ancestor of the other."""
+    def up(x):
+        seen = []
+        while x is not None and x not in seen: seen.append(x); x = (objs.get(x) or {}).get("parent")
+        return seen
+    return a in up(b) or b in up(a)
+
 
 
 def _read(path, errs):
@@ -100,10 +134,10 @@ def check(m, d, idx=None):
     for oid, o in objs.items():
         if not o.get("name"): errs.append(f"{oid}: thiếu name")
         if o.get("kind") not in KINDS: errs.append(f"{oid}: kind '{o.get('kind')}' không hợp lệ")
-        if o.get("status", "live") not in c4.STATUS: errs.append(f"{oid}: status sai")
+        if o.get("status", "live") not in STATUS: errs.append(f"{oid}: status sai")
         p = o.get("parent")
         if p is not None and p not in objs: errs.append(f"{oid}: parent '{p}' không tồn tại")
-        elif p is not None and c4.ancestors(objs, oid)[1] in objs: errs.append(f"{oid}: chuỗi parent bị vòng")
+        elif p is not None and ancestors(objs, oid)[1] in objs: errs.append(f"{oid}: chuỗi parent bị vòng")
         b = o.get("behavior")
         if b is not None and pathlib.PurePath(str(b)).stem not in m["behavior"]: errs.append(f"{oid}: behavior '{b}' không có file")
     for mod in m["behavior"]:
@@ -112,7 +146,7 @@ def check(m, d, idx=None):
         for end in ("from", "to"):
             if x.get(end) not in objs: errs.append(f"link {lid}: {end} '{x.get(end)}' không tồn tại")
         if x.get("detail") is not None and x["detail"] not in cons: errs.append(f"link {lid}: detail '{x['detail']}' không tồn tại")
-        if x.get("status", "live") not in c4.STATUS: errs.append(f"link {lid}: status sai")
+        if x.get("status", "live") not in STATUS: errs.append(f"link {lid}: status sai")
     cache = {}
     for cid, r in cons.items():
         if not isinstance(cid, str) or "." not in cid or cid.endswith("."): errs.append(f"contract {cid}: thiếu id"); continue
@@ -128,14 +162,14 @@ def check(m, d, idx=None):
             where = f"flow {f['id']} bước {i}"
             if not isinstance(s, dict): errs.append(f"{where}: phải là mapping"); continue
             if s.get("link") is not None and s["link"] not in links: errs.append(f"{where}: link '{s['link']}' không tồn tại"); continue
-            ends, err = c4.step_ends({**{k: v for k, v in s.items() if k in ("at", "reverse")}, **({"connection": s["link"]} if "link" in s else {})}, flat, objs)
+            ends, err = step_ends({**{k: v for k, v in s.items() if k in ("at", "reverse")}, **({"connection": s["link"]} if "link" in s else {})}, flat, objs)
             if err: errs.append(f"{where}: {err.replace('connection', 'link')}"); continue
             if s.get("transition") is not None:
                 beh = m["behavior"].get(pathlib.PurePath(str(objs[s["at"]].get("behavior") or "")).stem) if "at" in s else None
                 if "at" not in s: errs.append(f"{where}: transition chỉ dùng với at")
                 elif s["transition"] not in [t.get("id") for t in (beh or {}).get("transitions") or [] if isinstance(t, dict)]:
                     warns.append(f"{where}: transition '{s['transition']}' chưa có trong behavior của '{s['at']}'")
-            if ends and prev and not c4._related(objs, prev[1], ends[0]):
+            if ends and prev and not _related(objs, prev[1], ends[0]):
                 warns.append(f"{where}: đứt mạch, bắt đầu ở '{ends[0]}' nhưng bước trước kết thúc ở '{prev[1]}'")
             prev = ends or prev
     n = sum(x.get("detail") is not None for x in links.values())
@@ -153,7 +187,7 @@ def report(d, idx=None):
 
 
 def _counts(c, project):
-    return {t: c.execute(f"SELECT count(*) FROM c4_{t} WHERE project=?", (project,)).fetchone()[0] for t in ("object", "connection", "flow", "contract", "behavior", "port", "interface")}
+    return {t: c.execute(f"SELECT count(*) FROM c4_{t} WHERE project=?", (project,)).fetchone()[0] for t in ("object", "connection", "flow", "contract", "behavior")}
 
 
 def _upsert(c, table, pk, row):
@@ -163,7 +197,7 @@ def _upsert(c, table, pk, row):
 
 
 def import_dir(c, d, project, force=False):
-    """Audited upsert of a layered folder into `project`; rows absent from the folder are deleted (incl. old-format interfaces/ports). Atomic."""
+    """Audited upsert of a layered folder into `project`; rows absent from the folder are deleted, and task/decision links to objects that no longer exist. Atomic."""
     m, errs = load(d)
     if m is not None: errs += check(m, d)[0]
     if errs and not force: raise ValueError("model có lỗi, không ghi gì (--force để bỏ qua):\n" + "\n".join(errs))
@@ -173,7 +207,6 @@ def import_dir(c, d, project, force=False):
         before = _counts(c, project)
         _upsert(c, "meta", "project", {"project": project, "name": pr.get("name") or pr.get("id") or project,
                                        "root": str((pathlib.Path(d) / pr["root"]).resolve()), "source": str(pathlib.Path(d).resolve())})
-        c.execute("UPDATE c4_connection SET from_port_id=NULL, to_port_id=NULL WHERE project=?", p); c.execute("DELETE FROM c4_port WHERE project=?", p); c.execute("DELETE FROM c4_interface WHERE project=?", p)
         for o in m["objects"]:
             _upsert(c, "object", "project,id", {"id": o["id"], "project": project, "type": o.get("kind"), "name": o.get("name"), "parent": o.get("parent"),
                     "description": o.get("summary"), "tags": j(o.get("tags")), "status": o.get("status"), "owns": j(o.get("owns")), "behavior": o.get("behavior")})
@@ -191,6 +224,7 @@ def import_dir(c, d, project, force=False):
                              ("contract", "id", m["contracts"]), ("behavior", "module", [{"module": k} for k in m["behavior"]])):
             keep = [r[col] for r in rows]
             c.execute(f"DELETE FROM c4_{t} WHERE project=? AND {col} NOT IN ({','.join('?' * len(keep))})", (project, *keep))
+        c.execute("DELETE FROM c4_link WHERE project=? AND object_id NOT IN (SELECT id FROM c4_object WHERE project=?)", (project, project))
         after = _counts(c, project)
         c.execute("INSERT INTO audit(project,actor_role,tool,target,before,after) VALUES(?,?,?,?,?,?)",
                   (project, "cli", "c4-import", str(d), j(before), j(after)))
@@ -222,10 +256,19 @@ def export_dir(c, project, d):
 
 # ---- read side: text for agents (c4 flow / context / contract) ----
 
-def is_layered(c, project):
-    """Imported by `c4 import` <=> c4_meta.source is a folder path; old-format import-yaml stores a .yaml file there (or nothing)."""
-    r = c.execute("SELECT source FROM c4_meta WHERE project=?", (project,)).fetchone()
-    return bool(r and r[0] and not r[0].lower().endswith((".yaml", ".yml")))
+def read_model(c, project):
+    """{name, root, objects, connections, flows} for the viewer and /code, or None when the project has no imported map."""
+    meta = c.execute("SELECT * FROM c4_meta WHERE project=?", (project,)).fetchone()
+    if not meta: return None
+    jl = lambda v: json.loads(v) if v is not None else None
+    clean = lambda d: {k: v for k, v in d.items() if v is not None}
+    q = lambda t: c.execute(f"SELECT * FROM c4_{t} WHERE project=? ORDER BY rowid", (project,)).fetchall()
+    return {"name": meta["name"], "root": meta["root"],
+            "objects": [clean({"id": o["id"], "type": o["type"], "name": o["name"], "parent": o["parent"], "description": o["description"],
+                               "tags": jl(o["tags"]), "status": o["status"], "owns": jl(o["owns"]), "behavior": o["behavior"]}) for o in q("object")],
+            "connections": [clean({"id": x["id"], "from": x["from_id"], "to": x["to_id"], "name": x["name"], "description": x["description"],
+                                   "detail": x["detail"], "status": x["status"]}) for x in q("connection")],
+            "flows": [clean({"id": f["id"], "name": f["name"], "steps": jl(f["steps"]) or []}) for f in q("flow")]}
 
 
 def viewer_extra(c, project):

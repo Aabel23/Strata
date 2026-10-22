@@ -51,7 +51,8 @@ Hiện có: `internproj`; `project1_app` (cha internproj, root `/home/abel/proje
 | Gói ngữ cảnh task | `$S task context ID [--budget 12000]` (ticket, luật cứng, decision, c4, đường dẫn; quá ngân sách thì cắt, cảnh báo stderr) |
 | Đọc map | `$S c4 context --project P [--object OBJ] [--max-tokens 2000]` |
 | Đọc flow | `$S c4 flow --project P` (liệt kê) / `$S c4 flow --project P --id FLOW` |
-| Sửa map | sửa YAML → `$S validate FILE` (0 lỗi) → `$S import-yaml FILE --project P`. Chi tiết: `docs/AGENT_C4.md` |
+| Sửa map | sửa thư mục `docs/c4` → `$S c4 validate docs/c4` (0 lỗi) → `$S c4 import docs/c4 --project P`. Chi tiết: `docs/AGENT_C4.md` |
+| Đọc contract | `$S c4 contract ID --project P` |
 | Viết tài liệu | file YAML trong `<docs_dir>/research\|architect\|plan\|review/`, server tự quét. Định dạng: `docs/architect/doc-format.yaml` |
 | Kiểm tra doc | `$S doc validate FILE` |
 | Quét doc tay | `$S doc scan --project P` |
@@ -81,7 +82,7 @@ Block khác: `diagram`, `layers`, `swimlane`, `mermaid`, `legend`, `c4`, `query`
 Kiểm lỗi: mở viewer (trang hiện khung lỗi) hoặc `curl -s 'localhost:8740/api/doc?project=P&path=...' | jq .errors`.
 
 ## Luồng 6 bước → Strata
-- **B2 sơ đồ**: viết/sửa C4 YAML + flow → `validate` → `import-yaml`.
+- **B2 sơ đồ**: viết/sửa thư mục C4 (map, contracts, flows) → `c4 validate` → `c4 import`.
 - **B3 research**: mỗi research-stage là một doc YAML trong `<docs_dir>/research/` (chat chính ghi, theo skill `research-stage`); user chốt xong thì `decision add`.
 - **B4 user duyệt**: `item add --kind task --status approved` + `c4 link` vào object liên quan.
 - **B5 làm**: coder `item claim N --as coder` → `item submit N --as coder --note "..."`; main `item approve N`.
@@ -95,9 +96,9 @@ Ba server cùng `strata.py mcp --role ...`, khác nhau ở tập tool theo vai:
 - `strata-reviewer` (`--role reviewer`): reviewer đọc, thêm issue (`proposed`).
 Đăng ký đang chờ user (xem "Cài đặt" trong `agent/BOOTSTRAP.md`). Có MCP thì ưu tiên MCP hơn CLI.
 
-## Lỗi hay gặp (C4 YAML)
-- Chuỗi có `:` `?` `{` `}` `,` `#` phải bọc `"..."`; dấu phẩy không bọc cắt chuỗi, `validate` báo `key lạ`.
-- Giữ `id` ổn định: link item và flow bám theo id; `import-yaml` là upsert và **xoá** phần không còn trong YAML.
-- Phản hồi dùng `{connection: id, reverse: true}`, không tạo connection ngược.
-- Flow phải liền mạch; `validate` cảnh báo `đứt mạch` khi bước sau không nối bước trước.
+## Lỗi hay gặp (thư mục C4)
+- Chuỗi có `:` `?` `{` `}` `,` `#` phải bọc `"..."`; dấu phẩy không bọc cắt chuỗi, `c4 validate` báo `key lạ`.
+- Giữ `id` ổn định: link item và flow bám theo id; `c4 import` là upsert và **xoá** phần không còn trong thư mục.
+- Phản hồi dùng `{link: id, reverse: true}`, không tạo link ngược.
+- Flow phải liền mạch; `c4 validate` cảnh báo `đứt mạch` khi bước sau không nối bước trước.
 - Cha hợp lệ: app/store → system/group; component → app/group; file/function → component/file.

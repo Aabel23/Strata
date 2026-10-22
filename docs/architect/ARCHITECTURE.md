@@ -25,17 +25,17 @@ Principles:
 | `strata.py` | CLI entry point (argparse), calls into the modules in `strata/` |
 | `strata/schema.sql` | The whole schema: tables, append-only triggers, FTS5 |
 | `strata/db.py` | Connection, `init` + migrate, CRUD for project/doc/item/page/link, audit, `fold` for search |
-| `strata/c4.py` | Read/validate YAML, load into the DB (upsert + delete what was dropped), `read_model`, issue detection, `context`, flow trace |
+| `strata/c4_layered.py` | The only C4 format (folder `map.yaml` + `contracts/` + `behavior/` + `flows/`): load, validate, import/export, `read_model`, `context`, flow trace, contract text |
 | `strata/roadmap.py` | Roadmap import, syncing steps/gates into items, phases/criteria, gate checks and audit |
 | `strata/blocks.py` | Validates the 8 block types of a page |
-| `strata/server.py` | HTTP server: static files, GET `/api/*`, four scoped C4 POST routes, `/docs/*`, `/code/*` |
+| `strata/server.py` | HTTP server: static files, GET `/api/*`, read-only (no POST), `/docs/*`, `/code/*` |
 | `viewer/app.html`, `app.js`, `app.css` | Multi-project app shell (sidebar, tabs, Ctrl+K, theme) |
 | `viewer/index.html` | C4 viewer (zoom by level, flows, tags, object search) |
 | `viewer/page.html`, `page.js`, `page.css` | Renders block-based pages |
 | `viewer/roadmap.js`, `viewer/app.js` | Draws the roadmap block and the roadmap tab / task board |
 | `viewer/vendor/` | `dagre` (layout), `mermaid` |
 | `viewer/assets/` | Decorative SVGs for the top of the Overview page |
-| `examples/` | Sample C4 models (`*.strata.yaml`), sample pages (`*.page.json`) |
+| `examples/` | Sample pages (`*.page.json`) |
 | `scripts/` | Auxiliary tools (tracing the hero image to SVG), not part of the runtime |
 | `tests/` | pytest, one file per module |
 
@@ -50,12 +50,12 @@ Every table (except `project`) has a `project` column; the primary key is usuall
 | `decision` | ADR: context, decision, consequences, rejected_options | **Append-only**: triggers block deletes and only allow changing `status`. `rejected_options` is required |
 | `page` | slug, title, kind (research/discussion/note), `blocks` JSON | `text` is the extracted text used for search |
 | `doc` | index of HTML files in `docs_dir` | `kind` follows the first folder, `status` = missing when the file disappears |
-| `c4_meta` | model name, absolute `root`, layout, tag definitions | one row per project |
-| `c4_object` | actor, system, app, store, component, group, file, function | `parent` builds the tree; `kind` stores a subtype; `links` point to code files |
-| `c4_port` | typed input/output port attached to an object | id is unique within a project; optional JSON schema |
-| `c4_connection` | from → to, kind (network/call/queue), status, interface, payload | may reference its source and target ports |
-| `c4_interface` | callable contract of an object: http/function/queue/event | |
-| `c4_flow` | JSON list of steps referencing connections or objects | |
+| `c4_meta` | map name, absolute `root`, `source` (the imported folder) | one row per project with a map |
+| `c4_object` | actor, system, app, store, component, group | `parent` builds the tree; `owns` lists code globs; `behavior` names a behavior module |
+| `c4_connection` | a link: from → to, name, summary, status, `detail` (contract id) | |
+| `c4_contract` | call detail of a link: transport, body, `start`/`end` code symbols | id is `<file>.<id>` |
+| `c4_behavior` | states and transitions of one module | |
+| `c4_flow` | JSON list of steps (`link` or `at`) | |
 | `c4_link` | links a C4 object with an item/decision | |
 | `audit` | ts, tool, target, before, after | every write command adds a row |
 | `search` | FTS5 over item, decision, page, doc | triggers keep it in sync |
@@ -68,23 +68,22 @@ Default DB: `$STRATA_DB`, otherwise `/home/abel/project/tools/strata/strata.db`.
 
 ## 4. C4 flow
 
-1. **Read YAML** (`c4.read_yaml`): check keys against `KEYS`; interfaces nested in an object are split out.
-2. **Validate**: type is in `TYPES`, parent valid per `PARENTS`, ids unique, connections/flows point to things that exist, kind/status valid.
-3. **Load/export**: `import-yaml` upserts objects, ports, connections, interfaces and flows; `export-yaml` serializes the DB model. `root` is stored as an absolute path.
-4. **Serve** (`/api/c4`): `read_model` + `issues_by_object` (`dead_link`, `no_link`, `no_desc`) + `links` + `open_issues`.
-5. **Draw** (`viewer/index.html`): only the direct children of the zoomed object are drawn at a time; connections at deeper levels are "lifted" to link the two visible ancestors and merged if they share a direction. Layout uses dagre.
+1. **Load** (`c4_layered.load`): read the folder, reject unknown keys.
+2. **Validate** (`c4_layered.check`): kinds and status, parents, unique ids, link ends, `detail` and `behavior` targets, flow steps and continuity; contract symbols are checked against the Python AST (warnings).
+3. **Import/export**: `c4 import` upserts objects, links, contracts, behavior and flows, deletes what the folder dropped and task/decision links to objects that are gone, and writes an audit row; `c4 export` writes the folder back. `root` is stored as an absolute path.
+4. **Serve** (`/api/c4`): `read_model` + `viewer_extra` (contracts, behavior) + `links` + `open_issues`; 404 when the project has no map.
+5. **Draw** (`viewer/index.html`): only the direct children of the zoomed object are drawn at a time; links at deeper levels are "lifted" to join the two visible ancestors and merged if they share a direction. Layout uses dagre.
 
 Valid parent–child tree:
 
-| type | Level | Allowed parent |
+| kind | Level | Allowed parent |
 |---|---|---|
 | `actor`, `system` | L1 Context | top level, `group` |
 | `app`, `store` | L2 Container | `system`, `group` |
 | `component` | L3 Component | `app`, `group` |
-| `file`, `function` | L4 Code | `component`, `file` |
-| `group` | grouping | top level, `group`, `system`, `app` |
+| `group` | grouping | any |
 
-**For agents.** `c4 context` prints a compact tree with a token limit (estimated as `len/4`), trimming from the flows upward when exceeded. `c4 flow --id F` prints one line per step: `N. A → B [kind] text (interface) | payload: …`.
+**For agents.** `c4 context` prints a compact tree with a token limit (estimated as `len/4`), trimming from the flows upward when exceeded. `c4 flow --id F` prints one line per step: `N. A → B [link name] text | key=value`, plus the contract's `start → end` under it.
 
 ## 5. Server
 
@@ -112,16 +111,16 @@ The source definition is `docs/plan/<roadmap>.yaml`. The `roadmap-<id>` page sto
 
 See [Create and Run a Roadmap](../guide/roadmap.yaml) and [Task Board and Roadmap Viewer](../guide/viewer-roadmap.yaml).
 
-- **New CLI command:** add a subparser in `strata.py`, put the logic in `strata/db.py` or `strata/c4.py`, and write `audit` if it writes.
-- **New C4 field:** `KEYS` + validation in `c4.py`, a column in `schema.sql` + `ADDED` in `db.py`, the `INSERT … ON CONFLICT` statement on load, then the viewer.
-- **New API:** hold `lock` when reading or writing the shared DB connection, and filter inputs with a whitelist. Viewer POSTs are limited to `/api/c4/object`, `/api/c4/port`, and `/api/c4/link`; layout is computed by the viewer and never stored; all use the service transaction and audit. Do not add a generic write route. Update CLAUDE.md rule #1 and section 1 if this allowlist changes.
+- **New CLI command:** add a subparser in `strata.py`, put the logic in `strata/db.py` or `strata/c4_layered.py`, and write `audit` if it writes.
+- **New C4 field:** `KEYS` + validation in `c4_layered.py`, a column in `schema.sql` + `ADDED` in `db.py`, `import_dir`/`export_dir`/`read_model`, then the viewer.
+- **New API:** hold `lock` when reading or writing the shared DB connection, and filter inputs with a whitelist. The server has no write routes; C4 is edited in the folder and imported with the CLI.
 - **Page blocks:** fixed at exactly 8 types; adding one requires agreement from the project owner first.
 
 ## 7. Running and testing
 
 ```
 python3 strata.py init --db /tmp/x.db
-python3 strata.py import-yaml examples/strata.strata.yaml --project strata --db /tmp/x.db
+python3 strata.py c4 import docs/c4 --project strata --db /tmp/x.db
 python3 strata.py serve --db /tmp/x.db                   # http://127.0.0.1:8740
 python3 -m pytest -q
 ```

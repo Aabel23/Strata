@@ -36,8 +36,52 @@ def _backup_if_rebuild(path):
         d = pathlib.Path(p).parent / "backups"; d.mkdir(exist_ok=True)
         shutil.copy2(p, d / datetime.datetime.now().strftime("strata-%Y%m%d-%H%M%S.db"))
 
+def _old_c4_due(c):
+    return bool(c.execute("SELECT 1 FROM sqlite_master WHERE name IN ('c4_port','c4_interface')").fetchone())
+
+def _backup_old_c4(path):
+    """Before dropping the old single-file C4 format: backups/strata-pre-old-c4-drop-<timestamp>.db via the sqlite backup API."""
+    p = db_path(path)
+    if p == ":memory:" or not os.path.exists(p): return
+    k = sqlite3.connect(p)
+    try:
+        if not _old_c4_due(k): return
+        d = pathlib.Path(p).parent / "backups"; d.mkdir(exist_ok=True)
+        dst = sqlite3.connect(d / datetime.datetime.now().strftime("strata-pre-old-c4-drop-%Y%m%d-%H%M%S.db"))
+        try: k.backup(dst)
+        finally: dst.close()
+    finally: k.close()
+
+def _drop_old_c4(c):
+    """One-off: C4 rows of projects not imported as a layered folder, orphan c4_link rows, then tables c4_port/c4_interface
+    (c4_connection is rebuilt first: its FKs point at c4_port). Layered = c4_meta.source is a folder, not a .yaml file."""
+    if not _old_c4_due(c): return
+    c.commit(); c.execute("PRAGMA foreign_keys=OFF")
+    try:
+        keep = "SELECT project FROM c4_meta WHERE source IS NOT NULL AND lower(source) NOT LIKE '%.yaml' AND lower(source) NOT LIKE '%.yml'"
+        c.executescript(f"""BEGIN;
+            DELETE FROM c4_link WHERE project NOT IN ({keep});
+            DELETE FROM c4_connection WHERE project NOT IN ({keep});
+            DELETE FROM c4_flow WHERE project NOT IN ({keep});
+            DELETE FROM c4_contract WHERE project NOT IN ({keep});
+            DELETE FROM c4_behavior WHERE project NOT IN ({keep});
+            DELETE FROM c4_object WHERE project NOT IN ({keep});
+            DELETE FROM c4_meta WHERE project NOT IN ({keep});
+            DELETE FROM c4_link WHERE NOT EXISTS (SELECT 1 FROM c4_object o WHERE o.project=c4_link.project AND o.id=c4_link.object_id);
+            CREATE TABLE c4_connection_new(
+              id TEXT NOT NULL, project TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL,
+              name TEXT, status TEXT, description TEXT, detail TEXT, PRIMARY KEY(project,id));
+            INSERT INTO c4_connection_new SELECT id,project,from_id,to_id,name,status,description,detail FROM c4_connection;
+            DROP TABLE c4_connection; ALTER TABLE c4_connection_new RENAME TO c4_connection;
+            DROP TABLE IF EXISTS c4_port; DROP TABLE IF EXISTS c4_interface;
+            COMMIT;""")
+    except BaseException:
+        c.rollback(); raise
+    finally: c.execute("PRAGMA foreign_keys=ON")
+
 def init(path=None):
     _backup_if_rebuild(path)
+    _backup_old_c4(path)
     c = connect(path)
     if c.execute("SELECT 1 FROM sqlite_master WHERE name='research'").fetchone() and c.execute("SELECT 1 FROM research").fetchone():
         raise RuntimeError("table research is not empty: move rows to page(kind='research') first")
@@ -61,6 +105,7 @@ def init(path=None):
         cols = ",".join(r["name"] for r in c.execute("PRAGMA table_info(c4_object_old)"))
         c.execute(f"INSERT INTO c4_object({cols}) SELECT {cols} FROM c4_object_old")
         c.execute("DROP TABLE c4_object_old")
+    _drop_old_c4(c)
     c.commit()
     return c
 
@@ -85,9 +130,7 @@ def _finish_page(c):
     if (r := c.execute("PRAGMA integrity_check").fetchone()[0]) != "ok": raise RuntimeError(f"integrity_check: {r}")
 
 # columns added after a table was first created: (table, column, type)
-ADDED = [("c4_connection", "description", "TEXT"), ("c4_connection", "feature", "TEXT"), ("c4_connection", "interface", "TEXT"),
-         ("c4_connection", "payload", "JSON"), ("c4_connection", "kind", "TEXT"),
-         ("c4_connection", "from_port_id", "TEXT"), ("c4_connection", "to_port_id", "TEXT"),
+ADDED = [("c4_connection", "description", "TEXT"),
          ("c4_object", "kind", "TEXT"), ("c4_object", "owns", "JSON"), ("c4_object", "behavior", "TEXT"), ("c4_connection", "detail", "TEXT"),
          ("c4_object", "responsibilities", "JSON"), ("c4_object", "state", "TEXT"),
          ("item", "phase", "INT"), ("item", "roadmap", "TEXT"), ("doc", "prev_status", "TEXT"), ("doc", "summary", "TEXT"), ("doc", "code", "JSON"), ("c4_meta", "positions", "JSON"), ("c4_meta", "source", "TEXT")]
@@ -236,9 +279,9 @@ def set_doc(c, project, path, feature=None, status=None, ord=None):
 
 
 # ---- C4 object <-> item/decision links ----
-def _link_target(c, project, object, item, decision):
+def _link_target(c, project, object, item, decision, must_exist=True):
     if (item is None) == (decision is None): raise ValueError("give exactly one of --item / --decision")
-    if not c.execute("SELECT 1 FROM c4_object WHERE project=? AND id=?", (project, object)).fetchone():
+    if must_exist and not c.execute("SELECT 1 FROM c4_object WHERE project=? AND id=?", (project, object)).fetchone():
         raise ValueError(f"no object {project}/{object}")
     kind, rid = ("item", item) if item is not None else ("decision", decision)
     if not c.execute(f"SELECT 1 FROM {kind} WHERE project=? AND id=?", (project, rid)).fetchone():
@@ -253,7 +296,7 @@ def link(c, project, object, item=None, decision=None):
     return True
 
 def unlink(c, project, object, item=None, decision=None):
-    kind, rid = _link_target(c, project, object, item, decision)
+    kind, rid = _link_target(c, project, object, item, decision, must_exist=False)  # an object removed by re-import must stay unlinkable
     if not c.execute("DELETE FROM c4_link WHERE project=? AND object_id=? AND ref_kind=? AND ref_id=?", (project, object, kind, rid)).rowcount: return False
     audit(c, project, "c4.unlink", f"{object}->{kind}:{rid}", {"object": object, "ref_kind": kind, "ref_id": rid}, None); c.commit()
     return True

@@ -58,7 +58,7 @@
       },
       {
        "name": "CLI strata.py",
-       "note": "init · import-yaml · validate · serve · page",
+       "note": "init · c4 import · c4 validate · serve · page",
        "status": "done"
       },
       {

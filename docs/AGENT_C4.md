@@ -1,105 +1,126 @@
-# Hướng dẫn agent: thiết kế và sửa bản đồ C4 trong Strata
+# Agent guide: reading and editing a C4 map in Strata
 
-Strata giữ kiến trúc dự án trong SQLite (`/home/abel/project/tools/strata/strata.db`). YAML là định dạng import/export; SQLite là nguồn dữ liệu chuẩn.
-Viewer vẽ map C4 zoom được (L1 hệ thống → L4 file/hàm) và tô từng bước của flow lên map.
-Agent đọc map qua CLI (văn bản gọn), chỉ mở YAML ở phần cần sửa.
-
-## 1. Đọc tối thiểu (làm theo thứ tự, dừng khi đủ)
+Strata has one C4 format: a **layered folder** kept in the repo and imported into SQLite.
 
 ```
-export STRATA_DB=/home/abel/project/tools/strata/strata.db         # hoặc thêm --db FILE sau từng lệnh con
-python3 strata.py c4 context --project P                 # cây object + interface + flow + connection
-python3 strata.py c4 context --project P --object X      # một object: cha, con, connection, issue, flow
-python3 strata.py c4 flow --project P                    # danh sách flow, số bước
-python3 strata.py c4 flow --project P --id F             # trace từng bước, một dòng một bước
+docs/c4/
+  map.yaml          thin map: objects + links (who exists, who talks to whom)
+  contracts/<file>.yaml   call detail per link (transport, body, start -> end code symbols)
+  behavior/<module>.yaml  states and transitions of one module
+  flows/<id>.yaml         one user-visible action as a list of steps
 ```
 
-- `context` tự cắt theo `--max-tokens` (mặc định 2000); thiếu thì dùng `--object`.
-- Chỉ `grep -n` rồi đọc đoạn YAML có id cần sửa; không đọc cả file.
-- Dòng trace: `N. A → B [kind] text (interface) | payload: …`; `[call ↩]` là bước trả về; `N. @ X` là xử lý trong X.
+The folder is the source of truth for the map. The DB is a read model built by `c4 import`; the viewer is read-only.
+Link a task or decision to an object with `c4 link` (stored in the DB, not in the folder).
 
-## 2. Thứ tự thiết kế
+## 1. Reading path (stop as soon as you have enough)
 
-1. **L1**: `actor`, `system` (người dùng, hệ ngoài). Mỗi cái một dòng description.
-2. **L2**: `app`, `store` trong system. Ghi `technology`.
-3. **L3**: `component` trong app: `responsibilities` (3–5 gạch), `state`, `interfaces` công khai.
-4. **L4**: `file`/`function` chỉ cho module đáng soi (đường đi chính của flow, chỗ bảo mật). Không chép hết code.
-5. **Connection** cho mọi lời gọi thật, ở tầng thấp nhất cần cho flow (L4 `call`), giữ thêm bản L2/L3 tóm tắt.
-6. **Flow** cuối cùng, chỉ dùng connection/object đã có.
+```
+export STRATA_DB=/home/abel/project/tools/strata/strata.db     # or add --db FILE to each command
+python3 strata.py c4 context --project P                       # object tree + flows + links
+python3 strata.py c4 context --project P --object X            # one object: parent, children, owns, behavior, links with contract, related tasks, flows
+python3 strata.py c4 flow --project P                          # flow list with step counts
+python3 strata.py c4 flow --project P --id F                   # numbered trace, one line per step
+python3 strata.py c4 contract ID --project P                   # one contract: transport, body, start -> end
+python3 strata.py sym ls PATH --project P [--public]           # symbols of a file or folder
+python3 strata.py sym show FILE::Qual.name --project P         # source of one symbol
+```
 
-## 3. Quy ước YAML
+- `context` cuts itself to `--max-tokens` (default 2000). Use `--object` instead of raising the limit.
+- Trace line: `N. A -> B [link name] text | key=value`; `[... ↩]` is a reverse step (response); `N. @ X` is work inside X;
+  `↳ start -> end` under a step is the code behind the link (the contract).
+- Run `sym index --project P` once so `sym` and `c4 validate --project P` read the symbol cache.
 
-- Mỗi thực thể một dòng flow-style `{...}`; chuỗi có `:` `?` `{` `}` `,` `#` thì **bắt buộc** bọc `"..."` (dấu phẩy không bọc sẽ cắt chuỗi, `validate` báo `key lạ`).
-- id ngắn, snake_case, ổn định (đổi id = mất link/issue gắn với nó). Tên hiển thị để ở `name` (object bắt buộc có `name`).
-- Không lặp dữ liệu: shape request/response để ở interface (`input/output`) hoặc connection (`payload`);
-  `payload` của step chỉ ghi khi khác hoặc cụ thể hơn (giá trị thật của lần gọi này).
-- `links` trỏ file thật, tương đối với `root`; `validate` báo link chết. Bắt buộc với app/component/file/function (thiếu → dấu "!" trên map); actor/system/store/group không bắt buộc (store nên trỏ migrations/schema).
+## 2. Map rules (`map.yaml`)
+
+Keep the map thin. A reader should understand the system from names and one-line summaries; detail lives in `contracts/`.
 
 ```yaml
+project: {id: strata, name: strata, root: ../..}      # root: code root, relative to this folder
 objects:
-  - {id: server, type: app, parent: platform, name: Cloud server, technology: Python, links: [server/main.py], description: Điểm vào HTTP}
-  - {id: relay, type: component, parent: server, name: relay, state: RAM-only, responsibilities: [Xếp lệnh app → máy], links: [server/src/relay/relay.py], description: Chuyển lệnh}
-  - {id: r_file, type: file, parent: relay, name: relay.py, links: [server/src/relay/relay.py], description: RelayHub + handler}
-  - {id: r_hub_send, type: function, parent: r_file, name: RelayHub.send, links: [server/src/relay/relay.py], description: Tạo Pending, chờ kết quả}
-connections:
-  - {id: rh_send, from: r_cmd_send, to: r_hub_send, name: RelayHub.send, kind: call, technology: in-process}
-  - {id: fc_net, from: fc_send, to: t_do_post, name: POST phong bì, kind: network, technology: HTTPS + HPKE, payload: {request: "...", response: "..."}}
-interfaces:
-  - {id: hub_send, object: r_hub_send, kind: function, name: RelayHub.send, signature: "send(*, user_id, machine_id, ...) -> HandlerResult", errors: [BUSY 409]}
-flows:
-  - id: menu_refresh
-    name: Làm mới menu
-    steps:
-      - {connection: u_pull, text: Kéo để làm mới}
-      - {connection: rh_send, interface: hub_send}
-      - {at: r_hub_send, text: tạo Pending trong RAM}
-      - {connection: rh_send, reverse: true, text: trả HandlerResult}
+  - {id: cli, kind: app, name: CLI, summary: Subcommand dispatch, owns: [strata.py]}
+  - {id: argp, parent: cli, kind: component, name: main, summary: Parses argv and routes to the service}
+links:
+  - {id: m_imp, from: argp, to: c4mod, name: import, summary: Import a folder into the DB, detail: c4mod.m_imp}
 ```
 
-## 4. Luật viết flow
+- Object keys: `id`, `kind` (actor, system, app, store, component, group), `name`, `parent`, `summary`, `status`
+  (live, future, doing, maintenance, deprecated, removed), `tags`, `owns` (code globs), `behavior` (module file stem).
+- Link keys: `id`, `from`, `to`, `name`, `summary`, `status`, `detail` (a contract id `<file>.<id>`).
+- Levels: actor/system, then app/store inside a system, then component inside an app. There are no file or function objects:
+  code lives in contracts (`start`/`end` symbols) and in `owns`.
+- Ids are short, snake_case and stable. Flows, task links and contracts follow ids; renaming an id breaks them.
+- Every real call gets a link. A reply travels back over the same link (`reverse: true` in a flow); do not add a reverse link.
+- Unknown keys are errors (`key lạ`): quote strings containing `:` `,` `#` `{` `}`.
 
-- Một flow = một hành động người dùng thấy được (hoặc một sự kiện hệ thống). id dạng `menu_refresh`.
-- Mỗi hop là một step: `{connection: id}`. Xử lý bên trong một object (không gửi message) là `{at: id}`.
-- Phản hồi đi ngược connection đã có: `{connection: id, reverse: true}`. **Không** tạo connection ngược.
-- Hàng đợi/condition giữa hai thread cũng là connection (`kind: queue`), để flow không bị đứt.
-- Liên tục: điểm đầu của bước k+1 phải trùng (hoặc là cha/con của) điểm cuối bước k. `validate` cảnh báo `đứt mạch`.
-- Bước gọi hàm có contract thì thêm `interface: <id>`.
-- Mục tiêu 5–15 bước cho flow bình thường. Flow qua nhiều tiến trình (app → server → máy → về) có thể dài hơn;
-  khi đó vẫn giữ đủ hop, cắt bớt chữ, không cắt bước.
-- `text` ngắn (≤ ~12 từ), nói việc làm ở bước đó, không nhắc lại tên connection.
+## 3. Contract, behavior and flow files
 
-## 5. Vòng sửa
+**Contract** (`contracts/c4mod.yaml`, a list; the global id is `<file stem>.<id>`):
 
-```
-grep -n "<id>" examples/<p>.strata.yaml                     # tìm chỗ sửa
-python3 strata.py validate examples/<p>.strata.yaml         # phải 0 lỗi; cố 0 cảnh báo "đứt mạch"
-python3 strata.py import-yaml examples/<p>.strata.yaml --project <p>
-python3 strata.py c4 flow --project <p> --id <flow>   # đọc lại trace
-```
-
-Dữ liệu đổi thì chỉ cần reload trang viewer; không cần `systemctl --user restart strata` (chỉ cần khi sửa Python).
-`import-yaml` là upsert và xoá phần không còn trong YAML. Bản đồ gồm `kind`, `ports` và `from_port`/`to_port`; không lưu toạ độ, viewer luôn tự xếp bố cục. `export-yaml FILE --project P` xuất trạng thái hiện tại từ DB. Có lỗi từ `validate` (thiếu name, id trùng, parent vòng/không tồn tại...) thì không ghi gì; `--force` để bỏ qua.
-
-Các thao tác CLI có audit:
-
-```bash
-python3 strata.py c4 port add --project P --object OBJ --id PORT --name "request" --direction input --kind json --schema '{"type":"object"}'
-python3 strata.py c4 port list --project P [--object OBJ]
-python3 strata.py c4 kind set --project P --object OBJ --kind service
+```yaml
+- id: m_imp
+  transport: in-process
+  body:
+    signature: import_dir(c, d, project) -> dict counts
+    purpose: Replace the project's map with the folder
+    errors: [ValueError when validation fails]
+  start: strata.py::main                  # a string or a list of strings
+  end: strata/c4_layered.py::import_dir   # path::Qual.name; Python symbols are checked
 ```
 
-Viewer chỉ được POST tới `/api/c4/object`, `/api/c4/port` và `/api/c4/link`. Các route cùng dùng service, kiểm tra Host/Origin/JSON/body size, validate toàn model và ghi DB + audit trong một transaction. Thay đổi từ viewer chỉ ghi SQLite; muốn YAML thì chạy `export-yaml`. Không thêm route ghi tổng quát.
+`start` and `end` are required. A symbol that is missing, outside `root` or in a non-Python file is a warning, not an error.
 
-## 6. Tham chiếu trường
+**Behavior** (`behavior/relay.yaml`, file stem = object id referenced by `behavior:`):
 
-| Thực thể | Trường bắt buộc | Trường tuỳ chọn |
+```yaml
+module: relay
+form: machine
+initial: idle
+states: {idle: {}, busy: {}}
+transitions:
+  - {id: t1, from: idle, on: send, to: busy}
+```
+
+**Flow** (`flows/send_command.yaml`, id = file stem). One flow is one action a user can see; 5-15 steps is typical.
+
+```yaml
+id: send_command
+name: Send a command
+steps:
+  - {link: user_app, text: tap}
+  - {link: app_cmd, values: {command: start}}
+  - {at: relay, transition: t1}
+  - {link: app_cmd, reverse: true, text: result}
+```
+
+- A step is exactly one of `link` (a hop, optional `reverse`) or `at` (work inside an object, optional `transition` id from its behavior).
+- Continuity: a step must start where the previous one ended (or at its parent/child); otherwise `validate` warns `đứt mạch`.
+- `text` is short (about 12 words) and says what happens, not the link name.
+
+## 4. Validate and the edit loop
+
+```
+python3 strata.py c4 validate docs/c4                       # 0 errors required; fix gaps (đứt mạch) too
+python3 strata.py c4 import docs/c4 --project strata        # upsert; rows missing from the folder are deleted
+python3 strata.py c4 flow --project strata --id <flow>      # read the trace back
+python3 strata.py c4 export OUT_DIR --project P             # DB -> folder (round trip)
+```
+
+- `import` writes nothing if validation reports errors (`--force` skips that check). It also removes task/decision links
+  whose object no longer exists, and writes an audit row (`c4-import` with before/after counts).
+- Data changes only need a viewer reload. Restart the service only after Python changes.
+- Task and decision links: `c4 link|unlink --project P --object X --item ID` (or `--decision ID`), `c4 links --project P --object X`.
+  `unlink` also works for an object that was removed from the map.
+
+## 5. Field reference
+
+| Entity | Required | Optional |
 |---|---|---|
-| object | `id`, `type` (actor/system/app/store/component/group/file/function), `name` | `kind` subtype, `parent`, `technology`, `description`, `tags`, `links`, `status` (live/future/doing/maintenance/deprecated/removed; chấm góc thẻ: xanh/xám/đỏ/vàng/cam/mờ), `responsibilities`, `state`, `ports` |
-| port | `id`, `name`, `direction` (`input`/`output`) | `kind`, `schema` JSON; khai báo lồng trong object |
-| connection | `id`, `from`, `to` | `from_port`, `to_port`, `name`, `kind` (api/network/call/queue; `api` cho cửa vào dịch vụ API), `technology`, `interface` (thuộc `to`), `payload {endpoints, request, response}` (`request`/`response`: danh sách trường `"tên: ghi chú"` hoặc `{name, type, note}`; `endpoints`: `[{api: "POST /path", note, request, response}]` mỗi API một thẻ), `direction`, `feature`, `description`, `status`, `tags` |
-| interface | `id`, `object` | `kind` (http/function/queue/event), `name`, `signature`, `purpose`, `input`, `output`, `errors` |
-| flow | `id`, `steps` | `name` |
-| step | đúng một: `connection` \| `at` \| (cũ) `from`+`to` | `id`, `reverse` (chỉ với connection), `text`, `payload` (chuỗi), `interface` |
+| object | `id`, `kind`, `name` | `parent`, `summary`, `status`, `tags`, `owns`, `behavior` |
+| link | `id`, `from`, `to` | `name`, `summary`, `detail`, `status` |
+| contract | `id`, `start`, `end` | `transport`, `body` (any mapping: `signature`, `purpose`, `request`, `response`, `errors`) |
+| behavior | `module` (= file stem) | `form`, `initial`, `states`, `transitions` (`id`, `from`, `on`, `to`, `guard`) |
+| flow | `steps` | `id` (= file stem), `name` |
+| step | exactly one of `link` \| `at` | `reverse` (with `link`), `text`, `values`, `transition` (with `at`) |
 
-Cha hợp lệ: actor/system → top hoặc group; app/store → system/group; component → app/group; file → component/file; function → component/file.
-Ví dụ đầy đủ: `examples/project1_app.strata.yaml` (flow `menu_refresh`, `login`, `command`).
+Complete example: `tests/fixtures/c4_layered/` (small) and `docs/c4/` (the Strata map).

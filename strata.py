@@ -2,8 +2,6 @@
 """Strata: project knowledge in SQLite, with a C4 viewer and block pages.
 
   strata.py init [--db]
-  strata.py import-yaml FILE --project P [--force] [--db]   load a C4 YAML model into the DB
-  strata.py validate FILE | --project P [--db]    check structure and code links
   strata.py serve [--db] [--project P] [--port] [--host A,B] [--allow-host NAME]... viewer on http://127.0.0.1:PORT
   strata.py page put|validate FILE | list [--project]
   strata.py project add ID --name N [--root --docs-dir --parent --description] | list
@@ -28,7 +26,7 @@
   strata.py item claim ID --as NAME | submit ID --note N [--as NAME] | rework ID --note N | close ID --note N | approve ID [--note --as] | reject ID --note N | release ID | dep add|rm ID DEP   (all: --json)
 """
 import argparse, json, pathlib, sqlite3, sys, threading, webbrowser
-from strata import blocks, c4, c4_layered, db, service, symbols
+from strata import blocks, c4_layered, db, service, symbols
 
 
 def cmd_page(a):
@@ -140,7 +138,7 @@ def _idx(a):
 
 
 def cmd_write(a):
-    """project / doc / item: the only write path besides import-yaml and page put."""
+    """project / doc / item: the only write path besides c4 import and page put."""
     c = db.init(a.db)
     try:
         if a.cmd == "project" and a.action == "add":
@@ -159,9 +157,9 @@ def cmd_write(a):
             from strata import context
             print(context.build(c, a.id, a.budget))
         elif a.cmd == "c4" and a.action == "context":
-            print(c4.context_text(c, a.project, a.object, a.max_tokens))
+            print(c4_layered.context_text(c, a.project, a.object, a.max_tokens))
         elif a.cmd == "c4" and a.action == "flow":
-            print(c4.flow_text(c, a.project, a.id))
+            print(c4_layered.flow_text(c, a.project, a.id))
         elif a.cmd == "c4" and a.action == "contract":
             print(c4_layered.contract_text(c, a.project, a.id))
         elif a.cmd == "c4" and a.action == "import":
@@ -169,15 +167,6 @@ def cmd_write(a):
             print(f"imported {a.project}: " + ", ".join(f"{v} {k}" for k, v in n.items()))
         elif a.cmd == "c4" and a.action == "export":
             c4_layered.export_dir(c, a.project, a.dir); print(f"exported {a.project}: {a.dir}")
-        elif a.cmd == "c4" and a.action == "port":
-            if a.port_action == "add":
-                schema = json.loads(a.schema) if a.schema else None
-                service.add_c4_port(c, "main", a.project, a.object, a.id, a.name, a.direction, a.kind, schema)
-                print("ok")
-            else:
-                for p in service.list_c4_ports(c, a.project, a.object): print(json.dumps(p, ensure_ascii=False))
-        elif a.cmd == "c4" and a.action == "kind":
-            service.set_c4_kind(c, "main", a.project, a.object, a.kind); print("ok")
         elif a.cmd == "c4" and a.action == "links":
             l = db.links_for(c, a.project, a.object)
             for i in l["items"]: print(f"{i['kind']} #{i['id']} [{i['status']}] {i['title']}")
@@ -205,9 +194,6 @@ def main(argv=None):
         for x in args: p.add_argument(*x[0], **x[1])
         return p
     add("init")
-    add("import-yaml", (["file"], {}), (["--project"], {"required": True}), (["--force"], {"action": "store_true"}))
-    add("export-yaml", (["file"], {}), (["--project"], {"required": True}))
-    add("validate", (["file"], {"nargs": "?"}), (["--project"], {}))
     add("serve", (["--project"], {}), (["--port"], {"type": int, "default": 8740}), (["--host"], {"default": "127.0.0.1"}), (["--allow-host"], {"action": "append", "default": []}))
     pg = sub.add_parser("page"); ps = pg.add_subparsers(dest="action", required=True)
     for n in ("put", "validate"):
@@ -261,13 +247,6 @@ def main(argv=None):
                     "export": [(["dir"], {}), (["--project"], req)], "validate": [(["dir"], {}), (["--project"], {})]}.items():
         p = gs4.add_parser(n); p.add_argument("--db")
         for x in args: p.add_argument(*x[0], **x[1])
-    p = gs4.add_parser("port"); p.add_argument("--db")
-    ps4 = p.add_subparsers(dest="port_action", required=True)
-    p = ps4.add_parser("add"); p.add_argument("--db"); p.add_argument("--project", required=True); p.add_argument("--object", required=True); p.add_argument("--id", required=True); p.add_argument("--name", required=True)
-    p.add_argument("--direction", required=True, choices=["input", "output"]); p.add_argument("--kind"); p.add_argument("--schema")
-    p = ps4.add_parser("list"); p.add_argument("--db"); p.add_argument("--project", required=True); p.add_argument("--object")
-    p = gs4.add_parser("kind"); p.add_argument("--db"); ks4 = p.add_subparsers(dest="kind_action", required=True)
-    p = ks4.add_parser("set"); p.add_argument("--db"); p.add_argument("--project", required=True); p.add_argument("--object", required=True); p.add_argument("--kind", required=True)
     a = ap.parse_args(argv)
     if a.cmd == "doc" and a.action == "validate": return cmd_doc_validate(a)
     if a.cmd == "roadmap": return cmd_roadmap(a)
@@ -279,18 +258,6 @@ def main(argv=None):
         return mcp.serve(a.role, a.db)
     if a.cmd == "init":
         db.init(a.db).close(); print("ok:", db.db_path(a.db)); return 0
-    if a.cmd == "import-yaml":
-        try: n = c4.import_yaml(db.init(a.db), a.file, a.project, a.force)
-        except (OSError, ValueError, TypeError, AttributeError, sqlite3.IntegrityError) as e: print("ERROR import:", e); return 1
-        print(f"imported {a.project}: {n['object']} object, {n['connection']} connection, {n['flow']} flow"); return 0
-    if a.cmd == "export-yaml":
-        try: c4.export_yaml(db.init(a.db), a.project, a.file)
-        except (OSError, ValueError, KeyError, TypeError) as e: print("ERROR export:", e); return 1
-        print(f"exported {a.project}: {a.file}"); return 0
-    if a.cmd == "validate":
-        if a.project: return c4.validate_db(db.init(a.db), a.project)
-        if a.file: return c4.validate_file(a.file)
-        ap.error("validate needs FILE or --project")
     if a.cmd == "page": return cmd_page(a)
     from strata import server
     hosts = a.host.split(",")  # vd "127.0.0.1,100.107.55.40": nghe nhiều địa chỉ

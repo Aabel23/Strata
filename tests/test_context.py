@@ -1,7 +1,7 @@
 import json
 import pytest
-from strata import c4, context, db, service
-from test_c4 import EX
+from strata import c4_layered, context, db, service
+from conftest import FIX
 
 SPEC = {"goal": "G", "acceptance": ["A1"], "verify": "pytest -q", "scope": {"touch": ["a/b.py", "c.py"]}, "note": "see decision 2"}
 
@@ -10,7 +10,7 @@ SPEC = {"goal": "G", "acceptance": ["A1"], "verify": "pytest -q", "scope": {"tou
 def env(tmp_path):
     (tmp_path / "CLAUDE.md").write_text("# X\n\n## Luật cứng\n\n1. RULE-ONE\n2. RULE-TWO\n\n## Khác\nOTHER\n", encoding="utf-8")
     c = db.init(str(tmp_path / "t.db")); db.add_project(c, "p", "P", root=str(tmp_path))
-    c4.import_yaml(c, str(EX), "p", False)
+    c4_layered.import_dir(c, FIX, "p")
     d1 = service.add_decision(c, "main", "p", "D one", "ctx", "X" * 300, "cons", "rej")
     d2 = service.add_decision(c, "main", "p", "D two", "ctx", "second", "cons", "rej")
     dep = service.add_item(c, "main", "p", "task", "Dep", spec=SPEC)

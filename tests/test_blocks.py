@@ -1,6 +1,6 @@
 import json, os, pathlib, subprocess, sys
 import pytest
-from strata import blocks, c4, db
+from strata import blocks, c4_layered, db
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -68,8 +68,8 @@ def test_not_a_list():
 
 def test_c4_missing_ids_warn_only(tmp_path):
     c = db.init(tmp_path / "t.db")
-    c4.import_yaml(c, ROOT / "examples/project1_app.strata.yaml", "p")
-    errs, warns = blocks.validate([{"type": "c4", "ids": ["server", "ghost"]}], c, "p")
+    c4_layered.import_dir(c, ROOT / "tests/fixtures/c4_layered", "p")
+    errs, warns = blocks.validate([{"type": "c4", "ids": ["relay", "ghost"]}], c, "p")
     assert errs == [] and len(warns) == 1 and "ghost" in warns[0]
 
 

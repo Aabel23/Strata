@@ -1,7 +1,7 @@
 import pathlib, shutil
 import pytest, yaml
 from strata import c4_layered as L, db
-from test_c4 import dbp, run
+from conftest import FIX, run
 
 FIX = pathlib.Path(__file__).parent / "fixtures/c4_layered"
 
@@ -87,31 +87,6 @@ def test_import_rejects_errors_and_drops_removed(folder, tmp_path):
     assert db.connect(dbp).execute("SELECT count(*) FROM c4_object").fetchone()[0] == 5
 
 
-def test_old_import_yaml_still_works(tmp_path):
-    from test_c4 import EX
-    dbp = tmp_path / "t.db"
-    assert run(dbp, "import-yaml", str(EX), "--project", "p")[0] == 0
-    assert run(dbp, "validate", "--project", "p")[0] == 0
-
-
-def test_import_over_old_project_with_bound_ports(folder, tmp_path):
-    old = tmp_path / "old.strata.yaml"
-    old.write_text(yaml.safe_dump({"name": "Old", "root": ".", "objects": [
-        {"id": "s", "type": "system", "name": "S", "description": "x"},
-        {"id": "a", "type": "app", "parent": "s", "name": "A", "description": "x", "ports": [{"id": "pa", "name": "pa", "direction": "output"}]},
-        {"id": "b", "type": "app", "parent": "s", "name": "B", "description": "x"}],
-        "connections": [{"id": "ab", "from": "a", "to": "b", "technology": "t", "from_port": "pa"}]}))
-    dbp = tmp_path / "t.db"
-    assert run(dbp, "import-yaml", str(old), "--project", "p")[0] == 0
-    rc, out = run(dbp, "c4", "import", str(folder), "--project", "p")
-    assert rc == 0, out
-    c = db.connect(dbp)
-    assert c.execute("SELECT count(*) FROM c4_port").fetchone()[0] == 0
-    assert c.execute("SELECT count(*) FROM c4_connection WHERE from_port_id IS NOT NULL").fetchone()[0] == 0
-    import json
-    assert json.loads(c.execute("SELECT before FROM audit WHERE tool='c4-import'").fetchone()[0])["port"] == 1
-
-
 @pytest.fixture
 def lay(folder, dbp):
     assert run(dbp, "project", "add", "demo", "--name", "Demo")[0] == 0 and run(dbp, "c4", "import", str(folder), "--project", "demo")[0] == 0
@@ -141,11 +116,60 @@ def test_context_and_contract_layered(lay):
     assert run(lay, "c4", "contract", "nope", "--project", "demo")[0] == 1
 
 
-def test_old_format_unchanged(dbp, tmp_path):
-    from test_c4 import EX
-    run(dbp, "project", "add", "p", "--name", "P"); run(dbp, "import-yaml", str(EX), "--project", "p")
-    c = db.connect(dbp)
-    assert not L.is_layered(c, "p")
-    from strata import c4
-    assert c4.flow_text(c, "p", "menu_refresh").splitlines()[7].startswith("7. cloud.CloudClient.post/_send → transport.http.Handler.do_POST [network]")
-    assert c4.context_text(c, "p").startswith("# ") and "Connection:" in c4.context_text(c, "p")
+def test_step_ends():
+    objs = {"a": {}, "b": {}, "b1": {"parent": "b"}}
+    conns = {"ab": {"from": "a", "to": "b"}}
+    assert L.step_ends({"connection": "ab"}, conns, objs) == (("a", "b"), None)
+    assert L.step_ends({"connection": "ab", "reverse": True}, conns, objs) == (("b", "a"), None)
+    assert L.step_ends({"at": "b"}, conns, objs) == (("b", "b"), None)
+    for step in ({}, {"connection": "ab", "at": "a"}, {"at": "zz"}, {"connection": "zz"}, {"at": "a", "reverse": True}, {"from": "a", "to": "b"}):
+        assert L.step_ends(step, conns, objs)[1]
+    assert L._related(objs, "b", "b1") and not L._related(objs, "a", "b1")
+
+
+def test_import_drops_orphan_links_and_unlink_works_for_missing_object(lay):
+    assert run(lay, "item", "add", "--project", "demo", "--kind", "issue", "--title", "T")[0] == 0
+    assert run(lay, "c4", "link", "--project", "demo", "--object", "relay", "--item", "1")[0] == 0
+    c = db.connect(lay)
+    c.execute("INSERT INTO c4_link VALUES('demo','ghost','item',1)"); c.commit()   # what an older import left behind
+    assert run(lay, "c4", "unlink", "--project", "demo", "--object", "ghost", "--item", "1") == (0, "ok\n")
+    c.execute("INSERT INTO c4_link VALUES('demo','ghost','item',1)"); c.commit()
+    assert run(lay, "c4", "import", str(FIX), "--project", "demo")[0] == 0
+    assert c.execute("SELECT object_id FROM c4_link").fetchall()[0][0] == "relay" and c.execute("SELECT count(*) FROM c4_link").fetchone()[0] == 1
+
+
+OLD = """
+CREATE TABLE c4_object(id TEXT NOT NULL, project TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN ('actor','system','app','store','component','group','file','function')),
+  name TEXT NOT NULL, parent TEXT, technology TEXT, description TEXT, PRIMARY KEY(project,id));
+CREATE TABLE c4_port(project TEXT NOT NULL, id TEXT NOT NULL, object_id TEXT NOT NULL, name TEXT, direction TEXT, kind TEXT, schema_json JSON, PRIMARY KEY(project,id));
+CREATE TABLE c4_connection(id TEXT NOT NULL, project TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, name TEXT, status TEXT, from_port_id TEXT, to_port_id TEXT,
+  PRIMARY KEY(project,id), FOREIGN KEY(project,from_port_id) REFERENCES c4_port(project,id));
+CREATE TABLE c4_interface(project TEXT NOT NULL, id TEXT NOT NULL, object_id TEXT NOT NULL, PRIMARY KEY(project,id));
+CREATE TABLE c4_meta(project TEXT PRIMARY KEY, name TEXT NOT NULL, root TEXT, layout TEXT, tags JSON, positions JSON, source TEXT);
+CREATE TABLE c4_link(project TEXT NOT NULL, object_id TEXT NOT NULL, ref_kind TEXT NOT NULL, ref_id INTEGER NOT NULL, PRIMARY KEY(project,object_id,ref_kind,ref_id));
+INSERT INTO c4_meta(project,name,source) VALUES('old','Old','/x/old.strata.yaml'),('lay','Lay','/x/docs/c4'),('none','None',NULL);
+INSERT INTO c4_object(id,project,type,name) VALUES('a','old','app','A'),('b','old','app','B'),('a','lay','app','A'),('a','none','app','A');
+INSERT INTO c4_port VALUES('old','pa','a','pa','output',NULL,NULL);
+INSERT INTO c4_connection VALUES('ab','old','a','b','x',NULL,'pa',NULL),('ab','lay','a','a','y',NULL,NULL,NULL);
+INSERT INTO c4_interface VALUES('old','i','a');
+INSERT INTO c4_link VALUES('old','a','item',1),('lay','a','item',1),('lay','gone','item',2),('none','a','item',3);
+"""
+
+
+def test_migration_drops_old_format_with_backup(tmp_path):
+    import sqlite3
+    p = tmp_path / "old.db"
+    s = sqlite3.connect(p); s.executescript(OLD); s.close()
+    c = db.init(p)
+    q = lambda sql: c.execute(sql).fetchall()
+    assert [tuple(r) for r in q("SELECT project,id FROM c4_object")] == [("lay", "a")]
+    assert [tuple(r) for r in q("SELECT project,id,name FROM c4_connection")] == [("lay", "ab", "y")]
+    assert [tuple(r) for r in q("SELECT project FROM c4_meta")] == [("lay",)]
+    assert [tuple(r) for r in q("SELECT project,object_id FROM c4_link")] == [("lay", "a")]     # old/none projects and the orphan 'gone' removed
+    assert not q("SELECT name FROM sqlite_master WHERE name IN ('c4_port','c4_interface')")
+    c.execute("INSERT INTO c4_connection(id,project,from_id,to_id) VALUES('z','lay','a','a')"); c.commit()  # no dangling FK to c4_port
+    [b] = list((tmp_path / "backups").glob("strata-pre-old-c4-drop-*.db"))
+    k = sqlite3.connect(b)
+    assert k.execute("SELECT count(*) FROM c4_port").fetchone()[0] == 1 and k.execute("SELECT count(*) FROM c4_object").fetchone()[0] == 4
+    db.init(p)   # idempotent, no second backup
+    assert len(list((tmp_path / "backups").glob("strata-pre-old-c4-drop-*.db"))) == 1

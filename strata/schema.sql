@@ -40,20 +40,7 @@ CREATE TABLE IF NOT EXISTS c4_object(
   tags JSON, links JSON, status TEXT, responsibilities JSON, state TEXT, owns JSON, behavior TEXT, PRIMARY KEY(project,id));
 CREATE TABLE IF NOT EXISTS c4_connection(
   id TEXT NOT NULL, project TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL,
-  name TEXT, technology TEXT, status TEXT, direction TEXT, tags TEXT, description TEXT,
-  feature TEXT, interface TEXT, payload JSON, kind TEXT, from_port_id TEXT, to_port_id TEXT, detail TEXT,
-  PRIMARY KEY(project,id),
-  FOREIGN KEY(project,from_port_id) REFERENCES c4_port(project,id),
-  FOREIGN KEY(project,to_port_id) REFERENCES c4_port(project,id));
-CREATE TABLE IF NOT EXISTS c4_port(
-  project TEXT NOT NULL, id TEXT NOT NULL, object_id TEXT NOT NULL, name TEXT NOT NULL,
-  direction TEXT NOT NULL CHECK(direction IN ('input','output')), kind TEXT, schema_json JSON,
-  PRIMARY KEY(project,id), FOREIGN KEY(project,object_id) REFERENCES c4_object(project,id) ON DELETE CASCADE);
--- a callable contract on an object: HTTP route, function, queue, event
-CREATE TABLE IF NOT EXISTS c4_interface(
-  project TEXT NOT NULL, id TEXT NOT NULL, object_id TEXT NOT NULL,
-  kind TEXT CHECK(kind IN ('http','function','queue','event')), name TEXT, signature TEXT,
-  purpose TEXT, input TEXT, output TEXT, errors JSON, PRIMARY KEY(project,id));
+  name TEXT, status TEXT, description TEXT, detail TEXT, PRIMARY KEY(project,id));
 CREATE TABLE IF NOT EXISTS c4_meta(
   project TEXT PRIMARY KEY, name TEXT NOT NULL, root TEXT, layout TEXT, tags JSON, positions JSON, source TEXT);
 CREATE TABLE IF NOT EXISTS c4_flow(

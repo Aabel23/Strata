@@ -273,13 +273,10 @@ def test_api_items_board_fields(env):
     assert get(base, "/api/items?status=review")[0] == 200 and get(base, "/api/items?ready=1&status=bogus")[0] == 400
 
 
-def test_only_scoped_c4_post_endpoints():
-    """Only the explicitly scoped C4 APIs may mutate state over HTTP."""
+def test_server_has_no_write_routes():
+    """The viewer is read-only: C4 is edited in the folder and imported with the CLI."""
     src = (ROOT / "strata/server.py").read_text()
-    assert not any(m in src for m in ("do_PUT", "do_DELETE", "do_PATCH"))
-    post = src[src.index("def do_POST"):src.index("def do_GET")]
-    paths = {s for s in post.split('"') if s.startswith("/api/")}
-    assert paths == {"/api/c4/object", "/api/c4/port", "/api/c4/link"}
+    assert not any(m in src for m in ("do_POST", "do_PUT", "do_DELETE", "do_PATCH"))
 
 
 def test_board_ui_filters_in_url():
@@ -299,16 +296,6 @@ def test_api_c4_layered_exposes_contracts_behavior(env):
     assert [t["id"] for t in m["behavior"]["relay"]["transitions"]] == ["t1"]
     assert next(o for o in m["objects"] if o["id"] == "relay")["owns"] == ["src/**"]
     assert any(s.get("link") == "app_cmd" for s in m["flows"][0]["steps"])
-
-
-def test_api_c4_old_format_has_no_layered_fields(env, tmp_path):
-    from strata import c4
-    b, p, _ = env
-    y = tmp_path / "old.yaml"
-    y.write_text("name: A\nroot: .\nobjects:\n  - {id: x, type: system, name: X, description: d}\nconnections: []\nflows: []\n")
-    c = db.connect(p); c4.import_yaml(c, str(y), "a"); c.close()
-    m = J(env, "/api/c4?project=a")
-    assert m["objects"][0]["id"] == "x" and not {"layered", "contracts", "behavior"} & set(m)
 
 
 def test_viewer_script_calls_only_defined_functions():

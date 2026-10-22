@@ -1,19 +1,19 @@
 # ⛰ Strata
 
-Kiến trúc C4 viết dưới dạng code. Bạn mô tả hệ thống trong một file YAML, rồi xem nó qua một viewer có thể zoom qua các tầng.
+Kiến trúc C4 viết dưới dạng code. Bạn mô tả hệ thống trong một thư mục YAML (`map.yaml` + `contracts/` + `behavior/` + `flows/`), rồi xem nó qua một viewer có thể zoom qua các tầng.
 Ý tưởng lấy từ IcePanel: **model trước, sơ đồ sau**.
 
 Tài liệu viết bằng YAML thuần nội dung, đặt trong `docs_dir`; server tự quét và vẽ (xem `docs/architect/doc-format.yaml`). Ngoài ra: [docs/architect/ARCHITECTURE.md](docs/architect/ARCHITECTURE.md) (kiến trúc, dữ liệu, server, cách mở rộng) · [docs/AGENT_C4.md](docs/AGENT_C4.md) (agent vẽ/sửa map).
 
-Dữ liệu nằm trong SQLite (`$STRATA_DB`, hoặc `--db FILE`). YAML chỉ là định dạng nhập.
+Dữ liệu nằm trong SQLite (`$STRATA_DB`, hoặc `--db FILE`). Thư mục C4 là nguồn chuẩn của map; DB chỉ là bản đọc.
 
 ```
-python3 strata.py import-yaml examples/project1_app.strata.yaml --project project1   # nạp vào DB (upsert, xóa phần đã bỏ)
-python3 strata.py validate --project project1        # kiểm tra từ DB (hoặc: validate FILE.yaml)
-python3 strata.py serve --project project1           # http://127.0.0.1:8740
+python3 strata.py c4 validate docs/c4                          # kiểm tra thư mục map
+python3 strata.py c4 import docs/c4 --project strata           # nạp vào DB (upsert, xóa phần đã bỏ)
+python3 strata.py serve --project strata             # http://127.0.0.1:8740
 ```
 
-Viewer cần server (`/api/c4`), không mở trực tiếp file HTML được nữa. Link tới code lấy gốc từ `root` trong YAML, đổi thành đường dẫn tuyệt đối lúc import.
+Viewer cần server (`/api/c4`), không mở trực tiếp file HTML được nữa. Gốc code lấy từ `project.root` trong `map.yaml`, đổi thành đường dẫn tuyệt đối lúc import.
 Map C4 chỉ hiện trong tab Kiến trúc của app shell (`/#/p/P/c4`); mở `/c4?project=P` trực tiếp sẽ chuyển về đó.
 
 ## App shell nhiều project
@@ -35,7 +35,7 @@ Route (GET): `/` shell, `/c4` viewer C4, `/pages`, `/page/<p>/<slug>`, `/api/pro
 `/api/decisions?project=`, `/api/docs?project=`, `/api/audit?project=&limit=`, `/api/search?q=&project=` (FTS, bm25, tối đa 30),
 `/docs/<project>/<path>` (phục vụ cả cây `docs_dir`; chặn `..`, dotfile, `.db`). Giá trị lọc ngoài whitelist trả 400.
 
-Route (POST, chỉ các ngoại lệ C4 có phạm vi hẹp — xem [CLAUDE.md](CLAUDE.md) luật cứng #1): `/api/c4/object` nhận `op=create|update|move|delete` (payload object/fields tương ứng; payload cũ `{id, fields}` vẫn sửa name/description/technology/status); `/api/c4/port` nhận `op=create|update|delete`; `/api/c4/link` nhận `op=create|update|delete`. Bố cục do viewer tự tính, không lưu. Các route giữ kiểm tra Host/Origin/JSON/size, validate model, ghi DB và audit transactionally. SQLite là nguồn chuẩn; YAML chỉ import/export.
+Server HTTP chỉ đọc: không có route POST. Map C4 sửa trong thư mục rồi `c4 import`; mọi ghi khác đi qua CLI/MCP (service có audit).
 
 ### Liên kết object với task/decision, context cho agent
 
@@ -44,17 +44,18 @@ python3 strata.py c4 link --project P --object X --item ID        # hoặc --dec
 python3 strata.py c4 links --project P --object X                  # liệt kê item/decision đã gắn
 python3 strata.py c4 context --project P [--object X] [--max-tokens 2000]   # văn bản gọn cho agent
 python3 strata.py c4 flow --project P [--id F]                              # trace từng bước của flow
+python3 strata.py c4 contract ID --project P                                # chi tiết một contract
 ```
 
 Agent thiết kế/sửa map: đọc [docs/AGENT_C4.md](docs/AGENT_C4.md) trước.
 
 `link/unlink` có audit (`c4.link`/`c4.unlink`); link trùng không ghi thêm. `context` không có `--object` thì in tổng quan cả map (kèm số issue mở); có `--object` thì in object, chuỗi cha, con, connection đã gộp, item/decision liên quan, flow; quá `--max-tokens` (ước len/4) thì cắt từ flow ngược lên, phần cắt ghi `... (cắt: <phần>)`.
-`/api/c4` trả thêm `issues` (dead_link/no_link/no_desc theo object), `links` và `open_issues`; viewer vẽ huy hiệu "!" cho object có vấn đề, viền đỏ cho object có issue mở, và có ô tìm object.
+`/api/c4` trả `meta`, `objects`, `connections` (link), `flows`, `contracts`, `behavior`, `links` và `open_issues`; viewer viền đỏ object có issue mở và có ô tìm object. Project chưa import map thì `/api/c4` trả 404 và viewer ghi "No C4 map (layered format) for this project".
 
 ## Hướng dẫn dùng bản đồ C4
 
 **Chuẩn bị**
-- `python3 strata.py import-yaml FILE.yaml --project P` nạp model vào DB.
+- `python3 strata.py c4 import DIR --project P` nạp thư mục map vào DB.
 - `python3 strata.py serve --project P` rồi mở tab Kiến trúc trong app shell (`/#/p/P/c4`).
 
 **Đọc một ô**: icon, tên, nhãn loại (Người dùng / Hệ thống / Ứng dụng / Kho dữ liệu / Thành phần), technology và 1–2 dòng mô tả. Rê chuột vào ô để xem mô tả đầy đủ. Ô có chồng thẻ phía sau và dòng "N thành phần bên trong ›" ở chân là ô mở ra được. Ô nét đứt ghi "Bên ngoài tầng này". Hộp "Chú giải" ở góc phải trên canvas giải thích các ký hiệu, gập/mở được (nhớ lựa chọn).
@@ -104,29 +105,28 @@ Trong tab Kiến trúc: map, chú giải, tag/tìm object và panel Chi tiết/F
 
 ## Tầng C4
 
-| type | Tầng | Được nằm trong |
+| kind | Tầng | Được nằm trong |
 |---|---|---|
 | `actor`, `system` | 1 Context | top level, `group` |
 | `app`, `store` | 2 Container | `system` |
 | `component` | 3 Component | `app` |
-| `file`, `function` | 4 Code | `component`, `file` |
-| `group` | gom nhóm (domain) | top level, `group`, `system`, `app` |
+| `group` | gom nhóm (domain) | bất kỳ |
 
-Mỗi object có `links:` trỏ tới file code thật, và lệnh `validate` báo link nào đã chết.
+Code không là object: contract có `start`/`end` trỏ `path::Qual.name`, object có `owns` (glob). `c4 validate` cảnh báo symbol không resolve được.
 
 ## Model
 
 ```yaml
-name: ...
-root: đường/dẫn/tới/repo      # gốc của links, tính từ vị trí file model
-tags: {security: {color: "#f04438"}}
+# map.yaml
+project: {id: strata, name: strata, root: ../..}
 objects:
-  - {id, type, name, parent?, technology?, description?, tags?, links?, status?}
-connections:
-  - {id?, from, to, name?, technology?, status?, direction?: outgoing|bidirectional|none, tags?}
-flows:
-  - {id, name, steps: [{id?, connection: id, reverse?: true | at: object id, text?, payload?, interface?}]}   # xem docs/AGENT_C4.md
+  - {id, kind, name, parent?, summary?, status?, tags?, owns?, behavior?}
+links:
+  - {id, from, to, name?, summary?, detail?: <contract id>, status?}
+# contracts/<file>.yaml: [{id, transport?, body?, start, end}]   behavior/<module>.yaml   flows/<id>.yaml: {name, steps: [{link, reverse?} | {at, transition?}, text?, values?]}
 ```
+
+Chi tiết và ví dụ: [docs/AGENT_C4.md](docs/AGENT_C4.md).
 
 ## Viewer
 
@@ -169,6 +169,6 @@ URL khi `serve`: `/pages[?project=P]` (danh sách), `/page/<project>/<slug>`, `/
 
 ## Ghép vào workflow
 
-1. Đặt file `*.strata.yaml` trong repo cạnh code, ví dụ `documentation/architecture.strata.yaml`.
-2. Agent architect cập nhật file này khi thiết kế thay đổi. Diff đọc được trong git.
-3. Chạy `strata.py import-yaml` rồi `strata.py validate --project P` (hoặc `validate FILE`) trong CI hoặc pre-commit để bắt link chết và connection sai.
+1. Đặt thư mục map trong repo cạnh code, ví dụ `docs/c4/`.
+2. Agent architect cập nhật thư mục này khi thiết kế thay đổi. Diff đọc được trong git.
+3. Chạy `strata.py c4 validate docs/c4` rồi `strata.py c4 import docs/c4 --project P` trong CI hoặc pre-commit để bắt link, contract và flow sai.

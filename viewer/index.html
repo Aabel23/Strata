@@ -228,19 +228,15 @@ const P=new URLSearchParams(location.search);
 let M=null, hotNode=null, byId={}, focus=null, selected=null, flow=null, step=0, codeBase="/code/";
 const codeQ=P.get("project")?"?project="+encodeURIComponent(P.get("project")):"";
 let cam={x:0,y:0,k:1}, graphBox=null, pos={};
-const ISSUE={dead_link:"Dead link",no_link:"No link",no_desc:"Missing description"};
 const NW=240, NH=108;
 const SDOT={live:["#22a06b","Live"],future:["#9aa3a0","Planned"],doing:["#e5484d","In progress"],maintenance:["#e5b318","Maintenance"],deprecated:["#e8833a","Deprecated"],removed:["#5b5f5e","Removed"]};
 const stc=v=>SDOT[v]?v:"live"; // status goes into class names: whitelist, never raw model text
 const sdot=(o,cx,cy)=>{const d=SDOT[o.status||"live"]||SDOT.live;return `<circle class="sdot" cx="${cx}" cy="${cy}" r="5" fill="${d[0]}"><title>${d[1]}</title></circle>`};
-const TYPE_LABEL={actor:"Actor",system:"System",app:"App",store:"Data store",component:"Component",group:"Group",file:"File",function:"Function"};
-const CODE=new Set(["file","function"]), CW=210, CH=50;
+const TYPE_LABEL={actor:"Actor",system:"System",app:"App",store:"Data store",component:"Component",group:"Group"};
 // Card scale (size + text together), kept per browser; layout reruns with scaled boxes.
 let K=1;try{const v=Number(localStorage.getItem("strata-card-k"));if(v>=0.6&&v<=2)K=v}catch{}
 $("#cardsz").value=Math.round(K*100);$("#cardlbl").textContent=Math.round(K*100)+"%";
 $("#cardsz").oninput=e=>{K=e.target.value/100;$("#cardlbl").textContent=e.target.value+"%";try{localStorage.setItem("strata-card-k",String(K))}catch{};if(M)render(true)};
-const isCode=o=>CODE.has(o?.type);
-const KIND={api:"API",network:"network",call:"function call",queue:"queue"};
 let scopeRect=null, curEdges=new Map(), tok=0, busy=false, pickConn=null, pickEdge=null, expanded=new Set(), springKey=null;
 const EMPTY='<p class="empty">Click a card to see details and highlight its connections. Double-click, Enter or “… inside ›” to go inside; click the background to deselect.</p>';
 // Keep the right panel's width and visibility independent of the diagram state.
@@ -264,12 +260,10 @@ const ICON={
   store:'<ellipse cx="10" cy="4.5" rx="7" ry="2.5"/><path d="M3 4.5v11c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-11M3 10c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/>',
   component:'<path d="M10 2l7 4v8l-7 4-7-4V6z"/><path d="M3 6l7 4 7-4M10 10v8"/>',
   group:'<rect x="2" y="2" width="16" height="16" rx="2" stroke-dasharray="3 2"/>',
-  file:'<path d="M5 2h7l4 4v12H5z"/><path d="M12 2v4h4"/>',
-  function:'<path d="M8 4c-3 0-2 6-5 6 3 0 2 6 5 6M12 4c3 0 2 6 5 6-3 0-2 6-5 6"/>'
 };
 
 function load(m){
-  M=m; byId={}; M.issues=m.issues||{}; M.links=m.links||{}; M.open_issues=m.open_issues||[];
+  M=m; byId={}; M.links=m.links||{}; M.open_issues=m.open_issues||[];
   $("#qlist").innerHTML=(m.objects||[]).map(o=>`<option value="${esc(o.id)}">${esc(o.name||"")}</option>`).join("");
   (m.objects||[]).forEach(o=>byId[o.id]=o);
   (m.connections||[]).forEach((c,i)=>c.id=c.id||`c${i}`);
@@ -290,7 +284,7 @@ function lift(id,F){
 }
 // Flat mode: every object except functions on one map; endpoints inside a function lift to its nearest non-function ancestor.
 let flat=false;
-const unfn=id=>{let o=byId[id];while(o&&o.type==="function")o=byId[o.parent];return o};
+const unfn=id=>byId[id];
 // With a flow picked, only its objects (plus the boundaries around them) and its connections stay.
 function flatView(){
   const nodes=new Map(), edges=new Map(), f=flow&&(M.flows||[]).find(x=>x.id===flow);
@@ -298,7 +292,7 @@ function flatView(){
   if(f){keep=new Set();conns=new Set();
     (f.steps||[]).forEach(st=>{const e=stepEnds(st);if(e.c?.id)conns.add(e.c.id);
       [e.at,e.from,e.to].forEach(id=>{const o=id&&unfn(id);if(o)chain(o.id).forEach(x=>keep.add(x))})})}
-  const vis=o=>o.type!=="function"&&(!keep||keep.has(o.id));
+  const vis=o=>!keep||keep.has(o.id);
   (M.objects||[]).forEach(o=>{if(vis(o))nodes.set(o.id,{o,ext:false,box:kids(o.id).some(vis)})});
   for(const c of M.connections||[]){
     if(conns&&!conns.has(c.id)) continue;
@@ -321,7 +315,6 @@ function view(F){
   return {nodes,edges};
 }
 const label=e=>e.list.length>1?`${e.list.length} connections`:(e.list[0].name||"");
-const tech=e=>e.list.length>1?"":(e.list[0].technology||"");
 // Smooth a dagre polyline into a curve through the midpoints.
 function curve(p){
   if(p.length<3) return `M${p[0].x},${p[0].y}L${p[p.length-1].x},${p[p.length-1].y}`;
@@ -336,11 +329,11 @@ function render(keepCam,keepOld){
   const g=new dagre.graphlib.Graph({compound:true});
   g.setGraph({rankdir:M.layout||"LR",nodesep:36/K,ranksep:90/K,marginx:40,marginy:40}); g.setDefaultEdgeLabel(()=>({}));
   if(focus) g.setNode("__scope",{});
-  nodes.forEach((n,id)=>{g.setNode(id,n.box?{paddingTop:30*K}:isCode(n.o)?{width:CW*K,height:CH*K}:{width:NW*K,height:NH*K}); if(focus&&!n.ext) g.setParent(id,"__scope")});
+  nodes.forEach((n,id)=>{g.setNode(id,n.box?{paddingTop:30*K}:{width:NW*K,height:NH*K}); if(focus&&!n.ext) g.setParent(id,"__scope")});
   // Flat mode nests every object inside its parent's boundary; dagre can't route edges to clusters, so those are drawn straight after layout.
   if(flat) nodes.forEach((n,id)=>{if(n.o.parent&&nodes.has(n.o.parent)) g.setParent(id,n.o.parent)});
   const boxEdge=e=>flat&&(nodes.get(e.from).box||nodes.get(e.to).box);
-  edges.forEach(e=>{if(!boxEdge(e)) g.setEdge(e.from,e.to,{width:Math.min(200,Math.max(label(e).length,tech(e).length)*6),height:30,labelpos:"c"})});
+  edges.forEach(e=>{if(!boxEdge(e)) g.setEdge(e.from,e.to,{width:Math.min(200,label(e).length*6),height:30,labelpos:"c"})});
   dagre.layout(g);
   edges.forEach(e=>{if(!boxEdge(e)) return; const a=g.node(e.from),b=g.node(e.to),p1=rim(a,b),p2=rim(b,a); g.setEdge(e.from,e.to,{points:[p1,p2],x:(p1.x+p2.x)/2,y:(p1.y+p2.y)/2})});
   graphBox={w:g.graph().width,h:g.graph().height};
@@ -368,36 +361,33 @@ function render(keepCam,keepOld){
     const hn=e.list.map(c=>hot.get(c.id)).find(v=>v!==undefined);
     const isHot=hn!==undefined, st=e.list.length===1?stc(c0.status):"live";
     const dim=(tag&&!e.list.some(c=>(c.tags||[]).includes(tag)))||(flow&&!isHot);
-    const lw=Math.max(label(e).length+(isHot?3:0),tech(e).length)*6; // estimate text width
+    const lw=(label(e).length+(isHot?3:0))*6; // estimate text width
     const dir=c0.direction||"outgoing", d=curve(ge.points);
     const r=isHot&&rev, mk=r?'marker-start="url(#ar)"':(dir!=="none"?'marker-end="url(#ar)"':"")+(dir==="bidirectional"?' marker-start="url(#ar)"':"");
     s+=`<g class="edge ${st} ${isHot?"hot":""} ${r?"rev":""} ${dim?"dim":""}" data-e="${esc(e.from+"→"+e.to)}"><path class="hit" d="${d}"/><path d="${d}" ${mk}/>
-      <rect class="lbg" x="${ge.x-lw/2-3}" y="${ge.y-(tech(e)?19:5)}" width="${lw+6}" height="${tech(e)?31:17}" rx="3"/>
-      ${tech(e)?`<text x="${ge.x}" y="${ge.y-5}" text-anchor="middle">${esc(tech(e))}</text>`:""}
+      <rect class="lbg" x="${ge.x-lw/2-3}" y="${ge.y-5}" width="${lw+6}" height="17" rx="3"/>
       <text x="${ge.x}" y="${ge.y+9}" text-anchor="middle">${isHot?`<tspan class="num">${hn+1}. </tspan>`:""}${esc(label(e))}</text></g>`;
   });
   nodes.forEach((n,id)=>{if(n.box) return;const p=g.node(id),i=s.length;drawNode(n,id);
     if(K!==1) s=s.slice(0,i)+`<g class="ks" transform="translate(${p.x} ${p.y}) scale(${K}) translate(${-p.x} ${-p.y})">`+s.slice(i)+"</g>"});
   function drawNode(n,id){
-    if(isCode(n.o)){s+=codeNode(n,id,g.node(id),tag);return}
     const p=g.node(id), o=n.o, x=p.x-NW/2, y=p.y-NH/2, t=o.type||"component", rx=10, fy=y+NH-24;
     const col=(o.tags||[]).map(t=>M.tags?.[t]?.color).find(Boolean);
     const dim=tag&&!(o.tags||[]).includes(tag), nk=kids(id).length, deep=nk>0&&!n.ext&&!flat, st=o.status&&o.status!=="live";
     const dl=wrap(o.description,34,2);
-    const tl=TYPE_LABEL[t]||t, sub=[(o.name||"").trim().toLowerCase()!==tl.toLowerCase()&&tl,o.technology&&clip(o.technology,18)].filter(Boolean).join(" · ");
+    const tl=TYPE_LABEL[t]||t, sub=[(o.name||"").trim().toLowerCase()!==tl.toLowerCase()&&tl,].filter(Boolean).join(" · ");
     s+=`<g class="node ${n.ext?"ext":""} ${dim?"dim":""} ${M.open_issues.includes(id)?"issue":""} ${hotNode===id?"hot":""}" data-id="${esc(id)}">
       ${deep?`<rect class="stk" x="${x+8}" y="${y+8}" width="${NW}" height="${NH}" rx="${rx}"/><rect class="stk" x="${x+4}" y="${y+4}" width="${NW}" height="${NH}" rx="${rx}"/>`:""}
       <rect class="box" x="${x}" y="${y}" width="${NW}" height="${NH}" rx="${rx}"/>
       ${col?`<rect x="${x+rx}" y="${y}" width="${NW-2*rx}" height="3" rx="1.5" fill="${esc(col)}"/>`:""}
-      <g class="ico" transform="translate(${x+14},${y+12})" stroke="var(--${CODE.has(t)?"component":t})">${ICON[t]||ICON.component}</g>
+      <g class="ico" transform="translate(${x+14},${y+12})" stroke="var(--${t})">${ICON[t]||ICON.component}</g>
       ${sdot(o,x+NW-14,y+14)}
-      ${M.issues[id]&&!M.layered?`<g class="bdg"><circle cx="${x+NW}" cy="${y}" r="9"/><text x="${x+NW}" y="${y+4}">!</text></g>`:""}
       <text class="t" x="${x+44}" y="${y+26}">${esc(clip(o.name||o.id,24))}</text>
       <text class="s" x="${x+44}" y="${y+42}">${esc(sub)}</text>
       ${dl.length?dl.map((l,i)=>`<text class="d" x="${x+14}" y="${y+62+i*14}">${esc(l)}</text>`).join(""):`<text class="d none" x="${x+14}" y="${y+62}">No description</text>`}
       ${n.ext||deep||st?`<line class="fl" x1="${x+1}" x2="${x+NW-1}" y1="${fy}" y2="${fy}"/>`:""}
       ${n.ext?`<text class="ft" x="${x+14}" y="${y+NH-9}">Outside this level</text>`:""}
-      ${deep?`<g class="zbtn" data-z="${esc(id)}"><path class="zhit" d="M${x+1} ${fy}H${x+NW-1}V${y+NH-rx}a${rx-1} ${rx-1} 0 0 1 -${rx-1} ${rx-1}H${x+rx}a${rx-1} ${rx-1} 0 0 1 -${rx-1} -${rx-1}z"/><text class="zt" x="${x+14}" y="${y+NH-9}">${kids(id).every(isCode)?`Open details · ${nk} ›`:`${nk} components inside ›`}</text></g>`:""}
+      ${deep?`<g class="zbtn" data-z="${esc(id)}"><path class="zhit" d="M${x+1} ${fy}H${x+NW-1}V${y+NH-rx}a${rx-1} ${rx-1} 0 0 1 -${rx-1} ${rx-1}H${x+rx}a${rx-1} ${rx-1} 0 0 1 -${rx-1} -${rx-1}z"/><text class="zt" x="${x+14}" y="${y+NH-9}">${`${nk} components inside ›`}</text></g>`:""}
       ${st?`<text class="ft" x="${x+NW-12}" y="${y+NH-9}" text-anchor="end">${esc(o.status)}</text>`:""}</g>`;
   }
   const olds=[...$("#stage").querySelectorAll(":scope>svg")];
@@ -442,19 +432,6 @@ function springLanes(ek){
     if(t<1) requestAnimationFrame(f)})(t0);
 }
 let g0Points=new Map();
-// Compact code-like card for file/function nodes; drills like any other node when it has children.
-function codeNode(n,id,p,tag){
-  const o=n.o, x=p.x-CW/2, y=p.y-CH/2, nk=kids(id).length, deep=nk>0&&!n.ext&&!flat, dim=tag&&!(o.tags||[]).includes(tag);
-  const sub=[TYPE_LABEL[o.type],o.technology,n.ext&&"external",deep&&`${nk} inside`].filter(Boolean).join(" · ");
-  return `<g class="node code ${n.ext?"ext":""} ${dim?"dim":""} ${M.open_issues.includes(id)?"issue":""} ${hotNode===id?"hot":""}" data-id="${esc(id)}">
-    ${deep?`<rect class="stk" x="${x+4}" y="${y+4}" width="${CW}" height="${CH}" rx="6"/>`:""}
-    <rect class="box" x="${x}" y="${y}" width="${CW}" height="${CH}" rx="6"/>
-    <g class="ico" transform="translate(${x+10},${y+15}) scale(.8)" stroke="var(--component)">${ICON[o.type]}</g>
-    ${sdot(o,x+CW-12,y+12)}
-    ${M.issues[id]&&!M.layered?`<g class="bdg"><circle cx="${x+CW}" cy="${y}" r="9"/><text x="${x+CW}" y="${y+4}">!</text></g>`:""}
-    <text class="t" x="${x+32}" y="${y+21}">${esc(clip(o.name||o.id,24))}</text>
-    <text class="s" x="${x+32}" y="${y+37}">${esc(clip(sub,30))}</text></g>`;
-}
 const clip=(s,n)=>(s=String(s)).length>n?s.slice(0,n-1)+"…":s;
 const wrap=(s,n,max)=>{const w=String(s||"").split(/\s+/).filter(Boolean),L=[];let cur="";
   for(const x of w){if(cur&&(cur+" "+x).length>n){L.push(cur);cur=x}else cur=cur?cur+" "+x:x}
@@ -603,7 +580,6 @@ $("#up").onclick=()=>{if(M&&focus)go(byId[focus].parent||null)};
 /* right panel */
 function tabTo(p){document.querySelectorAll(".ptabs a").forEach(a=>a.classList.toggle("on",a.dataset.p===p));$("#pinfo").hidden=p!=="info";$("#pflows").hidden=p!=="flows"}
 document.querySelectorAll(".ptabs a").forEach(a=>a.onclick=()=>tabTo(a.dataset.p));
-function links(o){return (o.links||[]).map(l=>/^https?:/.test(l)?`<div><a href="${esc(l)}" target="_blank">${esc(l)}</a></div>`:`<div><a href="${codeBase}${esc(l)}${codeQ}" target="_blank"><code>${esc(l)}</code></a></div>`).join("")}
 function related(id){
   const l=M.links[id]; if(!l||!(l.items.length+l.decisions.length)) return "";
   return `<div class="lbl">Related</div><ul>${l.items.map(i=>`<li>${esc(i.kind)} #${i.id} [${esc(i.status)}] ${esc(i.title)}</li>`).join("")}${l.decisions.map(d=>`<li>decision #${d.id} [${esc(d.status)}] ${esc(d.title)}</li>`).join("")}</ul>`;
@@ -612,114 +588,25 @@ const has=v=>v!=null&&v!==""&&!(Array.isArray(v)&&!v.length);
 const fld=(l,v)=>has(v)?`<div class="lbl">${l}</div><div class="field">${esc(v)}</div>`:"";
 const pre=(l,v)=>has(v)?`<div class="lbl">${l}</div><pre>${esc(typeof v==="string"?v:JSON.stringify(v,null,2))}</pre>`:"";
 const conns=()=>M.connections||[];
-const ifcById=(oid,iid)=>(byId[oid]?.interfaces||[]).find(i=>i.id===iid)||(M.objects||[]).flatMap(o=>o.interfaces||[]).find(i=>i.id===iid);
-function ifcCard(i){
-  return `<div class="ifc">${i.kind?`<span class="chip k" style="margin:0 6px 0 0">${esc(i.kind)}</span>`:""}<span class="mono">${esc(i.signature||i.name||i.id)}</span>
-  ${has(i.purpose)?`<div>${esc(i.purpose)}</div>`:""}
-  ${has(i.input)||has(i.output)?`<div class="m mono">${esc(i.input||"—")} → ${esc(i.output||"—")}</div>`:""}
-  ${has(i.errors)?`<div class="er mono">${(i.errors||[]).map(esc).join(", ")}</div>`:""}</div>`;
-}
 const cRow=c=>`<div data-c="${esc(c.id)}">${esc(nm(c.from))} → ${esc(nm(c.to))}${c.name?` <span class="m">· ${esc(c.name)}</span>`:""}</div>`;
 function bindRows(){$("#pinfo").querySelectorAll("[data-c]").forEach(el=>el.onclick=()=>{const c=conns().find(x=>x.id===el.dataset.c);if(c)showConn(c)})}
-// task #162: inline edit of name/description/technology/status, the only 4 fields the viewer may write (POST /api/c4/object).
-const STATUS_OPTS=Object.keys(SDOT);
 function objHead(o){
-  return `<div class="lbl">Name</div><h2 class="${isCode(o)?"mono":""}">${esc(o.name||o.id)}</h2>
-  <span class="chip">${esc(TYPE_LABEL[o.type]||o.type||"")}</span>${o.status?`<span class="chip">${esc(o.status)}</span>`:""}${has(o.state)?`<span class="chip k">${esc(o.state)}</span>`:""}${(o.tags||[]).map(t=>`<span class="chip">#${esc(t)}</span>`).join("")}
-  <a id="editobj" class="editlink">✎ Edit</a>
-  ${fld("Technology",o.technology)}
+  return `<div class="lbl">Name</div><h2>${esc(o.name||o.id)}</h2>
+  <span class="chip">${esc(TYPE_LABEL[o.type]||o.type||"")}</span>${o.status?`<span class="chip">${esc(o.status)}</span>`:""}${(o.tags||[]).map(t=>`<span class="chip">#${esc(t)}</span>`).join("")}
   ${fld("Description",o.description)}`;
-}
-function objForm(o,draft,err){
-  draft=draft||{name:o.name||"",description:o.description||"",technology:o.technology||"",status:o.status||""};
-  const opts=['<option value="">(default: live)</option>'].concat(STATUS_OPTS.map(s=>`<option value="${esc(s)}"${s===draft.status?" selected":""}>${esc(SDOT[s][1])}</option>`)).join("");
-  return `<div class="lbl">Name</div><input type="text" id="ef-name" value="${esc(draft.name)}">
-  <div class="lbl">Status</div><select id="ef-status">${opts}</select>
-  <div class="lbl">Technology</div><input type="text" id="ef-technology" value="${esc(draft.technology)}">
-  <div class="lbl">Description</div><input type="text" id="ef-description" value="${esc(draft.description)}">
-  ${err?`<div class="eferr">${esc(err)}</div>`:""}
-  <p class="efbtns"><button id="ef-save">Save</button><button id="ef-cancel">Cancel</button></p>`;
-}
-function bindEditOpen(o){const a=$("#editobj");if(a)a.onclick=()=>{$("#objhead").innerHTML=objForm(o);bindEditForm(o)}}
-function bindEditForm(o){
-  $("#ef-cancel").onclick=()=>{$("#objhead").innerHTML=objHead(o);bindEditOpen(o)};
-  $("#ef-save").onclick=()=>saveObjEdit(o);
-}
-async function saveObjEdit(o){
-  const draft={name:$("#ef-name").value,description:$("#ef-description").value,technology:$("#ef-technology").value,status:$("#ef-status").value};
-  const fields={};
-  for(const k of ["name","description","technology","status"]) if(draft[k].trim()!==(o[k]||"")) fields[k]=draft[k];
-  if(!Object.keys(fields).length){$("#objhead").innerHTML=objHead(o);bindEditOpen(o);return}
-  const btn=$("#ef-save"); btn.disabled=true; btn.textContent="Saving…";
-  try{
-    const r=await fetch("/api/c4/object",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({project:P.get("project")||null,id:o.id,fields})});
-    if(!r.ok) throw new Error((await r.text()).match(/<p>Message: (.*?)\.?<\/p>/)?.[1]||r.status);
-    const {object:updated}=await r.json();
-    const idx=(M.objects||[]).findIndex(x=>x.id===o.id); if(idx>-1) M.objects[idx]=updated;
-    byId[updated.id]=updated;
-    render(true);
-    showObj(updated);
-  }catch(e){$("#objhead").innerHTML=objForm(o,draft,e.message);bindEditForm(o)}
 }
 function showObj(o){
   tabTo("info"); $("#pinfo").dataset.open="1"; pickConn=null; pickEdge=null;
-  const ports=o.ports||[];
-  const inc=conns().filter(c=>c.to===o.id), out=conns().filter(c=>c.from===o.id), resp=(o.responsibilities||[]).filter(has);
+  const inc=conns().filter(c=>c.to===o.id), out=conns().filter(c=>c.from===o.id);
   $("#pinfo").innerHTML=`<div id="objhead">${objHead(o)}</div>
-  ${M.layered?(has(o.owns)?`<div class="lbl">Owns</div><div class="field mono">${o.owns.map(esc).join("<br>")}</div>`:"")+layBehavior(o)
-  :`<div class="lbl">Code</div>${o.links?.length?links(o):'<div class="empty">design only, no code yet</div>'}
-  <div class="lbl">Ports</div>${ports.length?ports.map(p=>`<div class="ifc"><span class="chip k">${esc(p.direction)}</span> <span class="mono">${esc(p.name||p.id)}</span>${p.kind?` <span class="m">· ${esc(p.kind)}</span>`:""}</div>`).join(""):'<div class="empty">No typed ports</div>'}<button id="add-c4-port">Add port</button>`}
-  ${resp.length?`<div class="lbl">Responsibilities</div><ul class="r">${resp.map(r=>`<li>${esc(r)}</li>`).join("")}</ul>`:""}
-  ${has(o.interfaces)?`<div class="lbl">Interfaces</div>${o.interfaces.map(ifcCard).join("")}`:""}
+  ${has(o.owns)?`<div class="lbl">Owns</div><div class="field mono">${o.owns.map(esc).join("<br>")}</div>`:""}${layBehavior(o)}
   ${inc.length?`<div class="lbl">Called by</div><div class="clist">${inc.map(cRow).join("")}</div>`:""}
   ${out.length?`<div class="lbl">Calls</div><div class="clist">${out.map(cRow).join("")}</div>`:""}
-  ${M.issues[o.id]&&!M.layered?`<div class="lbl">Problems</div><ul>${M.issues[o.id].map(c=>`<li>${esc(ISSUE[c]||c)}</li>`).join("")}</ul>`:""}
   ${related(o.id)}
-  ${kids(o.id).length?`<p><button id="zoomto" data-id="${esc(o.id)}">${kids(o.id).every(isCode)?"Open details":"Zoom in"} (${kids(o.id).length}) →</button></p>`:""}`;
+  ${kids(o.id).length?`<p><button id="zoomto" data-id="${esc(o.id)}">Zoom in · ${kids(o.id).length} →</button></p>`:""}`;
   const zb=$("#zoomto"); if(zb) zb.onclick=()=>go(zb.dataset.id);
-  const pb=$("#add-c4-port"); if(pb) pb.onclick=()=>addC4Port(o);
   bindRows();
-  bindEditOpen(o);
 }
-function idSlug(s){return String(s||"").toLowerCase().replace(/[^a-z0-9_-]+/g,"-").replace(/^-|-$/g,"")||"port"}
-async function postC4(path,body){
-  const r=await fetch(`/api/c4/${path}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({project:P.get("project")||null,...body})});
-  if(!r.ok) throw new Error((await r.text()).match(/<p>Message: (.*?)\.?<\/p>/)?.[1]||`HTTP ${r.status}`);
-  return r.json();
-}
-async function refreshC4(keep=focus){
-  const r=await fetch("/api/c4"+codeQ); if(!r.ok) throw new Error(`Could not reload model (HTTP ${r.status})`);
-  const d=await r.json(); M={...d.meta,objects:d.objects,connections:d.connections,flows:d.flows,issues:d.issues,links:d.links,open_issues:d.open_issues,layered:d.layered,contracts:d.contracts,behavior:d.behavior};
-  byId={}; (M.objects||[]).forEach(o=>byId[o.id]=o); (M.connections||[]).forEach((c,i)=>c.id=c.id||`c${i}`);
-  focus=keep&&byId[keep]&&kids(keep).length?keep:null;
-  selected=selected&&byId[selected]?selected:null;
-  $("#qlist").innerHTML=(M.objects||[]).map(o=>`<option value="${esc(o.id)}">${esc(o.name||"")}</option>`).join("");
-  renderFlows(); render(true);
-}
-async function addC4Port(o){
-  const name=prompt("Port name"); if(!name?.trim())return;
-  const direction=prompt("Direction: input or output","input"); if(!["input","output"].includes(direction))return;
-  const kind=prompt("Port type (kind)","json"); if(kind===null)return;
-  const id=idSlug(o.id+"-"+name);
-  try{await postC4("port",{op:"create",object:o.id,port:{id,name:name.trim(),direction,kind:kind.trim()||"any"}});await refreshC4(focus);showObj(byId[o.id]);}
-  catch(e){$("#smsg").textContent=`Port save failed: ${e.message}`}
-}
-// Field list: each item "name: note" or {name,type,note}; a plain string payload stays as a block.
-const pitem=x=>{if(typeof x!=="string") return `<li><span class="mono">${esc(x.name||"")}</span>${x.type?` <span class="m">${esc(x.type)}</span>`:""}${x.note?` · ${esc(x.note)}`:""}</li>`;
-  const k=x.indexOf(": ");return k<0?`<li class="mono">${esc(x)}</li>`:`<li><span class="mono">${esc(x.slice(0,k))}</span> · ${esc(x.slice(k+2))}</li>`};
-function plist(l,v){
-  if(!has(v)) return "";
-  if(Array.isArray(v)) return `<div class="lbl">${l} (${v.length})</div><ul class="r">${v.map(pitem).join("")}</ul>`;
-  if(typeof v==="object") return plist(l,Object.entries(v).map(([k,x])=>`${k}: ${typeof x==="string"?x:JSON.stringify(x)}`));
-  return pre(l,v);
-}
-// payload.endpoints: one card per API (method + path) with its request and response fields.
-const epCard=e=>`<div class="ep"><span class="chip k">API</span><span class="mono">${esc(e.api||"")}</span>${has(e.note)?`<div class="m">${esc(e.note)}</div>`:""}${plist("Request",e.request)}${plist("Response",e.response)}</div>`;
-function payloadHtml(p){
-  if(!p) return "";
-  return (p.endpoints||[]).map(epCard).join("")+plist("Request",p.request)+plist("Response",p.response);
-}
-// Contract of one connection: kind, feature, target interface, parameters, payloads, flows using it.
 // Layered model: the contract behind a link (c.detail = "<file>.<id>"). Anything missing reads "Not specified yet".
 const NYS='<div class="empty">Not specified yet</div>';
 const fldN=(l,v)=>`<div class="lbl">${l}</div>${has(v)?`<div class="field">${esc(v)}</div>`:NYS}`;
@@ -737,19 +624,10 @@ function layBehavior(o){
   return `<div class="lbl">Behavior${has(b.form)?` (${esc(b.form)})`:""}</div>${st?`<div class="lbl">States</div><ul class="r">${st}</ul>`:NYS}${tr?`<div class="lbl">Transitions</div><ul class="r">${tr}</ul>`:""}`;
 }
 function connBody(c){
-  const i=has(c.interface)?ifcById(c.to,c.interface):null;
   const fl=(M.flows||[]).map(f=>({f,n:(f.steps||[]).map((st,k)=>stepConn(st)===c.id?k+1:0).filter(Boolean)})).filter(x=>x.n.length);
   const flh=fl.length?`<div class="lbl">Flows using this connection</div><div class="clist">${fl.map(x=>`<div data-f="${esc(x.f.id)}" data-s="${x.n[0]-1}">${esc(x.f.name||x.f.id)} <span class="m">· step ${x.n.join(", ")}</span></div>`).join("")}</div>`:"";
-  if(M.layered) return `<div class="field" style="margin-top:8px">${esc(nm(c.from))} → ${esc(nm(c.to))}</div>
-  ${c.status&&c.status!=="live"?`<span class="chip">${esc(c.status)}</span>`:""}${fld("Summary",c.description)}${layContract(c)}${flh}`;
   return `<div class="field" style="margin-top:8px">${esc(nm(c.from))} → ${esc(nm(c.to))}</div>
-  ${KIND[c.kind]||has(c.kind)?`<span class="chip k">${esc(KIND[c.kind]||c.kind)}</span>`:""}${c.status&&c.status!=="live"?`<span class="chip">${esc(c.status)}</span>`:""}${(c.tags||[]).map(t=>`<span class="chip">#${esc(t)}</span>`).join("")}
-  ${fld("Technology",c.technology)}
-  ${fld("Feature",c.feature)}
-  ${i?`<div class="lbl">Interface</div>${ifcCard(i)}`:has(c.interface)?fld("Interface",c.interface):""}
-  ${has(c.payload?.endpoints)?`<div class="lbl">API (${c.payload.endpoints.length})</div>`:""}${payloadHtml(c.payload)}
-  ${fld("Description",c.description)}
-  ${fl.length?`<div class="lbl">Flows using this connection</div><div class="clist">${fl.map(x=>`<div data-f="${esc(x.f.id)}" data-s="${x.n[0]-1}">${esc(x.f.name||x.f.id)} <span class="m">· step ${x.n.join(", ")}</span></div>`).join("")}</div>`:""}`;
+  ${c.status&&c.status!=="live"?`<span class="chip">${esc(c.status)}</span>`:""}${fld("Summary",c.description)}${layContract(c)}${flh}`;
 }
 function bindFlows(){$("#pinfo").querySelectorAll("[data-f]").forEach(el=>el.onclick=()=>{flow=el.dataset.f;step=+el.dataset.s;renderFlows();tabTo("flows");showStep()})}
 function showConn(c){
@@ -801,8 +679,7 @@ function renderFlows(){
   if(f){
     h+=`<div class="stepnav"><button id="prev">« Previous</button><span>Step ${step+1} of ${f.steps.length}</span><button id="next" class="nx">Next »</button></div></div>`;
     h+=f.steps.map((st,i)=>{const e=stepEnds(st), c=e.c||{}, F=stepScope(st);
-      const iid=st.interface||c.interface, ifc=has(iid)?ifcById(e.at||c.to,iid):null;
-      const via=[c.technology||(M.layered&&M.contracts?.[c.detail]?.transport),KIND[c.kind]||c.kind].filter(has).join(" · ");
+      const via=M.contracts?.[c.detail]?.transport;
       const head=e.at?`<div class="ft" style="display:block"><i>⟳</i> at <span>${esc(nm(e.at))}</span></div>`
         :`<div class="ft"><span>${esc(nm(e.from))}</span><i>${st.reverse?"←":"→"}</i><span>${esc(nm(e.to))}</span></div>`;
       return `<div class="step ${i===step?"on":""}" data-i="${i}"><div class="n">Step<b>${i+1}.</b></div>
@@ -810,7 +687,7 @@ function renderFlows(){
       ${via?`<div class="via">via ${esc(via)}</div>`:""}<div>${esc(st.text||c.name||"")}</div>
       ${has(st.transition)?`<div class="via">transition ${esc(st.transition)}</div>`:""}
       ${has(st.payload)||has(st.values)?`<pre>${esc(typeof (st.payload||st.values)==="string"?st.payload:JSON.stringify(st.payload||st.values))}</pre>`:""}
-      ${ifc?`<div class="sig">${esc(ifc.signature||ifc.name||ifc.id)}</div>`:has(st.interface)?`<div class="sig">${esc(st.interface)}</div>`:""}</div>`}).join("");
+      </div>`}).join("");
   }
   $("#pflows").innerHTML=h;
   $("#flow").onchange=e=>{flow=e.target.value||null;step=0;renderFlows();showStep()};
@@ -868,8 +745,8 @@ const tip=$("#tip"); let tipId=null;
 $("#stage").addEventListener("mousemove",e=>{
   const n=!drag&&!busy&&e.target.closest?.(".node"), o=n&&byId[n.dataset.id];
   if(!o){tip.hidden=true;tipId=null;return}
-  if(tipId!==o.id){tipId=o.id; const nk=kids(o.id).length, iss=M.layered?null:M.issues[o.id];
-    tip.innerHTML=`<b>${esc(o.name||o.id)}</b><div class="m">${esc([TYPE_LABEL[o.type]||o.type,o.technology].filter(Boolean).join(" · "))}${n.classList.contains("ext")?" · outside this level":""}</div>${o.description?`<div>${esc(o.description)}</div>`:'<div class="m">No description</div>'}${nk?`<div class="m">${nk} components inside</div>`:""}${iss?`<div class="w">${esc(iss.map(c=>ISSUE[c]||c).join("; "))}</div>`:""}`;
+  if(tipId!==o.id){tipId=o.id; const nk=kids(o.id).length;
+    tip.innerHTML=`<b>${esc(o.name||o.id)}</b><div class="m">${esc(TYPE_LABEL[o.type]||o.type)}${n.classList.contains("ext")?" · outside this level":""}</div>${o.description?`<div>${esc(o.description)}</div>`:'<div class="m">No description</div>'}${nk?`<div class="m">${nk} components inside</div>`:""}`;
     tip.hidden=false}
   const w=tip.offsetWidth,h=tip.offsetHeight; tip.style.left=Math.min(e.clientX+14,innerWidth-w-8)+"px"; tip.style.top=(e.clientY+16+h>innerHeight?e.clientY-h-12:e.clientY+16)+"px";
 });
@@ -879,7 +756,6 @@ $("#stage").addEventListener("mouseleave",()=>{tip.hidden=true;tipId=null});
  $("#lgbody").innerHTML=`<div class="ty">`+["actor","system","app","store","component"].map(t=>`<div>${sw(t)}<span>${TYPE_LABEL[t]}</span></div>`).join("")+`</div><hr>
  <svg viewBox="0 0 24 18"><rect x="1" y="2" width="22" height="14" rx="3" fill="none" stroke="var(--faint)" stroke-dasharray="3 2.5"/></svg><span>Dashed: outside this level</span>
  <svg viewBox="0 0 24 18"><rect x="5" y="5" width="17" height="11" rx="3" fill="var(--card2)" stroke="var(--line)"/><rect x="2.5" y="2.5" width="17" height="11" rx="3" fill="var(--card)" stroke="var(--faint)"/></svg><span>Stacked: click to open inside</span>
- <svg viewBox="0 0 24 18"><circle cx="12" cy="9" r="7" fill="var(--err)"/><text x="12" y="12.5" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">!</text></svg><span>! mark: data problem</span>
  <svg viewBox="0 0 24 18"><rect x="1" y="2" width="22" height="14" rx="3" fill="color-mix(in srgb,var(--err) 14%,var(--card))" stroke="var(--err)"/></svg><span>Red fill: has open issues</span>
  <svg viewBox="0 0 24 18" style="color:var(--edge)"><path d="M1 9h16" stroke="${k}" stroke-width="1.4"/><path d="M16 5l6 4-6 4z" fill="${k}"/></svg><span>Arrow: call direction</span><hr>`+Object.values(SDOT).map(([c,t])=>`<svg viewBox="0 0 24 18"><circle cx="12" cy="9" r="5" fill="${c}"/></svg><span>Dot: ${t}</span>`).join("");
  const lg=$("#legend"); try{const v=localStorage.getItem("strata-legend"); if(v==="0"||(v===null&&innerWidth<900)) lg.open=false}catch{}
@@ -890,8 +766,8 @@ if(window.top===window){location.replace("/#/p/"+encodeURIComponent(P.get("proje
 document.body.classList.add("embed");
 if(P.get("shell")) document.body.classList.add("shell");
 fetch("/api/c4"+location.search).then(r=>r.ok?r.json():Promise.reject(r.status))
-  .then(d=>load({...d.meta,objects:d.objects,connections:d.connections,flows:d.flows,issues:d.issues,links:d.links,open_issues:d.open_issues,layered:d.layered,contracts:d.contracts,behavior:d.behavior}))
-  .catch(e=>{$("#drop").textContent=`Could not load model (${e}). Run strata.py import-yaml then strata.py serve.`});
+  .then(d=>load({...d.meta,objects:d.objects,connections:d.connections,flows:d.flows,links:d.links,open_issues:d.open_issues,layered:d.layered,contracts:d.contracts,behavior:d.behavior}))
+  .catch(e=>{$("#drop").textContent=e===404?"No C4 map (layered format) for this project":`Could not load model (${e}).`});
 </script>
 </body>
 </html>

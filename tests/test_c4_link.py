@@ -1,14 +1,14 @@
 import json, threading, urllib.request
 import pytest
 from strata import db, server, service
-from test_c4 import EX, run
+from conftest import FIX, run
 
 
 @pytest.fixture
 def dbp(tmp_path):
     p = tmp_path / "t.db"
-    assert run(p, "import-yaml", str(EX), "--project", "p")[0] == 0
     run(p, "project", "add", "p", "--name", "P")
+    assert run(p, "c4", "import", str(FIX), "--project", "p")[0] == 0
     run(p, "item", "add", "--project", "p", "--kind", "issue", "--title", "Lỗi relay")   # item 1
     run(p, "item", "add", "--project", "p", "--kind", "task", "--title", "Làm mail")      # item 2
     c = db.connect(p)
@@ -45,13 +45,13 @@ def test_link_errors(dbp, args):
 
 def test_api_links_and_open_issues(dbp):
     run(dbp, "c4", "link", "--project", "p", "--object", "relay", "--item", "1")
-    run(dbp, "c4", "link", "--project", "p", "--object", "mail", "--item", "2")   # a task: not an issue
+    run(dbp, "c4", "link", "--project", "p", "--object", "db", "--item", "2")   # a task: not an issue
     s = server.make_server(dbp, "p", 0)
     threading.Thread(target=s.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{s.server_address[1]}/api/c4?project=p"
     try:
         d = json.load(urllib.request.urlopen(url))
-        assert d["open_issues"] == ["relay"] and set(d["links"]) == {"relay", "mail"}
+        assert d["open_issues"] == ["relay"] and set(d["links"]) == {"relay", "db"}
         assert d["links"]["relay"]["items"][0]["id"] == 1
         c = db.init(dbp); service.transition(c, "main", 1, "done", note="fixed"); c.commit(); c.close()   # open -> done needs a note
         assert json.load(urllib.request.urlopen(url))["open_issues"] == []
