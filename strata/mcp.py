@@ -11,12 +11,6 @@ def schema(props, req): return {"type": "object", "properties": props, "required
 STATUS = {"type": "string", "enum": ["proposed", "approved", "open", "doing", "review", "done", "rejected"]}
 
 
-def _decisions(c, role, project, status=None, limit=50):
-    w, a = ["project=?"], [project]
-    if status: w.append("status=?"); a.append(status)
-    return [dict(r) for r in c.execute(f"SELECT id,title,status,decision,supersedes,created_at FROM decision WHERE {' AND '.join(w)} ORDER BY id DESC LIMIT ?", (*a, limit))]
-
-
 def _get_item(c, role, id):
     i = service.get_item(c, id)
     i["links"] = [r[0] for r in c.execute("SELECT object_id FROM c4_link WHERE project=? AND ref_kind='item' AND ref_id=? ORDER BY object_id", (i["project"], id))]
@@ -68,15 +62,14 @@ TOOLS = {
     "list_items": (_list_items, "List items by priority; ready=true: approved, deps done", schema(
         {"project": S(), "kind": S(), "status": STATUS, "owner": S(), "ready": {"type": "boolean"}, "limit": _lim}, []), ALL),
     "get_item": (_get_item, "One item with spec, deps both ways, c4 links, recent audit", schema({"id": I()}, ["id"]), ALL),
-    "list_decisions": (_decisions, "Decisions of a project, newest first", schema({"project": S(), "status": S(), "limit": _lim}, ["project"]), ALL),
     "get_doc": (_get_doc, "A project doc (YAML) parsed, with validation errors", schema({"project": S(), "path": S("Relative path under docs_dir")}, ["project", "path"]), ALL),
     "c4_context": (lambda c, role, project, object=None, max_tokens=2000: c4_layered.context_text(c, project, object, max_tokens),
                    "C4 overview or one object with its links, connections and flows", schema({"project": S(), "object": S(), "max_tokens": I()}, ["project"]), ALL),
     "c4_flow": (lambda c, role, project, id=None: c4_layered.flow_text(c, project, id), "Numbered trace of a flow; no id lists flows", schema({"project": S(), "id": S()}, ["project"]), ALL),
     "audit": (_audit, "Recent audit rows of a project, newest first", schema({"project": S(), "limit": _lim}, ["project"]), ALL),
-    "task_context": (_context, "Budgeted context bundle for a task: ticket, hard rules, decisions, c4, paths", schema({"id": I(), "budget": I("Max chars, default 12000")}, ["id"]), ALL),
-    "search": (service.search, "Full-text search over items, decisions, pages and docs", schema(
-        {"q": S(), "project": S(), "src": {"type": "string", "enum": ["item", "decision", "page", "doc"]}, "limit": {"type": "integer"}}, ["q"]), ALL),
+    "task_context": (_context, "Budgeted context bundle for a task: ticket, hard rules, c4, paths", schema({"id": I(), "budget": I("Max chars, default 12000")}, ["id"]), ALL),
+    "search": (service.search, "Full-text search over items, pages and docs", schema(
+        {"q": S(), "project": S(), "src": {"type": "string", "enum": ["item", "page", "doc"]}, "limit": {"type": "integer"}}, ["q"]), ALL),
     "add_item": (_w(service.add_item), "Add a task or issue (non-main: issues only, as proposed)", schema({"project": S(), "kind": {"type": "string", "enum": ["task", "issue"]}, "title": S(), "body": S(),
                  "priority": S(), "status": STATUS, "spec": {"type": "object"}}, ["project", "kind", "title"]), ALL),
     "edit_item": (_w(service.edit_item), "Edit title/body/spec/priority", schema({"id": I(), "title": S(), "body": S(), "spec": {"type": "object"}, "priority": S()}, ["id"]), MAIN),
@@ -87,11 +80,6 @@ TOOLS = {
     "item_release": (_move("approved"), "Release a doing item back to approved", schema({"id": I()}, ["id"]), MAIN),
     "dep_add": (lambda c, role, id, depends_on: {"changed": service.dep(c, role, id, depends_on, True)}, "Item id depends on depends_on", schema({"id": I(), "depends_on": I()}, ["id", "depends_on"]), MAIN),
     "dep_rm": (lambda c, role, id, depends_on: {"changed": service.dep(c, role, id, depends_on, False)}, "Remove a dependency", schema({"id": I(), "depends_on": I()}, ["id", "depends_on"]), MAIN),
-    "add_decision": (_w(service.add_decision), "Record a decision (non-main roles create it as proposed)", schema(
-        {k: S() for k in ("project", "title", "context", "decision", "consequences", "rejected")} | {"supersedes": I()},
-        ["project", "title", "context", "decision", "consequences", "rejected"]), ALL),
-    "set_decision_status": (_w(service.set_decision_status), "Change a decision's status", schema(
-        {"id": I(), "status": {"type": "string", "enum": ["proposed", "accepted", "superseded"]}}, ["id", "status"]), MAIN),
 }
 
 

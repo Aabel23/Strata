@@ -13,9 +13,9 @@ def run(tmp_path, role, msgs, db_=None):
     return r, [json.loads(l) for l in r.stdout.splitlines()]
 
 
-MAIN_TOOLS = ["list_projects", "list_items", "get_item", "list_decisions", "get_doc", "c4_context", "c4_flow", "audit", "search", "task_context", "add_item", "edit_item",
-              "item_claim", "item_submit", "item_approve", "item_reject", "item_release", "dep_add", "dep_rm", "add_decision", "set_decision_status"]
-READ = MAIN_TOOLS[:10]
+MAIN_TOOLS = ["list_projects", "list_items", "get_item", "get_doc", "c4_context", "c4_flow", "audit", "search", "task_context", "add_item", "edit_item",
+              "item_claim", "item_submit", "item_approve", "item_reject", "item_release", "dep_add", "dep_rm"]
+READ = MAIN_TOOLS[:9]
 
 
 def call(i, name, **a): return {"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": name, "arguments": a}}
@@ -43,30 +43,23 @@ def test_tools_and_role_fixed(tmp_path):
     r, out = run(tmp_path, "coder", [
         call(1, "add_item", project="p", kind="issue", title="bug zork", role="main"),  # role arg ignored
         call(2, "add_item", project="p", kind="task", title="nope"),
-        call(3, "add_decision", project="p", title="T", context="c", decision="d", consequences="q", rejected="r"),
-        call(4, "add_decision", project="p", title="T", context="c", decision="d", consequences="q", rejected=""),
-        call(5, "set_decision_status", id=1, status="accepted"),
-        call(6, "search", q="zork")], p)
-    assert r.returncode == 0 and r.stdout.count("\n") == 6  # server survived every error
+        call(3, "search", q="zork")], p)
+    assert r.returncode == 0 and r.stdout.count("\n") == 3  # server survived every error
     flags = [o.get("result", {}).get("isError") for o in out]
-    assert flags == [False, True, False, True, None, False] and out[4]["error"]["code"] == -32602  # set_decision_status is main-only, hidden from coder
-    assert json.loads(out[5]["result"]["content"][0]["text"].splitlines()[0])["title"] == "bug zork"
+    assert flags == [False, True, False]
+    assert json.loads(out[2]["result"]["content"][0]["text"].splitlines()[0])["title"] == "bug zork"
     c = db.connect(p)
     assert c.execute("SELECT created_by FROM item WHERE id=1").fetchone()[0] == "coder"
-    assert c.execute("SELECT status FROM decision WHERE id=1").fetchone()[0] == "proposed"
-    assert {r[0] for r in c.execute("SELECT actor_role FROM audit WHERE tool IN ('item.add','decision.add')")} == {"coder"}
+    assert {r[0] for r in c.execute("SELECT actor_role FROM audit WHERE tool='item.add'")} == {"coder"}
 
 
-def test_main_decision_and_bad_role(tmp_path):
-    r, out = run(tmp_path, "main", [call(1, "add_decision", project="p", title="T", context="c", decision="d", consequences="q", rejected="r"),
-                                    call(2, "set_decision_status", id=1, status="superseded")])
-    assert [o["result"]["isError"] for o in out] == [False, False]
+def test_bad_role(tmp_path):
     r = subprocess.run([sys.executable, str(ROOT / "strata.py"), "mcp", "--role", "root", "--db", str(tmp_path / "x.db")], input="", capture_output=True, text=True)
     assert r.returncode != 0 and r.stdout == ""
 
 
 def test_malformed_input_never_crashes(tmp_path):
-    bad = [call(1, "add_decision", project="p", title="T", context="c", decision="d", consequences="q", rejected=5),
+    bad = [call(1, "add_item", project="p", kind="issue", title=5),
            {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": [1]},
            {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "search", "arguments": [1]}},
            {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": ["x"]}},
@@ -97,9 +90,9 @@ def tool_names(tmp_path, role):
 def test_tools_list_by_role(tmp_path):
     assert tool_names(tmp_path, "main") == set(MAIN_TOOLS)
     coder, rev = tool_names(tmp_path, "coder"), tool_names(tmp_path, "reviewer")
-    assert set(READ) <= coder and {"item_claim", "item_submit", "add_item", "add_decision"} <= coder
-    assert not coder & {"edit_item", "item_approve", "dep_add", "set_decision_status"}
-    assert rev == set(READ) | {"add_item", "add_decision"}
+    assert set(READ) <= coder and {"item_claim", "item_submit", "add_item"} <= coder
+    assert not coder & {"edit_item", "item_approve", "dep_add"}
+    assert rev == set(READ) | {"add_item"}
     _, out = run(tmp_path, "reviewer", [call(1, "item_claim", id=1)])
     assert out[0]["error"]["code"] == -32602  # hidden tools are not callable
 
@@ -110,7 +103,6 @@ def seeded(tmp_path):
     (tmp_path / "docs").mkdir(); (tmp_path / "docs" / "a.yaml").write_text("title: A\nblocks:\n  - {type: md, text: hi}\n", encoding="utf-8")
     a = db.add_item(c, "p", "task", "first", "body one", "high", "approved"); b = db.add_item(c, "p", "task", "second", None, None, "approved")
     c.execute("INSERT INTO item_dep VALUES(?,?)", (b, a)); c.commit()
-    c.execute("INSERT INTO decision(project,title,status,context,decision,consequences,rejected_options,created_at) VALUES('p','D1','accepted','c','d','q','r','now')"); c.commit()
     c.close()
     return p
 
@@ -118,18 +110,17 @@ def seeded(tmp_path):
 def test_read_tools(tmp_path):
     p = seeded(tmp_path)
     r, out = run(tmp_path, "reviewer", [call(1, "list_projects"), call(2, "list_items", project="p", ready=True), call(3, "get_item", id=2),
-                                        call(4, "list_decisions", project="p"), call(5, "get_doc", project="p", path="a.yaml"), call(6, "c4_context", project="p"),
-                                        call(7, "c4_flow", project="p"), call(8, "audit", project="p", limit=2), call(9, "search", q="first"),
-                                        call(10, "get_doc", project="p", path="../x.yaml")], p)
+                                        call(4, "get_doc", project="p", path="a.yaml"), call(5, "c4_context", project="p"),
+                                        call(6, "c4_flow", project="p"), call(7, "audit", project="p", limit=2), call(8, "search", q="first"),
+                                        call(9, "get_doc", project="p", path="../x.yaml")], p)
     t = [o["result"]["content"][0]["text"] for o in out]
     flags = [o["result"]["isError"] for o in out]
-    assert flags[:5] == [False] * 5 and flags[7:9] == [False] * 2 and flags[9]  # c4 tools may error: no model imported
+    assert flags[:4] == [False] * 4 and flags[6:8] == [False] * 2 and flags[8]  # c4 tools may error: no model imported
     assert '"id": "p"' in t[0]
     assert [json.loads(l)["title"] for l in t[1].splitlines()] == ["first"]  # second is blocked by first
     i = json.loads(t[2].split("\n--- body ---")[0]); assert i["depends_on"][0]["id"] == 1 and "links" in i and i["audit"]
-    assert json.loads(t[3].splitlines()[0])["title"] == "D1"
-    d = json.loads(t[4]); assert d["title"] == "A" and d["errors"] == []
-    assert len(t[7].splitlines()) == 2
+    d = json.loads(t[3]); assert d["title"] == "A" and d["errors"] == []
+    assert len(t[6].splitlines()) == 2
 
 
 def test_cap_line_boundary(tmp_path):
