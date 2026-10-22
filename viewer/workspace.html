@@ -105,12 +105,11 @@ try{const t=localStorage.getItem("strata-theme");if(t)document.documentElement.d
 const ICON={
   overview:'<rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/>',
   tasks:'<rect x="2" y="2" width="12" height="12" rx="2"/><path d="M5 8l2 2 4-4"/>',
-  issues:'<circle cx="8" cy="8" r="6"/><path d="M8 5v3.5M8 11h0"/>',
   docs:'<path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3M6 8h4M6 11h4"/>',
   c4:'<rect x="5.5" y="1.5" width="5" height="4" rx="1"/><rect x="1.5" y="10.5" width="5" height="4" rx="1"/><rect x="9.5" y="10.5" width="5" height="4" rx="1"/><path d="M8 5.5V8M4 10.5V8h8v2.5"/>',
   notes:'<path d="M3 2h10v12H3z"/><path d="M6 5h4M6 8h4"/>'
 };
-const MODULES=[["overview","Overview"],["tasks","Task"],["issues","Issue"],["docs","Docs"],["notes","Notes & knowledge"],["c4","C4 architecture"]];
+const MODULES=[["overview","Overview"],["tasks","Task"],["docs","Docs"],["notes","Notes & knowledge"],["c4","C4 architecture"]];
 const TASK_COLS=["proposed","approved","open","doing","done","rejected"];
 const NOTE_KINDS=["rule","knowledge","draft","note"];
 const PALETTE=["#3dd6c6","#6ea8ff","#b49cff","#ffb15c","#5bd17a","#f07aa8","#e8d36a"];
@@ -156,7 +155,7 @@ function render(){
   if(!projects().length) pj.append(el("div","empty","No data yet. Use strata.py c4 import / page put."));
   // sidebar: modules with counts
   const md=$("#modules"); md.replaceChildren();
-  const cnt={tasks:kind("task").length,issues:kind("issue").length,docs:of(D.pages,P).length,notes:of(D.items,P).filter(x=>NOTE_KINDS.includes(x.kind)).length,c4:D.c4.has(P)?"●":""};
+  const cnt={tasks:kind("task").length,docs:of(D.pages,P).length,notes:of(D.items,P).filter(x=>NOTE_KINDS.includes(x.kind)).length,c4:D.c4.has(P)?"●":""};
   MODULES.forEach(([k,label])=>{
     const r=el("div","md"+(k===MOD?" on":""));
     r.insertAdjacentHTML("afterbegin",`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">${ICON[k]}</svg>`);
@@ -167,9 +166,10 @@ function render(){
   document.title=(P?P+" · ":"")+"Strata";
   const v=$("#view"); v.replaceChildren(); v.className="";
   if(!P) return;
-  ({overview,tasks:board("task"),issues:board("issue"),docs,notes,c4})[MOD](v);
+  ({overview,tasks:board("task"),docs,notes,c4})[MOD](v);
 }
 const kind=k=>of(D.items,P).filter(x=>x.kind===k);
+const isIssue=x=>x.label==="issue";
 
 /* modules */
 function overview(v){
@@ -180,7 +180,8 @@ function overview(v){
   const pct=live?Math.round(done*100/live):0;
   tile(g,"Task progress",pct+"%",`${done}/${live} done`,()=>nav(P,"tasks"),barOf(t));
   tile(g,"In progress",t.filter(x=>x.status==="doing").length,"tasks in doing",()=>nav(P,"tasks"));
-  tile(g,"Open issues",kind("issue").filter(x=>!["done","rejected"].includes(x.status)).length,`/${kind("issue").length} issue`,()=>nav(P,"issues"));
+  const iss=t.filter(isIssue);
+  tile(g,"Open issues",iss.filter(x=>!["done","rejected"].includes(x.status)).length,`/${iss.length} issue`,()=>nav(P,"tasks"));
   tile(g,"Docs",of(D.pages,P).length,"pages",()=>nav(P,"docs"));
   tile(g,"C4 architecture",D.c4.has(P)?"Yes":"—",D.c4.has(P)?"open diagram":"model not imported",()=>nav(P,"c4"));
   const doing=t.filter(x=>x.status==="doing"||x.status==="open").slice(0,8);
@@ -203,8 +204,8 @@ function list(w,title,rows,cols,on){
 function board(k){
   return v=>{
     const w=el("div","pad");w.style.maxWidth="none";v.append(w);
-    const all=kind(k).filter(x=>match(x.title));
-    w.append(el("h1","",k==="task"?"Task":"Issue"),el("div","sub",`${all.length} items · scroll sideways to see columns`));
+    const all=kind(k).filter(x=>match(x.title)).sort((a,b)=>isIssue(b)-isIssue(a));
+    w.append(el("h1","","Task"),el("div","sub",`${all.length} items · scroll sideways to see columns`));
     const tb=el("div","toolbar"), own=el("select");
     own.append(new Option("All owners",""),...[...new Set(all.map(x=>x.owner).filter(Boolean))].map(o=>new Option(o,o)));
     own.value=SUB||""; own.onchange=()=>nav(P,MOD,own.value); tb.append(own,barOf(all));tb.lastChild.style.cssText="flex:1;margin:0";w.append(tb);
@@ -215,7 +216,7 @@ function board(k){
       const c=el("div","col"), h=el("h4");h.append(el("span","s-"+s,"●"),el("span","",s),el("span","n",xs.length));c.append(h);
       const cs=el("div","cards");c.append(cs);
       xs.forEach(x=>{const d=el("div","card");d.append(el("div","id","#"+x.id),el("div","ti",x.title));
-        const m=el("div","meta");if(x.priority)m.append(el("span","chip p-"+String(x.priority).toLowerCase(),x.priority));if(x.owner)m.append(el("span","chip","@"+x.owner));d.append(m);cs.append(d)});
+        const m=el("div","meta");if(x.label)m.append(el("span","chip",x.label));if(x.priority)m.append(el("span","chip p-"+String(x.priority).toLowerCase(),x.priority));if(x.owner)m.append(el("span","chip","@"+x.owner));d.append(m);cs.append(d)});
       if(!xs.length) cs.append(el("div","empty","—"));
       b.append(c);
     });

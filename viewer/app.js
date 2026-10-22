@@ -2,7 +2,7 @@
 // App shell. Read-only. All text goes through textContent (el() from page.js); never assigns markup.
 // el, get, enc and renderPage come from page.js (STRATA_SHELL makes it skip its own routing).
 const $=id=>document.getElementById(id);
-const TABS=[["overview","Overview","o"],["task","Task","t"],["roadmap","Roadmap","m"],["issue","Issue","i"],["docs","Docs","r"],["c4","Architecture","a"],["audit","Log","l"]];
+const TABS=[["overview","Overview","o"],["task","Task","t"],["roadmap","Roadmap","m"],["docs","Docs","r"],["c4","Architecture","a"],["audit","Log","l"]];
 const TAB_LABEL=Object.fromEntries(TABS.map(t=>[t[0],t[1]]));
 const ST_ITEM=["proposed","approved","open","doing","review","done","rejected"];
 const ST_DOC=["current","draft","outdated","missing"], KIND_DOC=["research","architect","review","plan","other"];
@@ -50,7 +50,6 @@ const PRI={low:'<rect x="2" y="10" width="3" height="4" rx="1" fill="currentColo
   none:'<path d="M2 8h2.5M6.75 8h2.5M11.5 8H14" stroke-width="1.5" opacity=".5"/>'};
 const priIcon=p=>{const e=svg(S("0 0 16 16",PRI[p]||PRI.none,'class="pri"')), t=document.createElementNS("http://www.w3.org/2000/svg","title");t.textContent=p||"no priority";e.append(t);return e};
 const IC={overview:'<path d="M2.5 13.5h11M4 11V7M8 11V3.5M12 11V6"/>',task:'<circle cx="8" cy="8" r="5.5"/><path d="M5.6 8.1l1.6 1.6 3.2-3.4"/>',
-  issue:'<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.5M8 10.8v.2"/>',
   docs:'<path d="M4 2.5h5.5L12 5v8.5H4z"/><path d="M6 8h4M6 10.5h4"/>',
   c4:'<rect x="2.5" y="2.5" width="4" height="4" rx="1"/><rect x="9.5" y="9.5" width="4" height="4" rx="1"/><path d="M6.5 4.5h3a2 2 0 0 1 2 2v3"/>',
   roadmap:'<path d="M3.5 14V2.5M3.5 3h8.5l-1.7 2.8L12 8.5H3.5"/>',audit:'<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',folder:'<path d="M2.5 4.5h4l1.5 1.5h5.5v6.5h-11z"/>',proj:'<path d="M2 12.5l3.5-6 2.5 3.5 2-2.5 4 5z"/>',
@@ -72,11 +71,11 @@ const hq=()=>{const i=location.hash.indexOf("?");return new URLSearchParams(i<0?
 function route(){
   const i=location.hash.indexOf("?"), raw=i<0?location.hash:location.hash.slice(0,i);
   const h=raw.startsWith("#/")?raw.slice(2).split("/").map(decodeURIComponent):[];
-  if(h[0]==="p"&&byId[h[1]]) return {p:h[1],tab:TAB_LABEL[h[2]]?h[2]:"overview",id:h.slice(3).join("/")};
+  if(h[0]==="p"&&byId[h[1]]) return {p:h[1],tab:h[2]==="issue"?"task":TAB_LABEL[h[2]]?h[2]:"overview",id:h.slice(3).join("/")};
   return {p:(PROJ.find(x=>!x.parent)||PROJ[0]||{}).id,tab:"overview",id:""};
 }
 const total=o=>Object.values(o||{}).reduce((a,b)=>a+b,0);
-function counts(p){return {task:total(p.tasks),issue:p.issues_open,docs:p.docs}}
+function counts(p){return {task:total(p.tasks),docs:p.docs}}
 let CUR={};
 
 /* ---------- sidebar + breadcrumb ---------- */
@@ -167,8 +166,9 @@ const PHASE_DESC=["Ideas and discussion; nothing committed yet.","Diagram and re
 
 const VIEW={
   async overview(box,p){
-    const [tasks,issues,docs]=await Promise.all([get("/api/items?kind=task&project="+enc(p)),get("/api/items?kind=issue&project="+enc(p)),
+    const [items,docs]=await Promise.all([get("/api/items?kind=task&project="+enc(p)),
       get("/api/docs?project="+enc(p))]);
+    const tasks=items.filter(x=>x.label!=="issue"), issues=items.filter(x=>x.label==="issue");
     const pr=byId[p], done=pr.tasks.done||0, doing=pr.tasks.doing||0, all=total(pr.tasks), pct=all?Math.round(100*done/all):0;
     const hero=el("div","hero");// full-bleed hero art behind the content column: traced mountains anchored right + fitted waves edge to edge
     const bg=el("div","herobg");bg.setAttribute("aria-hidden","true");const mt=el("div","mtn"), wv=el("div","waves");bg.append(wv,mt);box.append(bg);
@@ -208,7 +208,7 @@ const VIEW={
     else L.append(el("p","empty","No active tasks"));
     const gd=el("div","gate");gd.append(el("span","lab","Open issues"),el("div","line",open.length?open.length+" open issues":"No open issues"));
     if(open.length){const ul=el("ul","gmiss");open.slice(0,8).forEach(x=>{const li=el("li"),sp=el("span");
-      sp.append(link("#"+x.id+" "+x.title,hashFor(p,"issue",x.id))," ",el("span","who","· "+(x.priority||"")));li.append(sp);ul.append(li)});gd.append(ul)}
+      sp.append(link("#"+x.id+" "+x.title,hashFor(p,"task",x.id))," ",el("span","who","· "+(x.priority||"")));li.append(sp);ul.append(li)});gd.append(ul)}
     R.append(gd);
     [["Recently updated",recent.map(x=>crit(x[1],x[2],rel(x[3]),x[0]||"open"))]].forEach(([k,rows])=>{
       if(!rows.length)return;const grp=el("div","grp");grp.append(el("span","lab",k),...rows);R.append(el("hr","rule"),grp)});
@@ -216,7 +216,6 @@ const VIEW={
   },
   task:(box,p,id)=>boardView(box,p,id),
   roadmap:(box,p,id)=>roadmapView(box,p,id),
-  issue:(box,p,id)=>itemView(box,p,id,"issue"),
   async docs(box,p,id){
     const docs=await get("/api/docs?project="+enc(p));
     docs.forEach(x=>{try{x.code=JSON.parse(x.code||"[]")||[]}catch{x.code=[]}});
@@ -354,7 +353,7 @@ function docReader(box,p,id,docs){
 /* ---------- task board (read-only): status columns, detail pane. Filters live in the hash query. ---------- */
 const COLS=["proposed","approved","doing","review"], FOLD=["done","open","rejected"];
 const PRI_TAG={p0:"P0",p1:"P1",p2:"P2",p3:"P3"};
-const BKIND=["task","issue","step"];
+const BKIND=["task","step"];
 const DAY=864e5;
 function tag(text,cls,title){const t=el("span","tag"+(cls?" "+cls:""),text);if(title)t.title=title;return t}
 const acN=x=>((x.spec&&x.spec.acceptance)||[]).length;
@@ -365,6 +364,7 @@ function itemCard(x,p,qs,sel,blockedBy){
   const a=link("",boardHref(p,x.id,qs),"tcard"+(String(x.id)===sel?" sel":"")+(x.off_roadmap?" offrm":""));
   const m=el("span","mono","#"+x.id+(x.kind!=="task"?" "+x.kind:"")+(x.owner?" · "+x.owner:"")+(claimAge(x)?" · "+claimAge(x):""));
   const row=el("span","trow");
+  if(x.label)row.append(tag(x.label,"lbl-"+x.label));
   if(x.priority)row.append(tag(PRI_TAG[String(x.priority).toLowerCase()]||x.priority,"pri-"+String(x.priority).toLowerCase()));
   if(x.phase!=null)row.append(tag("P"+x.phase,x.off_roadmap?"offrm":"phase",x.off_roadmap?"Phase "+x.phase+", outside the roadmap's current phase":"Phase "+x.phase+" of the roadmap"));
   if(acN(x))row.append(tag("AC "+acN(x)));
@@ -390,6 +390,7 @@ async function boardView(box,p,id){
   const go=patch=>{const n=new URLSearchParams(qs);Object.entries(patch).forEach(([k,v])=>v?n.set(k,v):n.delete(k));location.hash=boardHref(p,id,n)};
   const all=await get("/api/items?project="+enc(p));
   const owners=[...new Set(all.map(x=>x.owner).filter(Boolean))].sort();
+  all.sort((a,b)=>(b.label==="issue")-(a.label==="issue")); // stable: issues first, API order otherwise
   const needle=f.q.toLowerCase();
   const vis=all.filter(x=>(!f.kind||x.kind===f.kind)&&(!f.status||x.status===f.status)&&(!f.owner||x.owner===f.owner)&&(!needle||(x.title+" #"+x.id).toLowerCase().includes(needle)));
   box.append(head("Board",vis.length));
@@ -425,6 +426,7 @@ function detailPane(c,d,p,qs){
   const top=el("div");top.append(el("span","mono","#"+d.id+" "+d.kind+" · "+d.status+(d.owner?" · owner "+d.owner:"")+(d.claimed_at?" · claim "+ago(d.claimed_at).slice(5):"")),el("h2","",d.title));
   const pr=el("div","props");pr.append(pill(d.status));
   if(d.priority){const s=el("span");s.append(priIcon(d.priority)," "+d.priority);s.style.display="inline-flex";s.style.gap="4px";pr.append(s)}
+  if(d.label)pr.append(tag(d.label,"lbl-"+d.label));
   pr.append(el("span","",ago(d.updated_at||d.created_at)));top.append(pr);c.append(top);
   section(c,"Goal",sp.goal?el("p","dtxt",sp.goal):null);
   if(ac.length){const ul=el("ul","acl");ac.forEach(a=>{const li=el("li");li.append(el("span","cb","☐"),el("span","",typeof a==="string"?a:JSON.stringify(a)));ul.append(li)});section(c,"Criteria · "+ac.length,ul)}
@@ -451,32 +453,6 @@ function detailPane(c,d,p,qs){
       el("span","",h.to?(h.from?h.from+" → ":"")+h.to+(h.note?" · "+h.note:""):h.tool.replace("item.","")+(h.note?" · "+h.note:"")));tl.append(r)});
     section(c,"History",tl)}
   if(d.body){const b=el("div","dbody");b.append(md(d.body));section(c,"Description",b)}
-}
-
-async function itemView(box,p,id,kind){
-  const rows=await get("/api/items?kind="+kind+"&project="+enc(p));
-  box.append(head(kind==="task"?"Task":"Issue",rows.length));
-  if(id){
-    const d=(await get("/api/items?id="+enc(id)))[0];
-    if(d&&d.project===p){
-      const c=el("div","detail");c.append(el("h2","","#"+d.id+" "+d.title));
-      const pr=el("div","props");pr.append(pill(d.status));
-      if(d.priority){const s=el("span");s.append(priIcon(d.priority));s.append(" "+d.priority);s.style.display="inline-flex";s.style.gap="4px";pr.append(s)}
-      if(d.owner)pr.append(el("span","",d.owner));pr.append(el("span","",ago(d.updated_at||d.created_at)));
-      c.append(pr,el("p","body",d.body||"(no description)"));box.append(c);
-    }else box.append(el("p","err","Not found #"+id));
-  }
-  if(!rows.length)return box.append(empty("No "+kind+" yet","Add via CLI:","strata.py item add --project "+p+" --kind "+kind+" --title ..."));
-  let cur="";
-  const chips=el("div"), body=el("div"), draw=()=>{
-    chips.replaceChildren(fbar([[ST_ITEM,cur,v=>{cur=v;draw()}]]));
-    const vis=rows.filter(x=>!cur||x.status===cur);
-    if(!vis.length){const e=empty("No "+kind+" with status "+cur);const c=el("button","","Clear filter");c.onclick=()=>{cur="";draw()};e.append(c);return body.replaceChildren(e)}
-    body.replaceChildren(...grouped(vis,x=>x.status,["doing","open","approved","proposed","done","rejected"],(k,h)=>h.append(statusIcon(k),k),x=>{
-      const a=link("",hashFor(p,kind,x.id),"row"+(String(x.id)===id?" sel":""));
-      a.append(priIcon(x.priority),el("span","id",(kind==="task"?"T-":"I-")+x.id),statusIcon(x.status),el("span","t",x.title),el("span","x",x.owner||""),dateCell(x.updated_at||x.created_at));return a}));
-  };
-  draw();box.append(chips,body);
 }
 
 /* ---------- Roadmap (read-only): Astra mountain trail + detail from /api/roadmap. Data only reaches DOM through textContent. ---------- */
@@ -778,7 +754,7 @@ async function roadmapView(box,p,id){
 }
 
 /* ---------- command palette ---------- */
-const SRC={item:["Task","task"],issue:["Issue","issue"],doc:["Docs","docs"]};
+const SRC={item:["Task","task"],doc:["Docs","docs"]};
 let hits=[], sel=0, qtok=0, timer=null, mouseMoved=false;
 function openPal(){closeKeys();$("pal").hidden=false;$("q").value="";hits=navHits();sel=0;drawHits();$("q").focus()}
 function closePal(){$("pal").hidden=true}
@@ -790,7 +766,7 @@ function navHits(){
   return out;
 }
 function searchHits(r){
-  const by={};r.forEach(h=>{const t=h.src==="item"&&h.key==="issue"?"issue":h.src;(by[t]=by[t]||[]).push(h)});
+  const by={};r.forEach(h=>{const t=h.src;(by[t]=by[t]||[]).push(h)});
   return Object.keys(SRC).filter(t=>by[t]).flatMap(t=>by[t].slice(0,8).map(h=>({grp:SRC[t][0],title:h.title||"(untitled)",ic:SRC[t][1],
     sub:(byId[h.project]?byId[h.project].name:h.project)+(h.snippet?" · "+h.snippet.replace(/\s+/g," "):""),
     run:()=>{location.hash=hashFor(h.project,SRC[t][1],h.src==="page"||h.src==="doc"?h.key:h.ref)}})));
