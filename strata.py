@@ -8,7 +8,7 @@
   strata.py doc validate FILE                     check a doc YAML (no DB)
   strata.py doc scan --project P | set --project P PATH [--feature --status --ord]
   strata.py c4 link|unlink|links --project P --object X [--item ID | --decision ID]   (links: list only)
-  strata.py c4 import DIR --project P [--force] | export DIR --project P | validate DIR   layered folder (map.yaml + contracts/ behavior/ flows/)
+  strata.py c4 import DIR --project P [--force] [--dry-run] [--yes] | diff DIR --project P [--json] | export DIR --project P | validate DIR   layered folder (map.yaml + contracts/ behavior/ flows/)
   strata.py c4 context --project P [--object X] [--max-tokens N]
   strata.py c4 flow --project P [--id F]          numbered step trace (no --id: list flows)
   strata.py c4 contract ID --project P            one contract of a layered project
@@ -163,8 +163,14 @@ def cmd_write(a):
         elif a.cmd == "c4" and a.action == "contract":
             print(c4_layered.contract_text(c, a.project, a.id))
         elif a.cmd == "c4" and a.action == "import":
-            n = c4_layered.import_dir(c, a.dir, a.project, a.force)
+            n = c4_layered.import_dir(c, a.dir, a.project, a.force, a.dry_run, a.yes)
+            if a.dry_run: print(c4_layered.diff_text(n)); return 0
             print(f"imported {a.project}: " + ", ".join(f"{v} {k}" for k, v in n.items()))
+        elif a.cmd == "c4" and a.action == "diff":
+            m, errs = c4_layered.load(a.dir)
+            if m is None: raise ValueError(errs[0])
+            df = c4_layered.diff_model(c, m, a.project)
+            print(json.dumps(df, ensure_ascii=False, indent=1) if a.json else c4_layered.diff_text(df))
         elif a.cmd == "c4" and a.action == "export":
             c4_layered.export_dir(c, a.project, a.dir); print(f"exported {a.project}: {a.dir}")
         elif a.cmd == "c4" and a.action == "links":
@@ -243,7 +249,9 @@ def main(argv=None):
     for n, args in {"link": ref, "unlink": ref, "links": ref[:2],
                     "context": [(["--project"], req), (["--object"], {}), (["--max-tokens"], {"type": int, "default": 2000})],
                     "flow": [(["--project"], req), (["--id"], {})], "contract": [(["id"], {}), (["--project"], req)],
-                    "import": [(["dir"], {}), (["--project"], req), (["--force"], {"action": "store_true"})],
+                    "import": [(["dir"], {}), (["--project"], req), (["--force"], {"action": "store_true"}),
+                               (["--dry-run"], {"action": "store_true"}), (["--yes"], {"action": "store_true"})],
+                    "diff": [(["dir"], {}), (["--project"], req), (["--json"], {"action": "store_true"})],
                     "export": [(["dir"], {}), (["--project"], req)], "validate": [(["dir"], {}), (["--project"], {})]}.items():
         p = gs4.add_parser(n); p.add_argument("--db")
         for x in args: p.add_argument(*x[0], **x[1])

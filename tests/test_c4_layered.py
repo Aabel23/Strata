@@ -134,7 +134,8 @@ def test_import_drops_orphan_links_and_unlink_works_for_missing_object(lay):
     c.execute("INSERT INTO c4_link VALUES('demo','ghost','item',1)"); c.commit()   # what an older import left behind
     assert run(lay, "c4", "unlink", "--project", "demo", "--object", "ghost", "--item", "1") == (0, "ok\n")
     c.execute("INSERT INTO c4_link VALUES('demo','ghost','item',1)"); c.commit()
-    assert run(lay, "c4", "import", str(FIX), "--project", "demo")[0] == 0
+    assert run(lay, "c4", "import", str(FIX), "--project", "demo")[0] == 1   # refused: would drop ghost link
+    assert run(lay, "c4", "import", str(FIX), "--project", "demo", "--yes")[0] == 0
     assert c.execute("SELECT object_id FROM c4_link").fetchall()[0][0] == "relay" and c.execute("SELECT count(*) FROM c4_link").fetchone()[0] == 1
 
 
@@ -173,3 +174,30 @@ def test_migration_drops_old_format_with_backup(tmp_path):
     assert k.execute("SELECT count(*) FROM c4_port").fetchone()[0] == 1 and k.execute("SELECT count(*) FROM c4_object").fetchone()[0] == 4
     db.init(p)   # idempotent, no second backup
     assert len(list((tmp_path / "backups").glob("strata-pre-old-c4-drop-*.db"))) == 1
+
+
+def test_dry_run_diff_and_dropped_link_refusal(folder, tmp_path):
+    p = tmp_path / "t.db"
+    run(p, "project", "add", "p", "--name", "P")
+    assert run(p, "c4", "import", str(folder), "--project", "p")[0] == 0
+    run(p, "item", "add", "--project", "p", "--kind", "task", "--title", "Làm mail")
+    assert run(p, "c4", "link", "--project", "p", "--object", "db", "--item", "1")[0] == 0
+    m = yaml.safe_load((folder / "map.yaml").read_text())
+    m["objects"] = [o for o in m["objects"] if o["id"] != "db"] + [{"id": "extra", "kind": "app", "name": "X"}]
+    m["links"] = [x for x in m["links"] if x["id"] != "relay_db"]
+    m["objects"][0]["name"] = "Renamed"
+    (folder / "map.yaml").write_text(yaml.safe_dump(m))
+    count = lambda: db.connect(p).execute("SELECT count(*) FROM c4_object").fetchone()[0]
+    code, out = run(p, "c4", "import", str(folder), "--project", "p", "--dry-run")
+    assert code == 0 and count() == 5
+    assert "+ extra" in out and "- db" in out and "~ user" in out and "- relay_db" in out and "item #1 Làm mail (object db)" in out
+    code, js = run(p, "c4", "diff", str(folder), "--project", "p", "--json")
+    d = __import__("json").loads(js)
+    assert d["object"] == {"added": ["extra"], "changed": ["user"], "removed": ["db"]} and d["link"]["removed"] == ["relay_db"]
+    assert d["dropped_links"][0]["id"] == 1
+    code, out = run(p, "c4", "import", str(folder), "--project", "p")          # refused, nothing written
+    assert code == 1 and "item #1" in out and count() == 5
+    assert run(p, "c4", "import", str(folder), "--project", "p", "--yes")[0] == 0
+    assert count() == 5 and run(p, "c4", "diff", str(folder), "--project", "p")[1].count("+0 ~0 -0") == 5
+    a = db.connect(p).execute("SELECT after FROM audit WHERE tool='c4-import' ORDER BY id DESC").fetchone()[0]
+    assert __import__("json").loads(a)["diff"]["object"]["added"] == ["extra"]

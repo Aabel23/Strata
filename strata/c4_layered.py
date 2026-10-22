@@ -196,38 +196,74 @@ def _upsert(c, table, pk, row):
               + ",".join(f"{k}=excluded.{k}" for k in row if k not in pk.split(",")), tuple(row.values()))
 
 
-def import_dir(c, d, project, force=False):
-    """Audited upsert of a layered folder into `project`; rows absent from the folder are deleted, and task/decision links to objects that no longer exist. Atomic."""
+def _rows(m, project):
+    """{table: {key: row}} the folder would write (key = the table's id column)."""
+    return {
+        "object": {o["id"]: {"id": o["id"], "project": project, "type": o.get("kind"), "name": o.get("name"), "parent": o.get("parent"),
+                             "description": o.get("summary"), "tags": j(o.get("tags")), "status": o.get("status"), "owns": j(o.get("owns")), "behavior": o.get("behavior")} for o in m["objects"]},
+        "connection": {x["id"]: {"id": x["id"], "project": project, "from_id": x.get("from"), "to_id": x.get("to"), "name": x.get("name"),
+                                 "description": x.get("summary"), "detail": x.get("detail"), "status": x.get("status")} for x in m["links"]},
+        "contract": {r["id"]: {"project": project, "id": r["id"], "transport": r.get("transport"), "body": j(r.get("body")),
+                               "start": j(r.get("start")), "end_sym": r.get("end")} for r in m["contracts"]},
+        "behavior": {mod: {"project": project, "module": mod, "form": d.get("form"), "data": j(d)} for mod, d in m["behavior"].items()},
+        "flow": {x["id"]: {"id": x["id"], "project": project, "name": x.get("name"), "steps": j(x.get("steps"))} for x in m["flows"]}}
+
+
+_PK = {"object": "id", "connection": "id", "contract": "id", "behavior": "module", "flow": "id"}
+
+
+def diff_model(c, m, project):
+    """What importing model `m` would change: {table: {added, changed, removed: [ids]}} (table 'link' = connection) + 'dropped_links' (task/decision links of vanished objects)."""
+    new, out = _rows(m, project), {}
+    for t, pk in _PK.items():
+        old = {r[pk]: dict(r) for r in c.execute(f"SELECT * FROM c4_{t} WHERE project=?", (project,))}
+        out["link" if t == "connection" else t] = {
+            "added": [k for k in new[t] if k not in old], "removed": [k for k in old if k not in new[t]],
+            "changed": [k for k, r in new[t].items() if k in old and any(old[k].get(f) != v for f, v in r.items())]}
+    gone = [r for r in c.execute("SELECT object_id,ref_kind,ref_id FROM c4_link WHERE project=?", (project,)) if r["object_id"] not in new["object"]]
+    out["dropped_links"] = [{"object": r["object_id"], "kind": r["ref_kind"], "id": r["ref_id"],
+                             "title": (c.execute(f"SELECT title FROM {r['ref_kind']} WHERE id=?", (r["ref_id"],)).fetchone() or [None])[0]} for r in gone]
+    return out
+
+
+def _dropped_text(df):
+    return "\n".join(f"  {x['kind']} #{x['id']} {x['title'] or ''} (object {x['object']})" for x in df["dropped_links"])
+
+
+def diff_text(df):
+    lines = []
+    for t, v in df.items():
+        if t == "dropped_links": continue
+        lines.append(f"{t}: +{len(v['added'])} ~{len(v['changed'])} -{len(v['removed'])}")
+        lines += [f"  {s} {i}" for s, k in (("+", "added"), ("~", "changed"), ("-", "removed")) for i in v[k]]
+    if df["dropped_links"]: lines.append("dropped task/decision links:\n" + _dropped_text(df))
+    return "\n".join(lines)
+
+
+def import_dir(c, d, project, force=False, dry_run=False, yes=False):
+    """Audited upsert of a layered folder into `project`; rows absent from the folder are deleted, and task/decision links to objects that no longer exist. Atomic.
+    Returns the new counts, or the diff when dry_run. Refuses (ValueError) when links would be dropped and not `yes`."""
     m, errs = load(d)
     if m is not None: errs += check(m, d)[0]
     if errs and not force: raise ValueError("model có lỗi, không ghi gì (--force để bỏ qua):\n" + "\n".join(errs))
     if m is None: raise ValueError(errs[0])
-    pr, p = m["project"], (project,)
+    df = diff_model(c, m, project)
+    if dry_run: return df
+    if df["dropped_links"] and not yes:
+        raise ValueError("import sẽ mất link task/decision, không ghi gì (--yes để chấp nhận):\n" + _dropped_text(df))
+    pr, new = m["project"], _rows(m, project)
     with c:
         before = _counts(c, project)
         _upsert(c, "meta", "project", {"project": project, "name": pr.get("name") or pr.get("id") or project,
                                        "root": str((pathlib.Path(d) / pr["root"]).resolve()), "source": str(pathlib.Path(d).resolve())})
-        for o in m["objects"]:
-            _upsert(c, "object", "project,id", {"id": o["id"], "project": project, "type": o.get("kind"), "name": o.get("name"), "parent": o.get("parent"),
-                    "description": o.get("summary"), "tags": j(o.get("tags")), "status": o.get("status"), "owns": j(o.get("owns")), "behavior": o.get("behavior")})
-        for x in m["links"]:
-            _upsert(c, "connection", "project,id", {"id": x["id"], "project": project, "from_id": x.get("from"), "to_id": x.get("to"), "name": x.get("name"),
-                    "description": x.get("summary"), "detail": x.get("detail"), "status": x.get("status")})
-        for r in m["contracts"]:
-            _upsert(c, "contract", "project,id", {"project": project, "id": r["id"], "transport": r.get("transport"), "body": j(r.get("body")),
-                    "start": j(r.get("start")), "end_sym": r.get("end")})
-        for mod, data in m["behavior"].items():
-            _upsert(c, "behavior", "project,module", {"project": project, "module": mod, "form": data.get("form"), "data": j(data)})
-        for x in m["flows"]:
-            _upsert(c, "flow", "project,id", {"id": x["id"], "project": project, "name": x.get("name"), "steps": j(x.get("steps"))})
-        for t, col, rows in (("connection", "id", m["links"]), ("flow", "id", m["flows"]), ("object", "id", m["objects"]),
-                             ("contract", "id", m["contracts"]), ("behavior", "module", [{"module": k} for k in m["behavior"]])):
-            keep = [r[col] for r in rows]
-            c.execute(f"DELETE FROM c4_{t} WHERE project=? AND {col} NOT IN ({','.join('?' * len(keep))})", (project, *keep))
+        for t, pk in _PK.items():
+            for row in new[t].values(): _upsert(c, t, "project," + pk, row)
+            keep = list(new[t])
+            c.execute(f"DELETE FROM c4_{t} WHERE project=? AND {pk} NOT IN ({','.join('?' * len(keep))})", (project, *keep))
         c.execute("DELETE FROM c4_link WHERE project=? AND object_id NOT IN (SELECT id FROM c4_object WHERE project=?)", (project, project))
         after = _counts(c, project)
         c.execute("INSERT INTO audit(project,actor_role,tool,target,before,after) VALUES(?,?,?,?,?,?)",
-                  (project, "cli", "c4-import", str(d), j(before), j(after)))
+                  (project, "cli", "c4-import", str(d), j(before), j({"counts": after, "diff": df})))
     return after
 
 
