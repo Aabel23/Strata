@@ -45,7 +45,9 @@ links:
 ```
 
 - Object keys: `id`, `kind` (actor, system, app, store, component, group), `name`, `parent`, `summary`, `status`
-  (live, future, doing, maintenance, deprecated, removed), `tags`, `owns` (code globs), `behavior` (module file stem).
+  (live, future, doing, maintenance, deprecated, removed), `tags`, `owns` (code globs), `behavior` (module file stem),
+  `tech` (optional string, C4 notation `[Type: Tech]`, e.g. `tech: Python + SQLite`; kept in the `technology` column, written back by
+  `c4 export`, shown as `id [kind: tech] name` in `c4 context` and as a second line on the node in the viewer).
 - Link keys: `id`, `from`, `to`, `name`, `summary`, `status`, `detail` (a contract id `<file>.<id>`).
 - Levels: actor/system, then app/store inside a system, then component inside an app. There are no file or function objects:
   code lives in contracts (`start`/`end` symbols) and in `owns`.
@@ -123,6 +125,7 @@ python3 strata.py c4 coverage --project P [--json]          # code files owned b
 | `C4-MISSING-ID` | error | add an `id` to the entry |
 | `C4-MISSING-NAME` | error | add a `name` to the object |
 | `C4-DUP-ID` | error | rename one of the duplicate ids |
+| `C4-BAD-TECH` | error | write tech as text, e.g. 'Python 3.12, sqlite3' |
 | `C4-BAD-KIND` | error | use one of the allowed object kinds |
 | `C4-BAD-STATUS` | error | use one of the allowed statuses |
 | `C4-PARENT-MISSING` | error | point `parent` at an existing object, or add that object |
@@ -156,8 +159,9 @@ python3 strata.py c4 coverage --project P [--json]          # code files owned b
 | `C4-VIEW-SIZE` | warn | group children under intermediate objects |
 | `C4-OWNS-EMPTY` | warn | fix the path or glob, or remove the entry |
 | `C4-OWNS-OVERLAP` | warn | narrow the owns of one object so each file has a single owner |
+| `C4-TECH-MISSING` | warn | add tech: the language, framework or engine it runs on (app and store only) |
 
-The semantic rules from `C4-PERSON-TARGET` to `C4-OWNS-OVERLAP` are warnings only; they fail the check only under `--strict`.
+The semantic rules from `C4-PERSON-TARGET` to `C4-TECH-MISSING` are warnings only; they fail the check only under `--strict`.
 
 - `c4 coverage --project P [--json]` lists code files that no object owns, grouped by directory (hidden directories and
   `venv`, `.venv`, `.git`, `node_modules`, `__pycache__` are skipped; vendored copies elsewhere still count). Text output ends with `N files unowned in M directories`. Use it to find code the map does not cover.
@@ -169,7 +173,7 @@ The semantic rules from `C4-PERSON-TARGET` to `C4-OWNS-OVERLAP` are warnings onl
 
 | Entity | Required | Optional |
 |---|---|---|
-| object | `id`, `kind`, `name` | `parent`, `summary`, `status`, `tags`, `owns`, `behavior` |
+| object | `id`, `kind`, `name` | `parent`, `summary`, `status`, `tags`, `owns`, `behavior`, `tech` |
 | link | `id`, `from`, `to` | `name`, `summary`, `detail`, `status` |
 | contract | `id`, `start`, `end` | `transport`, `body` (any mapping: `signature`, `purpose`, `request`, `response`, `errors`) |
 | behavior | `module` (= file stem) | `form`, `initial`, `states`, `transitions` (`id`, `from`, `on`, `to`, `guard`) |
