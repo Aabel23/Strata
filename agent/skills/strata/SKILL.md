@@ -82,7 +82,7 @@ Kiểm lỗi: mở viewer (trang hiện khung lỗi) hoặc `curl -s 'localhost:
 
 ## Luồng 6 bước → Strata
 - **B2 sơ đồ**: viết/sửa C4 YAML + flow → `validate` → `import-yaml`.
-- **B3 research**: mỗi research-stage là một note trong vault `research/<project>/` (chat chính ghi qua Obsidian MCP, theo skill `research-stage`); user chốt xong thì `decision add`.
+- **B3 research**: mỗi research-stage là một doc YAML trong `<docs_dir>/research/` (chat chính ghi, theo skill `research-stage`); user chốt xong thì `decision add`.
 - **B4 user duyệt**: `item add --kind task --status approved` + `c4 link` vào object liên quan.
 - **B5 làm**: coder `item claim N --as coder` → `item submit N --as coder --note "..."`; main `item approve N`.
 - **B6 lỗi**: `item add --kind issue` (+ `c4 link`).

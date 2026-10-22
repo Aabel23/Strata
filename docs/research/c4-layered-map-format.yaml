@@ -1,0 +1,331 @@
+title: Layered C4 map format (4 zoom levels + symbol index)
+summary: New map format for AI agents. L1 system, L2 container (incl. devices), L3 module with boundary contracts, L4 behavior state machine per module in behavior/<module>.yaml, plus a tree-sitter symbol index and on-demand source slices. Status research, 8 open questions.
+code: [docs/AGENT_C4.md, strata/c4.py, strata/context.py, examples/project1_app.strata.yaml]
+
+blocks:
+  - md: |
+      ## Summary
+      **Status: research, nothing decided.**
+
+      The map moves to four zoom levels plus a generated symbol index. An agent then reads map → module → behavior → one function, and never opens a whole file.
+      - Levels 1–3 live in one hand-written `docs/c4/map.yaml`.
+      - Level 4 is one file per module, named after it: `docs/c4/behavior/<module_id>.yaml`.
+      - Code detail comes from a tree-sitter symbol index (generated, never hand-written) and source slices read live from disk.
+
+  - md: |
+      ## The layers
+  - table:
+      head: [Layer, Answers, Written by, Stored in, Read budget]
+      rows:
+        - [L1 System, "who and what exists, who talks to whom", human / main agent, map.yaml, ~600 tokens]
+        - [L2 Container, "what runs inside a unit: service, DB, queue, firmware, device", human / main agent, map.yaml, ~1.2k tokens per system]
+        - [L3 Module, "which feature block owns this; its boundary contract", human / main agent, map.yaml, ~2.5k tokens per container]
+        - [L4 Behavior, "what happens inside a module, in what order, what can fail", human / main agent (reviewed), "behavior/<module_id>.yaml", one file per edit]
+        - [Symbol index, "what code exists in a module, where, with which signature", tool only (tree-sitter), separate SQLite cache, 20–50 lines per module]
+        - [Source, the actual lines, nobody (live from disk), "-", one symbol at a time]
+  - md: |
+      **Agent reading path**
+      1. `c4 view` (L1) → `c4 view <system>` (L2) → `c4 view <container>` (L3 module cards)
+      2. `c4 behavior <module>` (L4)
+      3. `sym ls <module> [--public]` → `sym show <symbol_id> [--sig-only | --ctx N]`
+
+      **Joins between layers**
+      - **Map → code:** each module's `owns` globs. A file belongs to exactly one module.
+      - **L3 ↔ L4:** event ids. Events a machine reacts to must be L3 inputs or `listens`; events and errors it emits must be L3 outputs.
+      - **L4 → code:** a transition's `guard`, `action` and `symbol` names resolve through the symbol index.
+      - **Index → source:** `file:start-end`, looked up when read. The YAML never stores line numbers.
+
+  - md: |
+      ## Example: user taps Dispense
+      1. Flow step `user → app.ui` (L1/L2 hop).
+      2. `app → server.relay` uses the L3 contract `relay.send`.
+      3. The server sends event `start(ml)` to `machine.pump_ctrl`.
+      4. In `behavior/dispense.yaml` (L4), the transition is `idle --start [door_closed]--> priming`, with `symbol: dispense.start`.
+      5. The agent runs `sym show dispense.start` and gets only that function.
+  - table:
+      head: [In the new format, Current code, Role]
+      rows:
+        - [owns globs, "none (links point to single files)", module → code]
+        - [symbol index, none, "replaces the L4 file and function objects"]
+        - [level views, "strata/c4.py:392 context_text, _est = chars/4", reuse for level views and module cards]
+        - [validation, "c4.check / validate_file / validate_db", "extend with ownership, contract, L4 and symbol checks"]
+        - [budgeted text, strata/context.py build, reuse the pattern for symbol sections]
+
+  - md: |
+      ## map.yaml (L1–L3) — proposed
+      Nesting expresses the hierarchy, with exactly 3 levels: no `parent:` field and no table of valid parent types. Relations are one flat list using dotted ids.
+
+      ```yaml
+      project: {id: vending, name: Vending, root: ., budget: {l1: 600, l2: 1200, l3: 2500}}
+      shared: ["src/utils/**", "gen/**"]           # exempt from the orphan check
+      systems:                                      # L1
+        - id: machine
+          kind: hardware                            # software|hardware|person|external
+          summary: Vending machine in the shop
+          containers:                               # L2
+            - id: pump_ctrl
+              kind: firmware                        # service|app|database|queue|device|firmware|external
+              tech: C / RP2040
+              summary: Controls pump and door
+              modules:                              # L3
+                - id: dispense
+                  summary: Pours a requested volume
+                  state: RAM-only
+                  owns: ["fw/dispense/**"]
+                  exposes:
+                    - {id: start, kind: call, in: "ml: int", out: ok, errors: [DOOR_OPEN, BUSY]}
+                  consumes: [pump.set_speed]
+                  emits: [dispense.done, dispense.fault]
+                  listens: [door.opened]
+                  behavior: behavior/dispense.yaml
+            - id: pump
+              kind: device
+              summary: Peristaltic pump
+              device: {bus: "GPIO + PWM", driver: fw/drivers/pump.c, direction: actuator, timing: {timeout_ms: 500}}
+      relations:
+        - {id: srv_cmd, from: cloud.server.relay, to: machine.pump_ctrl.dispense, kind: async, via: MQTT, uses: dispense.start}
+        - {id: pump_wire, from: machine.pump_ctrl, to: machine.pump, kind: physical, via: GPIO}
+      flows:
+        - id: dispense_drink
+          steps:
+            - {relation: srv_cmd, uses: dispense.start}
+            - {at: machine.pump_ctrl.dispense, state: priming}
+            - {relation: srv_cmd, reverse: true, event: dispense.done}
+      ```
+  - table:
+      head: [Field, Why, Phase]
+      rows:
+        - ["id, kind, summary", stable reference; filterable; cheap to read, "MVP, required"]
+        - [owns, "map → code; orphan and overlap checks", "MVP, warning if missing"]
+        - ["exposes / consumes / emits / listens", "boundary contract; event ids join L3 to L4", "MVP, warning if missing"]
+        - ["device (bus, driver, timing, direction)", "minimal hardware facts (AADL device)", MVP for kind device]
+        - [state, "RAM-only / persisted / none; high value for agents", MVP]
+        - ["status, tags, responsibilities", "useful for people; wordy", later]
+        - ["layout, positions, port geometry", belongs to the viewer, not in the model]
+  - md: |
+      **Sources of the ideas:**
+      - C4 defines a component as a group of functionality behind a well-defined interface, not a folder or a deployable unit.
+      - Backstage's `providesApis`/`consumesApis` and AsyncAPI operations (send or receive, plus a message) shaped the contract fields.
+
+  - md: |
+      ## behavior/<module_id>.yaml (L4) — proposed
+      Each file has exactly one of two forms:
+      - **machine:** for stateful modules, lifecycles, retries and hardware.
+      - **sequence:** for stateless logic. It stays inside one module and never names relations.
+
+      Ideas borrowed:
+      - From SCXML: the rules for a well-formed structure.
+      - From XState: `after` timeouts, and guards and actions referred to by name.
+      - From embedded and PLC practice:
+          - each output has a safe value;
+          - outputs are set only on state entry;
+          - faults latch until a reset;
+          - inputs are debounced before they become events;
+          - safety transitions are global and take priority.
+
+      ```yaml
+      module: dispense            # = file name = L3 id
+      form: machine
+      source: authored            # authored | extracted
+      verified_at: <commit>
+      signals:
+        - {id: door_closed, dir: in,  kind: digital, debounce_ms: 20}
+        - {id: pump_relay,  dir: out, kind: digital, safe_value: 0}
+      initial: idle
+      states:
+        idle:    {desc: Pump off, entry: [pump_off]}
+        priming: {entry: [pump_on_low], timeout: {ms: 3000, to: fault}}
+        pumping: {entry: [pump_on], timeout: {ms: 60000, to: fault}}
+        done:    {entry: [pump_off], terminal: true}
+        fault:   {entry: [pump_off, raise_alarm]}      # latched until reset
+      transitions:
+        - {id: t1, from: idle,    on: start,          to: priming, guard: door_closed, symbol: dispense.start}
+        - {id: t2, from: priming, on: flow_detected,  to: pumping}
+        - {id: t3, from: pumping, on: volume_reached, to: done, action: [emit_done]}
+        - {id: t4, from: fault,   on: reset,          to: idle, guard: door_closed}
+        - {id: t5, from: any,     on: door.opened,    to: fault, note: safety}
+      invariants:
+        - {id: i1, text: "pump_relay never 1 while door open", severity: safety}
+      waivers:
+        - {state: idle, rule: no_timeout, reason: resting state}
+      ```
+
+      ```yaml
+      module: price_calc
+      form: sequence
+      cases:
+        - id: calc_total
+          trigger: {input: calc_total}
+          steps:
+            - {do: validate cart, symbol: validate_cart, on_error: {emit_error: BAD_CART, end: true}}
+            - {if: cart.coupon, then: [{do: apply coupon, symbol: apply_coupon}]}
+            - {do: sum lines, symbol: sum_lines}
+          returns: {output: total}
+      ```
+
+      **In v1:**
+      - Flat states plus `any:` global transitions.
+      - `entry` actions.
+      - A timeout on each state.
+      - A mandatory `id` on every transition, so tests and issues have a stable key.
+      - Hardware `signals`.
+      - Invariants as text. They are labelled "documented", never "verified".
+
+  - md: |
+      ## Symbol index and source CLI — proposed
+      - **Indexer:** tree-sitter via `tree-sitter-language-pack`, installed with pip only.
+          - It covers Python, TS/JS, C/C++, Dart and Kotlin with exact ranges.
+          - Qualified names, signatures and visibility come from a small AST walker per language.
+          - Aider moved from ctags to tree-sitter for the same reasons.
+      - **Ids:** follow SCIP's naming idea, without package or version parts.
+          - Format: `module.Class.method`, or `path/file.c::fn` for C.
+          - An arity suffix is added only when two symbols collide.
+          - A rename gives a new id, and the old one becomes a dead reference. That is intended: the map must then be fixed.
+      - **Staleness:** a file is re-parsed when its mtime and size change and then its sha256 differs. The CLI re-checks the hash before slicing, so line shifts cost nothing.
+
+      ```
+      symbol(id PK, project, file, kind, name, parent_id, start_line, end_line, start_byte, end_byte,
+             signature, doc1, visibility, body_hash, sig_hash, lang)
+      file(path PK, project, sha256, mtime, size, lang, indexed_at)
+      module_file(module_id, file)                       -- from owns globs
+      symbol_ref(ref_kind, ref_id, symbol_id, status)    -- ok | dead | ambiguous
+      ```
+
+      ```
+      strata index [--project P] [--changed]
+      strata sym ls   <module|file> [--public] [--kind K] [--fmt compact|json]
+      strata sym show <symbol_id> [--ctx N] [--sig-only] [--lines a-b]   # capped at 200 lines
+      strata sym find <name-pattern>
+      strata sym check                                                    # dead / ambiguous / orphan / overlap
+      ```
+      - `sym ls` prints Aider-style output: one line per symbol, `kind name(sig) -- doc1`.
+      - Text is the default output; JSON is opt-in.
+      - For a dead id, `sym show` lists candidates (same name or same `body_hash`) instead of failing.
+
+  - md: |
+      ## Validation rules (v1)
+  - table:
+      head: ["#", Rule, Level]
+      rows:
+        - ["1", owns glob matches no file, error]
+        - ["2", a file is owned by two modules, error]
+        - ["3", "orphan source file (not owned, not shared); report count + top 10 dirs", warning]
+        - ["4", "relation uses must be in the target's exposes; flow event must be in the source's emits", error]
+        - ["5", level over its token budget (suggest split), warning]
+        - ["6", "behavior file name = module, module exists at L3, no unknown keys", error]
+        - ["7", "initial exists; every from/to exists; ids unique", error]
+        - ["8", "unreachable state (breadth-first search from initial, counting any)", error]
+        - ["9", "non-terminal state with no exit, or no timeout/fault exit, unless waived", error]
+        - ["10", "events consistent with L3 contract (both directions); unhandled L3 input", error / warning]
+        - ["11", "duplicate (from, on) without guards (syntactic only)", error]
+        - ["12", "signals used by guards/invariants exist; outputs declare safe_value", error]
+        - ["13", "explicit symbol: does not resolve / guard or action name does not resolve", error / warning]
+        - ["14", referenced symbol's body_hash changed since verified_at, warning]
+
+  - md: |
+      ## Questions to decide
+      The first questions decide the shape of everything that follows.
+  - question:
+      q: "Q1. In map.yaml, should the hierarchy be nested, or a flat list with parent:?"
+      options:
+        - {label: Nested, note: "hierarchy is visible, no parent-validity table; one-line grep per entity is lost, so agents read through the CLI"}
+        - {label: "Flat with parent:", note: current style}
+      recommend: Nested
+  - question:
+      q: Q2. Should a file be owned by exactly one module?
+      options:
+        - {label: "Exclusive owns + shared: list", note: simple validator}
+        - {label: Allow overlap}
+      recommend: "Exclusive owns + shared: list"
+  - question:
+      q: "Q3. Should event ids use one global namespace (module.event), owned by the emitting module, with the L3 contract as the source of truth?"
+      options: [{label: "Yes"}, {label: "No"}]
+      recommend: "Yes"
+  - question:
+      q: Q4. Should the L4 file and function object types be removed from the map and replaced by the symbol index?
+      options:
+        - {label: "Yes", note: "migration turns links into owns and functions into symbol: references"}
+        - {label: Keep as optional pinned notes}
+      recommend: "Yes"
+  - question:
+      q: Q5. Which indexer should we depend on?
+      options:
+        - {label: tree-sitter-language-pack, note: "pip only, exact ranges; BREAKS Strata hard rule 2 (stdlib + PyYAML only) unless the indexer is an optional extra"}
+        - {label: Python ast only (stdlib), note: "fits rule 2; Python projects only"}
+        - {label: ctags + Python ast, note: "needs a system binary; weaker ranges"}
+      recommend: tree-sitter-language-pack
+  - question:
+      q: Q6. Where should the symbol index be stored?
+      options:
+        - {label: Separate cache DB that can be rebuilt, note: derived data and safe to delete}
+        - {label: Tables in strata.db}
+      recommend: Separate cache DB that can be rebuilt
+  - question:
+      q: "Q7. How should L4 state machines be shaped in v1?"
+      options:
+        - {label: "Flat + any:"}
+        - {label: One level of nested states}
+      recommend: "Flat + any:"
+  - question:
+      q: "Q8. Should the level budgets (600 / 1,200 / 2,500 tokens) be warnings or errors?"
+      options:
+        - {label: Warnings only, note: "the numbers are untested; measure on project1_app with 3 map sizes"}
+        - {label: Errors}
+      recommend: Warnings only
+
+  - md: |
+      ## Problems found (not fixed)
+      - `examples/project1_app.strata.yaml` is about 1,000 lines in one file, with L4 file and function objects mixed into the map.
+      - Viewer layout (`positions`, `object_layout`, port geometry) is stored in the model.
+      - `_est` (`strata/c4.py:389`) estimates tokens as chars/4, which is crude for code. Acceptable for the MVP.
+
+      ## After the MVP
+      - Nested or parallel states, an expression language for guards, a model checker.
+      - Machine-checkable invariants, guard exclusivity checks, `min_ms` timing windows, `exit` actions, analog signals.
+      - Test skeletons generated from L4: one per transition, plus timeout tests (XState graph, GraphWalker).
+      - A call graph, LSP/SCIP indexers, embeddings, PageRank.
+      - Extracting L4 from code where a state machine is already explicit, as a drift check only.
+      - Splitting `map.yaml` per system once it passes about 600 lines.
+
+      ## What not to build
+      - A custom DSL.
+      - Views or styling in the model.
+      - JSON-schema payloads, versions, SLA or auth in contracts.
+      - Line numbers in YAML.
+      - A whole-repo dump.
+      - A file watcher or daemon.
+      - Wording that claims safety certification.
+
+      ## Prior work worth studying in detail
+      Suggestions only; nothing below has been analysed in depth.
+      - **Aider `repomap.py`** (open repo): how it renders signatures with elision.
+      - **Serena `find_symbol` / `get_symbols_overview`** (open repo): an overview first, then a symbol body on demand.
+      - **XState `@xstate/graph`** (open repo): generating test paths from a machine.
+      - **GraphWalker** (open repo): coverage stop conditions.
+      - **Quantum Leaps QM and QUTest** (vendor product): the model → C code → trace test loop for embedded state machines.
+      - **Backstage** orphan processing (open repo).
+      - **LikeC4** CLI/MCP (open repo).
+      - **ROS 2** node and topic graph (open repo).
+
+      ## Sources
+      - [C4 component](https://c4model.com/abstractions/component)
+      - [Structurizr DSL](https://docs.structurizr.com/dsl/language)
+      - [LikeC4](https://likec4.dev/dsl/model/)
+      - [Backstage annotations](https://backstage.io/docs/features/software-catalog/well-known-annotations/)
+      - [SysML v2 ports](https://sensmetry.com/advent-of-sysml-v2-lesson-13-ports-interfaces-items-and-flows/)
+      - [AADL guide](https://apps.dtic.mil/sti/tr/pdf/ADA472931.pdf)
+      - [AsyncAPI 3.0](https://www.asyncapi.com/docs/reference/specification/v3.0.0)
+      - [Lost in the middle](https://arxiv.org/abs/2307.03172)
+      - [Databricks long-context RAG](https://www.databricks.com/blog/long-context-rag-performance-llms)
+      - [SCXML](https://www.w3.org/TR/scxml/)
+      - [XState delayed transitions](https://stately.ai/docs/delayed-transitions)
+      - [XState graph](https://stately.ai/docs/graph)
+      - [Quantum Leaps](https://www.state-machine.com/)
+      - [GraphWalker](https://graphwalker.github.io/)
+      - [IEC 61131-3 SFC](https://www.fernhillsoftware.com/help/iec-61131/sequential-function-chart/sfc-step.html)
+      - [Aider repo map](https://aider.chat/2023/10/22/repomap.html)
+      - [tree-sitter code navigation](https://tree-sitter.github.io/tree-sitter/4-code-navigation.html)
+      - [ctags JSON](https://docs.ctags.io/en/latest/man/ctags-json-output.5.html)
+      - [SCIP](https://github.com/sourcegraph/scip/blob/main/scip.proto)
+      - [Serena](https://github.com/oraios/serena)
+      - [repomix](https://github.com/yamadashy/repomix)

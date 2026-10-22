@@ -22,7 +22,7 @@
 |---|---|---|---|---|
 | 1. Bàn | chat chính | — | khối, trách nhiệm, đánh đổi (mức hệ thống) | user |
 | 2. Sơ đồ | chat chính giao agent | Sonnet medium | object + flow trong C4 YAML của project (`docs/AGENT_C4.md`) | user |
-| 3. Research | researcher song song (skill `research-stage`) | Sonnet medium | note MD trong vault `research/<project>/` (chat chính ghi) + câu hỏi cần quyết | user chốt từng câu |
+| 3. Research | researcher song song (skill `research-stage`) | Sonnet medium | doc YAML trong `<docs_dir>/research/` của Strata (chat chính ghi) + câu hỏi cần quyết | user chốt từng câu |
 | 3b. Mổ xẻ (chỉ khi user gọi) | agent REA hoặc đọc repo mở | Opus low | cơ chế + bản viết lại theo hệ của ta | user |
 | 4. Task | tasker | Sonnet low | danh sách task: object/file liên quan, tiêu chí đạt kiểm được, thứ tự, phụ thuộc | user duyệt → chat chính ghi `item add --kind task`. Tasker do chat chính hoặc agent general-purpose làm theo định dạng ticket, không có file agent |
 | 5. Thực thi | coder | Sonnet medium | code bước nhỏ, test ngay theo tiêu chí | — |
@@ -45,7 +45,7 @@ Strata (`/home/abel/project/tools/strata`, DB `/home/abel/project/tools/strata/s
 - **Agent có MCP thì dùng MCP thay CLI** (khi đã đăng ký); CLI là đường dự phòng của chat chính.
 - Project chưa có trong Strata thì `project add` trước khi vào bước 2.
 - **Sơ đồ (bước 2):** C4 YAML + flow theo `docs/AGENT_C4.md`, `validate` sạch rồi `import-yaml`. Không vẽ sơ đồ rời.
-- **Research (bước 3):** note Markdown trong vault `research/<project>/`, chỉ chat chính ghi qua Obsidian MCP; đặt tên + frontmatter theo skill `research-stage` để tra được bằng `search_notes`/tag. Không ghi research vào Strata.
+- **Research (bước 3):** doc YAML trong `<docs_dir>/research/` (mục Docs của viewer), chỉ chat chính ghi, theo skill `research-stage`. Mọi tài liệu user yêu cầu mặc định ghi vào Strata Docs, không vào vault hay Claude Docs.
 - **Tài liệu đã chốt (sau bước 3):** YAML chỉ nội dung theo `docs/architect/doc-format.yaml`, đặt trong `docs_dir` của project (`architect/`, `plan/`, `review/`). Không viết HTML/CSS/JS cho tài liệu.
 - **Quyết định:** user chốt xong thì `decision add` (kèm phương án đã loại). Note research chỉ giữ câu hỏi và phương án.
 - **Task (bước 4) / lỗi (bước 6):** `item add --kind task|issue`, gắn object C4 bằng `c4 link` khi có object tương ứng. Coder tự nhận/nộp qua MCP/CLI (`item claim`/`item submit`); chỉ chat chính đặt `done`.

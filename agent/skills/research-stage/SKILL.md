@@ -1,11 +1,11 @@
 ---
 name: research-stage
-description: Quy trình mặc định cho research stage của một khối hay chủ đề thiết kế. Gồm giải thích các phương án ở mức hệ thống, làm rõ lựa chọn của user, dọn doc cũ, tự chia nhỏ vấn đề và chạy song song các agent researcher (Sonnet, effort medium), tổng hợp kèm câu hỏi cần user quyết, rồi viết note research Markdown vào vault Obsidian (tên + frontmatter chuẩn để tra bằng Obsidian MCP). LUÔN dùng khi user đang bàn một chủ đề rồi nói "deep research" (ưu tiên hơn skill deep-research chung). Cũng dùng khi user nói "research", "nghiên cứu", "chạy agent nghiên cứu", "so sánh phương án", "viết doc research", hoặc khi một khối đã chốt sơ đồ và cần đi sâu kỹ thuật.
+description: Quy trình mặc định cho research stage của một khối hay chủ đề thiết kế. Gồm giải thích các phương án ở mức hệ thống, làm rõ lựa chọn của user, dọn doc cũ, tự chia nhỏ vấn đề và chạy song song các agent researcher (Sonnet, effort medium), tổng hợp kèm câu hỏi cần user quyết, rồi viết doc research YAML vào Strata Docs (`<docs_dir>/research/`). LUÔN dùng khi user đang bàn một chủ đề rồi nói "deep research" (ưu tiên hơn skill deep-research chung). Cũng dùng khi user nói "research", "nghiên cứu", "chạy agent nghiên cứu", "so sánh phương án", "viết doc research", hoặc khi một khối đã chốt sơ đồ và cần đi sâu kỹ thuật.
 ---
 
 # Research stage
 
-Research stage là giai đoạn **đang bàn**: tìm hiểu, so sánh, đề xuất, ghi câu hỏi mở. Sản phẩm là note Markdown trong vault `research/<project>/`, do chat chính ghi qua Obsidian MCP (researcher không đụng vault). Khi user xác nhận đã bàn xong một chủ đề thì mới tinh chỉnh thành doc YAML chính thức trong `<docs_dir>/architect/` của Strata. Luôn theo hiến pháp: user chốt từng bước, cấm overengineer, phát hiện vấn đề thì ghi lại chứ không tự sửa code.
+Research stage là giai đoạn **đang bàn**: tìm hiểu, so sánh, đề xuất, ghi câu hỏi mở. Sản phẩm là doc YAML trong `<docs_dir>/research/` của Strata (mục Docs), do chat chính ghi (researcher không ghi). Khi user xác nhận đã bàn xong một chủ đề thì mới tinh chỉnh thành doc chính thức trong `<docs_dir>/architect/`. Luôn theo hiến pháp: user chốt từng bước, cấm overengineer, phát hiện vấn đề thì ghi lại chứ không tự sửa code.
 
 ## 1. Hiểu đúng câu hỏi trước khi giải thích
 
@@ -62,7 +62,7 @@ Cấu hình agent:
   - rủi ro khi áp dụng.
 - Chỉ học cơ chế rồi tự viết lại. Không chép mã hay tài sản có bản quyền, và ghi giấy phép của nguồn.
 - Quy tắc về vault giống researcher: không đưa nội dung vault vào prompt.
-- Kết quả được gộp vào bước 4 và note research. Mỗi tính năng thành một mục `##` trong note, ghi rõ "đề xuất".
+- Kết quả được gộp vào bước 4 và doc research. Mỗi tính năng thành một mục `##` trong doc, ghi rõ "đề xuất".
 
 ## 4. Tổng hợp
 
@@ -78,51 +78,27 @@ Cấu hình agent:
 
 Agent đồng thuận với nhau không thay cho user chốt.
 
-## 5. Viết note research (Markdown trong vault)
+## 5. Viết doc research (YAML trong Strata Docs)
 
-Chỉ chat chính ghi, qua `mcp__obsidian__write_note` (đường dẫn tương đối vault). Không ghi bằng shell, không ghi vào Strata.
+Mặc định (user chốt 22/10/2026): research ghi thành doc YAML trong `<docs_dir>/research/` của project, hiện ở mục **Docs** của viewer Strata. Không ghi vào vault, không dùng Claude Docs. Chỉ chat chính ghi.
 
-1. **Đối chiếu quyết định đã chốt** (RAM.md, chat, C4 của project) để note không đi ngược. Note phải **tự đứng được**: không nhắc nhãn nội bộ ("phương án 3", "agent research"). Giải thích bằng lý do kỹ thuật và chuẩn công khai; dẫn đường dẫn code được.
-2. **Trước khi tạo, tra trùng:** `search_notes` theo chủ đề và `list_directory research/<project>`. Đã có note cùng chủ đề thì cập nhật (`patch_note`, đổi `updated`), không tạo bản mới.
-3. **Tên và vị trí:** `research/<project>/<chu-de>.md`
-   - `<project>`: đúng tên project trong Strata (`strata.py project list`).
-   - `<chu-de>`: tiếng Anh, chữ thường, nối `-`, danh từ cụ thể, không ngày tháng (vd `token-refresh-flow`, `firmware-ota-signing`). Ngày nằm ở frontmatter.
-4. **Frontmatter bắt buộc** (để lọc bằng `get_frontmatter`, `search_notes`, tag):
-   ```yaml
-   ---
-   title: "Ký firmware khi cập nhật OTA"      # tiếng Việt, đọc là hiểu
-   summary: "So sánh 3 cách ký, đề xuất Ed25519 + kiểm ở bootloader"  # 1 câu, chứa từ khóa tra cứu
-   project: project1_app
-   topic: firmware-ota-signing               # = tên file
-   status: dang-ban                          # dang-ban | da-chot | bo
-   created: 2026-10-19
-   updated: 2026-10-19
-   keywords: [ota, ed25519, bootloader, ký số]  # từ đồng nghĩa Việt/Anh user hay gõ
-   code: [src/ota/verify.c]                  # file code liên quan
-   related: ["[[research/project1_app/key-management]]"]
-   strata_doc:                               # điền khi đã chốt thành doc architect/
-   tags: [research, project/project1_app, status/dang-ban]
-   ---
-   ```
-   Đổi `status` thì đổi cả tag `status/…` (`manage_tags`).
-5. **Bố cục thân note:**
-   - Dòng đầu: `> ` tóm tắt 2–3 câu (kết luận + điều đang chờ quyết).
-   - `## Bức tranh toàn cục`: khối, ai thấy gì, dữ liệu đi đâu (mermaid nếu cần).
-   - `## Luồng chính`: một ví dụ thật đi hết hệ thống (các bước đánh số hoặc mermaid sequence) + bảng "Trong sơ đồ → mã nguồn hiện có → vai trò".
-   - `## Thành phần: <tên>`: mỗi thành phần một mục, gồm làm gì, các bước và vì sao, trạng thái **đã chốt** / **đề xuất**.
-   - `## Thuật toán và nguyên lý` (nếu là đề tài kỹ thuật).
-   - `## Tính năng có thể mổ xẻ` (xem 3b).
-   - `## Câu hỏi cần quyết`: mỗi câu `### Q1. …` có phương án, **Khuyến nghị**, và khi user chốt thì ghi **Đã chọn / Đã loại + lý do**.
-   - `## Lỗi phát hiện`: file:dòng, "chưa sửa, chờ user".
-   - `## Để sau MVP`, `## Nguồn` (link case study), `## Thuật ngữ` (bảng Thuật ngữ | Nghĩa).
-6. **Kiểm:** `get_frontmatter` đọc lại đủ trường; `search_notes` bằng một keyword trong `keywords` phải ra note.
+1. **Đối chiếu quyết định đã chốt** (RAM.md, chat, C4, `decision` của project) để doc không đi ngược. Doc phải **tự đứng được**: không nhắc nhãn nội bộ ("phương án 3", "agent research"). Giải thích bằng lý do kỹ thuật và chuẩn công khai; dẫn đường dẫn code được.
+2. **Trước khi tạo, tra trùng:** `ls <docs_dir>/research/` và `strata.py search "<chủ đề>" --project P --src doc`. Đã có doc cùng chủ đề thì sửa doc đó, không tạo bản mới.
+3. **Tên:** `<docs_dir>/research/<chu-de>.yaml`; `<chu-de>` tiếng Anh, chữ thường, nối `-`, danh từ cụ thể, không ngày tháng (vd `token-refresh-flow`).
+4. **Định dạng:** theo `/home/abel/project/tools/strata/docs/architect/doc-format.yaml`: `title`, `summary` (1 câu, chứa từ khóa tra cứu), `code: [...]`, `blocks` (`md`, `table`, `question`, `diagram`, `mermaid`...). Câu hỏi cần quyết dùng block `question` (`options`, `recommend`).
+5. **Bố cục:**
+   - `## Summary`: dòng đầu ghi **Status: research, nothing decided.**, kết luận + điều đang chờ quyết.
+   - Bức tranh toàn cục; luồng chính (một ví dụ thật) + bảng "Trong thiết kế → mã nguồn hiện có → vai trò".
+   - Mỗi thành phần một mục, ghi **đã chốt** / **đề xuất**.
+   - Tính năng có thể mổ xẻ (3b), câu hỏi cần quyết (block `question`), lỗi phát hiện (file:dòng, "chưa sửa, chờ user"), để sau MVP, nguồn.
+6. **Kiểm và đăng ký:** `strata.py doc validate FILE` (0 lỗi) → `strata.py doc scan --project P` → `strata.py doc set --project P research/<chu-de>.yaml --status draft`.
 
-Khi user chốt chủ đề: viết doc YAML trong `<docs_dir>/architect/` theo `/home/abel/project/tools/strata/docs/architect/doc-format.yaml` (lệnh: skill `strata`), rồi đặt `status: da-chot`, điền `strata_doc` trong note.
+Khi user chốt chủ đề: `decision add` cho từng câu đã chốt, viết doc chính thức trong `<docs_dir>/architect/`, đặt doc research `--status outdated` (hoặc giữ `current` nếu còn dùng).
 
 ## 6. Bàn giao
 
 - Mở đầu bằng dòng "Viết cho: …".
-- Đường dẫn note trong vault + `title`/`keywords` đã đặt. Tóm cấu trúc note trong vài gạch đầu dòng.
+- Đường dẫn doc + link viewer (`http://127.0.0.1:8740`, mục Docs). Tóm cấu trúc doc trong vài gạch đầu dòng.
 - Liệt kê riêng **những gì agent tự thêm, user cần duyệt**.
-- Liệt kê **những gì ghi trong note nhưng chưa xử lý**: lỗi, phạm vi chưa phủ.
-- Các quyết định phiên khác (ngoài note) vẫn chạy `session-secondbrain` khi user muốn.
+- Liệt kê **những gì ghi trong doc nhưng chưa xử lý**: lỗi, phạm vi chưa phủ.
+- Các quyết định phiên khác (ngoài doc) vẫn chạy `session-secondbrain` khi user muốn.
