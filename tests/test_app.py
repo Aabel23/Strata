@@ -137,6 +137,17 @@ def test_app_js_never_injects_html():
     assert not any(w in js for w in ("innerHTML", "insertAdjacentHTML", "document.write", "eval(", "outerHTML"))
 
 
+def test_roadmap_astra_frontend():
+    app_js = (ROOT / "viewer/app.js").read_text()
+    app_css = (ROOT / "viewer/app.css").read_text()
+    roadmap_js = (ROOT / "viewer/roadmap.js").read_text()
+    assert "renderDetail" in app_js and "ltFormat" in app_js
+    assert "camps[0].cur" in app_js and "ph=" in app_js
+    assert "lt-mapbox" in app_css and ".lt .detail" in app_css and ".lt .thread" in app_css
+    assert "--st-miss:#c98a6a" in app_css or "--st-miss: #c98a6a" in app_css
+    assert "[330," in roadmap_js and "top-24" in roadmap_js
+
+
 def test_docs_autoscan_md(env):
     b, p, d = env
     (d / "guide.md").write_text("Intro\n\n# Hướng dẫn đặc biệt\n\n| a | b |\n|---|---|\n| 1 | 2 |\n")
@@ -262,11 +273,66 @@ def test_api_items_board_fields(env):
     assert get(base, "/api/items?status=review")[0] == 200 and get(base, "/api/items?ready=1&status=bogus")[0] == 400
 
 
-def test_no_write_endpoint():
+def test_only_scoped_c4_post_endpoints():
+    """Only the explicitly scoped C4 APIs may mutate state over HTTP."""
     src = (ROOT / "strata/server.py").read_text()
-    assert not any(m in src for m in ("do_POST", "do_PUT", "do_DELETE", "do_PATCH"))
+    assert not any(m in src for m in ("do_PUT", "do_DELETE", "do_PATCH"))
+    post = src[src.index("def do_POST"):src.index("def do_GET")]
+    paths = {s for s in post.split('"') if s.startswith("/api/")}
+    assert paths == {"/api/c4/object", "/api/c4/port", "/api/c4/link"}
 
 
 def test_board_ui_filters_in_url():
     js = (ROOT / "viewer/app.js").read_text()
     assert "URLSearchParams" in js and "Sẵn sàng" not in js
+
+
+def test_api_c4_layered_exposes_contracts_behavior(env):
+    from strata import c4_layered
+    b, p, _ = env
+    c = db.connect(p); c4_layered.import_dir(c, ROOT / "tests/fixtures/c4_layered", "a"); c.close()
+    m = J(env, "/api/c4?project=a")
+    assert m["layered"] is True
+    assert {x["id"]: x["detail"] for x in m["connections"] if x.get("detail")}["app_cmd"] == "relay_command.send"
+    r = m["contracts"]["relay_command.send"]
+    assert r["transport"] == "HTTPS POST /command/send" and r["body"]["errors"] == ["BUSY", "TIMEOUT"] and r["end"] == "src/relay.py::RelayHub.send"
+    assert [t["id"] for t in m["behavior"]["relay"]["transitions"]] == ["t1"]
+    assert next(o for o in m["objects"] if o["id"] == "relay")["owns"] == ["src/**"]
+    assert any(s.get("link") == "app_cmd" for s in m["flows"][0]["steps"])
+
+
+def test_api_c4_old_format_has_no_layered_fields(env, tmp_path):
+    from strata import c4
+    b, p, _ = env
+    y = tmp_path / "old.yaml"
+    y.write_text("name: A\nroot: .\nobjects:\n  - {id: x, type: system, name: X, description: d}\nconnections: []\nflows: []\n")
+    c = db.connect(p); c4.import_yaml(c, str(y), "a"); c.close()
+    m = J(env, "/api/c4?project=a")
+    assert m["objects"][0]["id"] == "x" and not {"layered", "contracts", "behavior"} & set(m)
+
+
+def test_viewer_script_calls_only_defined_functions():
+    """Regression for #195: a prune once deleted the map renderer but the script still called it."""
+    import re
+    t = (ROOT / "viewer/index.html").read_text(encoding="utf-8")
+    js = t[t.index("<script>\n"):t.rindex("</script>")]
+    js = re.sub(r"/\*.*?\*/", "", js, flags=re.S)
+    js = re.sub(r"(?m)(^|\s)//(\s.*)?$", "", js)
+    js = re.sub(r"[,;]\s*([A-Za-z_$][\w$]*)\s*=(?!=)", lambda m: " let " + m.group(1) + "=", js)  # comma declarations
+    js = re.sub(r"'[^'\n]*'|\"[^\"\n]*\"", "''", js)
+    js = re.sub(r"`[^`]*`", lambda m: " ".join(re.findall(r"\$\{(.*?)\}", m.group(0), flags=re.S)), js, flags=re.S)
+    ident = r"[A-Za-z_$][\w$]*"
+    defs = set(re.findall(rf"(?:function\*?|const|let|var|class)\s+({ident})", js))
+    for m in re.finditer(r"(?:const|let|var)\s*[\[{]([^\]}=]*)[\]}]", js):
+        defs |= set(re.findall(ident, m.group(1)))
+    for m in re.finditer(rf"\(([^()]*)\)\s*=>|function\s*[\w$]*\s*\(([^()]*)\)|({ident})\s*=>|catch\s*\(([^)]*)\)", js):
+        for g in m.groups():
+            defs |= set(re.findall(ident, g or ""))
+    calls = set(re.findall(rf"(?<![\w$.])({ident})\s*\(", js))
+    ok = {"if", "for", "while", "switch", "catch", "function", "return", "typeof", "await", "new", "else", "do", "try",
+          "async", "API", "prompt", "confirm", "alert", "String", "Number", "Object", "Array", "Math", "JSON", "Set", "Map", "Promise", "Boolean",
+          "parseInt", "parseFloat", "fetch", "setTimeout", "clearTimeout", "setInterval", "clearInterval",
+          "requestAnimationFrame", "matchMedia", "isNaN", "encodeURIComponent", "decodeURIComponent", "Error", "Date",
+          "URLSearchParams", "RegExp", "getComputedStyle", "isFinite", "structuredClone", "FormData", "Event",
+          "CustomEvent", "ResizeObserver", "MutationObserver", "URL", "Blob", "AbortController", "dagre", "mermaid"}
+    assert sorted(calls - defs - ok) == []
