@@ -1,3 +1,4 @@
+import json
 import pathlib, shutil
 import pytest, yaml
 from strata import c4_layered as L, db
@@ -21,8 +22,8 @@ def test_validate_fixture(folder, capsys):
     e, w, st = L.check(m, folder)
     assert errs == [] and e == []
     assert st == {"object": 5, "link": 5, "contract": 3, "behavior": 1, "flow": 1, "detail": 3}
-    assert any("RelayHub.removed" in x and "chưa resolve" in x for x in w)
-    assert any("push.dart" in x and "chưa resolve" in x for x in w)
+    assert any("RelayHub.removed" in x and "chưa resolve" in x for x in map(L.fmt, w))
+    assert any("push.dart" in x and "chưa resolve" in x for x in map(L.fmt, w))
     assert len(w) == 2          # flow is continuous, python symbols that exist raise nothing
     assert L.report(folder) == 0
     assert "3/5 link có detail" in capsys.readouterr().out
@@ -31,7 +32,7 @@ def test_validate_fixture(folder, capsys):
 def test_non_python_existing_file_warns(folder):
     (folder.parent / "lib").mkdir(); (folder.parent / "lib/push.dart").write_text("x")
     m, _ = L.load(folder)
-    assert any("không phải Python" in x for x in L.check(m, folder)[1])
+    assert any("không phải Python" in x for x in map(L.fmt, L.check(m, folder)[1]))
 
 
 @pytest.mark.parametrize("edit,msg", [
@@ -46,7 +47,7 @@ def test_map_errors(folder, edit, msg):
     p = folder / "map.yaml"; p.write_text(p.read_text().replace(*edit))
     m, errs = L.load(folder)
     errs += L.check(m, folder)[0]
-    assert any(msg in e for e in errs), errs
+    assert any(msg in L.fmt(e) for e in errs), errs
 
 
 def test_flow_errors_and_gap(folder):
@@ -54,7 +55,7 @@ def test_flow_errors_and_gap(folder):
     p.write_text(p.read_text().replace("{at: relay, transition: t1}", "{link: nope}").replace("{link: user_app, text: tap}", "{link: relay_db}"))
     m, errs = L.load(folder)
     e, w, _ = L.check(m, folder)
-    assert any("link 'nope'" in x for x in e) and any("đứt mạch" in x for x in w)
+    assert any("link 'nope'" in x for x in map(L.fmt, e)) and any("đứt mạch" in x for x in map(L.fmt, w))
 
 
 def test_import_export_roundtrip(folder, tmp_path):
@@ -201,3 +202,21 @@ def test_dry_run_diff_and_dropped_link_refusal(folder, tmp_path):
     assert count() == 5 and run(p, "c4", "diff", str(folder), "--project", "p")[1].count("+0 ~0 -0") == 5
     a = db.connect(p).execute("SELECT after FROM audit WHERE tool='c4-import' ORDER BY id DESC").fetchone()[0]
     assert __import__("json").loads(a)["diff"]["object"]["added"] == ["extra"]
+
+
+def test_findings_shape_and_report_modes(folder, capsys):
+    p = folder / "map.yaml"; p.write_text(p.read_text().replace("kind: store", "kind: file"))
+    m, errs = L.load(folder)
+    errs += L.check(m, folder)[0]
+    assert errs and all(set(f) == {"id", "severity", "subject", "message", "fix"} for f in errs)
+    assert "C4-BAD-KIND" in {f["id"] for f in errs}
+    capsys.readouterr()
+    assert L.report(folder, json_out=True) == 1
+    out = json.loads(capsys.readouterr().out)
+    assert all(set(f) == {"id", "severity", "subject", "message", "fix"} for f in out)
+    assert any(f["id"] == "C4-BAD-KIND" for f in out)
+
+
+def test_strict_fails_on_warning_only(folder, capsys):
+    assert L.report(folder) == 0 and L.report(folder, strict=True) == 1
+    assert "WARN  [C4-SYMBOL-UNRESOLVED]" in capsys.readouterr().out

@@ -50,16 +50,25 @@ def _related(objs, a, b):
 
 
 
+def finding(id, severity, subject, message, fix):
+    return {"id": id, "severity": severity, "subject": subject, "message": message, "fix": fix}
+
+
+def fmt(f):
+    """Plain text of a finding: 'subject: message'."""
+    return f"{f['subject']}: {f['message']}"
+
+
 def _read(path, errs):
     try: return yaml.load(path.read_text(encoding="utf-8"), _Loader)
     except (yaml.YAMLError, OSError) as e:
-        errs.append(f"{path.name}: không đọc được ({getattr(e, 'problem', e)})")
+        errs.append(finding("C4-READ", "error", path.name, f"không đọc được ({getattr(e, 'problem', e)})", "sửa cú pháp YAML hoặc quyền đọc file"))
 
 
 def _keys(errs, where, r, sec):
-    if not isinstance(r, dict): errs.append(f"{where}: phải là mapping"); return False
+    if not isinstance(r, dict): errs.append(finding("C4-BAD-SHAPE", "error", where, "phải là mapping", "viết entry dạng key: value")); return False
     bad = [k for k in r if k not in KEYS[sec]]
-    if bad: errs.append(f"{where}: key lạ {bad}")
+    if bad: errs.append(finding("C4-UNKNOWN-KEY", "error", where, f"key lạ {bad}", "xoá hoặc đổi tên key theo schema"))
     return True
 
 
@@ -67,38 +76,38 @@ def load(d):
     """(model, errs) from a folder. model = {project:{id?,name?,root}, objects, links, contracts, behavior:{module: data}, flows}."""
     d = pathlib.Path(d); errs = []
     mp = d / "map.yaml"
-    if not mp.is_file(): return None, [f"thiếu {mp}"]
+    if not mp.is_file(): return None, [finding("C4-MAP-MISSING", "error", str(mp), f"thiếu {mp}", "tạo map.yaml trong thư mục C4")]
     raw = _read(mp, errs) or {}
-    if not isinstance(raw, dict): return None, errs + ["map.yaml phải là mapping"]
-    for k in raw.keys() - {"project", "objects", "links"}: errs.append(f"map.yaml: key lạ '{k}'")
+    if not isinstance(raw, dict): return None, errs + [finding("C4-BAD-SHAPE", "error", "map.yaml", "map.yaml phải là mapping", "đặt project/objects/links làm key gốc")]
+    for k in raw.keys() - {"project", "objects", "links"}: errs.append(finding("C4-UNKNOWN-KEY", "error", "map.yaml", f"key lạ '{k}'", "chỉ dùng project, objects, links"))
     pr = raw.get("project")
     m = {"project": pr if isinstance(pr, dict) else {"name": pr} if pr else {}, "contracts": [], "behavior": {}, "flows": []}
     m["project"].setdefault("root", ".")
     for sec in ("objects", "links"):
         rows = raw.get(sec) or []
-        m[sec] = [r for i, r in enumerate(rows, 1) if _keys(errs, f"{sec} #{i} ({r.get('id') if isinstance(r, dict) else r})", r, sec)] if isinstance(rows, list) else errs.append(f"{sec}: phải là list") or []
+        m[sec] = [r for i, r in enumerate(rows, 1) if _keys(errs, f"{sec} #{i} ({r.get('id') if isinstance(r, dict) else r})", r, sec)] if isinstance(rows, list) else errs.append(finding("C4-BAD-SHAPE", "error", sec, f"{sec}: phải là list", "viết thành danh sách '- id: ...'")) or []
     for f in sorted((d / "contracts").glob("*.yaml")):
         rows = _read(f, errs) or []
-        if not isinstance(rows, list): errs.append(f"{f.name}: phải là list"); continue
+        if not isinstance(rows, list): errs.append(finding("C4-BAD-SHAPE", "error", f.name, "phải là list", "viết thành danh sách '- id: ...'")); continue
         for r in rows:
             if _keys(errs, f"contract {f.stem}.{r.get('id') if isinstance(r, dict) else r}", r, "contracts"):
-                if not r.get("id"): errs.append(f"contracts/{f.name}: entry thiếu id")
+                if not r.get("id"): errs.append(finding("C4-MISSING-ID", "error", f"contracts/{f.name}", "entry thiếu id", "thêm id cho entry"))
                 m["contracts"].append({**r, "id": f"{f.stem}.{r.get('id')}"})
     for f in sorted((d / "behavior").glob("*.yaml")):
         data = _read(f, errs)
         if isinstance(data, dict) and data.get("module", f.stem) == f.stem: m["behavior"][f.stem] = data
-        else: errs.append(f"behavior/{f.name}: phải là mapping, module = tên file")
+        else: errs.append(finding("C4-BEHAVIOR-FILE", "error", f"behavior/{f.name}", "phải là mapping, module = tên file", "viết mapping, bỏ hoặc sửa module cho khớp tên file"))
     for f in sorted((d / "flows").glob("*.yaml")):
         r = _read(f, errs)
         if not _keys(errs, f"flows/{f.name}", r, "flows"): continue
-        if r.get("id", f.stem) != f.stem: errs.append(f"flows/{f.name}: id '{r.get('id')}' khác tên file")
+        if r.get("id", f.stem) != f.stem: errs.append(finding("C4-FLOW-ID", "error", f"flows/{f.name}", f"id '{r.get('id')}' khác tên file", "đổi id cho khớp tên file"))
         for i, s in enumerate(r.get("steps") or [], 1): _keys(errs, f"flow {f.stem} bước {i}", s, "steps")
         m["flows"].append({**r, "id": f.stem})
     return m, errs
 
 
 def _dup(errs, kind, ids):
-    for i in {x for x in ids if ids.count(x) > 1}: errs.append(f"trùng id {kind}: {i}")
+    for i in {x for x in ids if ids.count(x) > 1}: errs.append(finding("C4-DUP-ID", "error", str(i), f"trùng id {kind}: {i}", "đổi một trong các id trùng"))
 
 
 def resolve(sym, root, cache, idx=None):
@@ -128,62 +137,64 @@ def check(m, d, idx=None):
     for sec, rows, ids in (("object", m["objects"], objs), ("link", m["links"], links)):
         _dup(errs, sec, [r.get("id") for r in rows])
         for r in rows:
-            if not r.get("id"): errs.append(f"{sec} thiếu id")
+            if not r.get("id"): errs.append(finding("C4-MISSING-ID", "error", sec, f"{sec} thiếu id", "thêm id"))
             ids[r.get("id")] = r
     _dup(errs, "contract", [r.get("id") for r in m["contracts"]])
     for oid, o in objs.items():
-        if not o.get("name"): errs.append(f"{oid}: thiếu name")
-        if o.get("kind") not in KINDS: errs.append(f"{oid}: kind '{o.get('kind')}' không hợp lệ")
-        if o.get("status", "live") not in STATUS: errs.append(f"{oid}: status sai")
+        if not o.get("name"): errs.append(finding("C4-MISSING-NAME", "error", oid, "thiếu name", "thêm name"))
+        if o.get("kind") not in KINDS: errs.append(finding("C4-BAD-KIND", "error", oid, f"kind '{o.get('kind')}' không hợp lệ", f"dùng một trong {sorted(KINDS)}"))
+        if o.get("status", "live") not in STATUS: errs.append(finding("C4-BAD-STATUS", "error", oid, "status sai", f"dùng một trong {sorted(STATUS)}"))
         p = o.get("parent")
-        if p is not None and p not in objs: errs.append(f"{oid}: parent '{p}' không tồn tại")
-        elif p is not None and ancestors(objs, oid)[1] in objs: errs.append(f"{oid}: chuỗi parent bị vòng")
+        if p is not None and p not in objs: errs.append(finding("C4-PARENT-MISSING", "error", oid, f"parent '{p}' không tồn tại", "sửa parent thành id object có thật hoặc thêm object đó"))
+        elif p is not None and ancestors(objs, oid)[1] in objs: errs.append(finding("C4-PARENT-CYCLE", "error", oid, "chuỗi parent bị vòng", "cắt vòng: đổi parent của một object trong chuỗi"))
         b = o.get("behavior")
-        if b is not None and pathlib.PurePath(str(b)).stem not in m["behavior"]: errs.append(f"{oid}: behavior '{b}' không có file")
+        if b is not None and pathlib.PurePath(str(b)).stem not in m["behavior"]: errs.append(finding("C4-BEHAVIOR-MISSING", "error", oid, f"behavior '{b}' không có file", "tạo behavior/<module>.yaml hoặc bỏ trường behavior"))
     for mod in m["behavior"]:
-        if mod not in objs: errs.append(f"behavior/{mod}.yaml: không có object '{mod}'")
+        if mod not in objs: errs.append(finding("C4-BEHAVIOR-ORPHAN", "error", f"behavior/{mod}.yaml", f"không có object '{mod}'", "thêm object cùng id hoặc xoá file behavior"))
     for lid, x in links.items():
         for end in ("from", "to"):
-            if x.get(end) not in objs: errs.append(f"link {lid}: {end} '{x.get(end)}' không tồn tại")
-        if x.get("detail") is not None and x["detail"] not in cons: errs.append(f"link {lid}: detail '{x['detail']}' không tồn tại")
-        if x.get("status", "live") not in STATUS: errs.append(f"link {lid}: status sai")
+            if x.get(end) not in objs: errs.append(finding("C4-LINK-END", "error", f"link {lid}", f"{end} '{x.get(end)}' không tồn tại", "sửa from/to thành id object có thật"))
+        if x.get("detail") is not None and x["detail"] not in cons: errs.append(finding("C4-LINK-DETAIL", "error", f"link {lid}", f"detail '{x['detail']}' không tồn tại", "sửa detail thành id contract (file.id) có thật hoặc bỏ"))
+        if x.get("status", "live") not in STATUS: errs.append(finding("C4-BAD-STATUS", "error", f"link {lid}", "status sai", f"dùng một trong {sorted(STATUS)}"))
     cache = {}
     for cid, r in cons.items():
-        if not isinstance(cid, str) or "." not in cid or cid.endswith("."): errs.append(f"contract {cid}: thiếu id"); continue
+        if not isinstance(cid, str) or "." not in cid or cid.endswith("."): errs.append(finding("C4-CONTRACT-BAD", "error", f"contract {cid}", "thiếu id", "thêm id cho contract")); continue
         st, en = r.get("start"), r.get("end")
         if not isinstance(en, str) or not (isinstance(st, str) or isinstance(st, list) and all(isinstance(s, str) for s in st)):
-            errs.append(f"contract {cid}: start (chuỗi hoặc list) và end (chuỗi) bắt buộc"); continue
+            errs.append(finding("C4-CONTRACT-BAD", "error", f"contract {cid}", "start (chuỗi hoặc list) và end (chuỗi) bắt buộc", "thêm start và end dạng path::Qual.name")); continue
         for sym in [*([st] if isinstance(st, str) else st), en]:
-            if w := resolve(sym, root, cache, idx): warns.append(f"contract {cid}: {sym}: {w}")
+            if w := resolve(sym, root, cache, idx): warns.append(finding("C4-SYMBOL-UNRESOLVED", "warn", f"contract {cid}", f"{sym}: {w}", "sửa path::Qual.name cho khớp code hoặc tạo symbol"))
     flat = {k: {"from": x.get("from"), "to": x.get("to")} for k, x in links.items()}
     for f in m["flows"]:
         prev = None
         for i, s in enumerate(f.get("steps") or [], 1):
             where = f"flow {f['id']} bước {i}"
-            if not isinstance(s, dict): errs.append(f"{where}: phải là mapping"); continue
-            if s.get("link") is not None and s["link"] not in links: errs.append(f"{where}: link '{s['link']}' không tồn tại"); continue
+            if not isinstance(s, dict): errs.append(finding("C4-FLOW-STEP", "error", where, "phải là mapping", "viết bước dạng {link: ...} hoặc {at: ...}")); continue
+            if s.get("link") is not None and s["link"] not in links: errs.append(finding("C4-FLOW-STEP", "error", where, f"link '{s['link']}' không tồn tại", "sửa thành id link có thật")); continue
             ends, err = step_ends({**{k: v for k, v in s.items() if k in ("at", "reverse")}, **({"connection": s["link"]} if "link" in s else {})}, flat, objs)
-            if err: errs.append(f"{where}: {err.replace('connection', 'link')}"); continue
+            if err: errs.append(finding("C4-FLOW-STEP", "error", where, err.replace('connection', 'link'), "sửa bước theo dạng {link, reverse?} hoặc {at}")); continue
             if s.get("transition") is not None:
                 beh = m["behavior"].get(pathlib.PurePath(str(objs[s["at"]].get("behavior") or "")).stem) if "at" in s else None
-                if "at" not in s: errs.append(f"{where}: transition chỉ dùng với at")
+                if "at" not in s: errs.append(finding("C4-FLOW-STEP", "error", where, "transition chỉ dùng với at", "dùng transition cùng at, không cùng link"))
                 elif s["transition"] not in [t.get("id") for t in (beh or {}).get("transitions") or [] if isinstance(t, dict)]:
-                    warns.append(f"{where}: transition '{s['transition']}' chưa có trong behavior của '{s['at']}'")
+                    warns.append(finding("C4-TRANSITION", "warn", where, f"transition '{s['transition']}' chưa có trong behavior của '{s['at']}'", "thêm transition vào behavior hoặc sửa id"))
             if ends and prev and not _related(objs, prev[1], ends[0]):
-                warns.append(f"{where}: đứt mạch, bắt đầu ở '{ends[0]}' nhưng bước trước kết thúc ở '{prev[1]}'")
+                warns.append(finding("C4-FLOW-BREAK", "warn", where, f"đứt mạch, bắt đầu ở '{ends[0]}' nhưng bước trước kết thúc ở '{prev[1]}'", "thêm bước nối hoặc sắp lại thứ tự"))
             prev = ends or prev
     n = sum(x.get("detail") is not None for x in links.values())
     return errs, warns, {"object": len(objs), "link": len(links), "contract": len(cons), "behavior": len(m["behavior"]), "flow": len(m["flows"]), "detail": n}
 
 
-def report(d, idx=None):
+def report(d, idx=None, json_out=False, strict=False):
     m, errs = load(d)
     warns, st = [], None
     if m is not None: e2, warns, st = check(m, d, idx); errs += e2
-    for w in warns: print("WARN ", w)
-    for e in errs: print("ERROR", e)
-    if st: print(f"{st['object']} object, {st['link']} link, {st['contract']} contract, {st['behavior']} behavior, {st['flow']} flow; {st['detail']}/{st['link']} link có detail — {len(errs)} lỗi, {len(warns)} cảnh báo")
-    return 1 if errs else 0
+    if json_out: print(json.dumps(errs + warns, ensure_ascii=False))
+    else:
+        for f in warns + errs:
+            print(f"{'ERROR' if f['severity'] == 'error' else 'WARN '} [{f['id']}] {fmt(f)} (fix: {f['fix']})")
+        if st: print(f"{st['object']} object, {st['link']} link, {st['contract']} contract, {st['behavior']} behavior, {st['flow']} flow; {st['detail']}/{st['link']} link có detail — {len(errs)} lỗi, {len(warns)} cảnh báo")
+    return 1 if errs or (strict and warns) else 0
 
 
 def _counts(c, project):
@@ -245,8 +256,8 @@ def import_dir(c, d, project, force=False, dry_run=False, yes=False):
     Returns the new counts, or the diff when dry_run. Refuses (ValueError) when links would be dropped and not `yes`."""
     m, errs = load(d)
     if m is not None: errs += check(m, d)[0]
-    if errs and not force: raise ValueError("model có lỗi, không ghi gì (--force để bỏ qua):\n" + "\n".join(errs))
-    if m is None: raise ValueError(errs[0])
+    if errs and not force: raise ValueError("model có lỗi, không ghi gì (--force để bỏ qua):\n" + "\n".join(map(fmt, errs)))
+    if m is None: raise ValueError(fmt(errs[0]))
     df = diff_model(c, m, project)
     if dry_run: return df
     if df["dropped_links"] and not yes:

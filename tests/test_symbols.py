@@ -49,7 +49,7 @@ def test_validate_uses_index_and_rejects_outside(folder):
     base = L.check(m, folder)[1]
     assert L.check(m, folder, (c, "p"))[1] == base
     (root / "src/app.py").write_text("def helper(): pass\n")      # index now stale (mtime/size) -> falls back to ast, still correct
-    assert any("App.ask" in w for w in L.check(m, folder, (c, "p"))[1])
+    assert any("App.ask" in w for w in map(L.fmt, L.check(m, folder, (c, "p"))[1]))
     assert S.resolves(c, "p", root, "src/relay.py::RelayHub.send") is True
     (root / "../escape.py").write_text("def e(): pass\n")
     assert L.resolve("../escape.py::e", root, {}) == "../escape.py: ngoài root" and L.resolve("/etc/passwd::x", root, {}).endswith("ngoài root")
