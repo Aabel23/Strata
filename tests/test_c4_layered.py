@@ -24,7 +24,7 @@ def test_validate_fixture(folder, capsys):
     assert st == {"object": 5, "link": 5, "contract": 3, "behavior": 1, "flow": 1, "detail": 3}
     assert any("RelayHub.removed" in x and "chưa resolve" in x for x in map(L.fmt, w))
     assert any("push.dart" in x and "chưa resolve" in x for x in map(L.fmt, w))
-    assert len(w) == 2          # flow is continuous, python symbols that exist raise nothing
+    assert len([x for x in w if x['id'] == 'C4-SYMBOL-UNRESOLVED']) == 2 and not [x for x in w if x['id'] == 'C4-FLOW-BREAK']          # flow is continuous, python symbols that exist raise nothing
     assert L.report(folder) == 0
     assert "3/5 link có detail" in capsys.readouterr().out
 

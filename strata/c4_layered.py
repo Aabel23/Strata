@@ -129,6 +129,87 @@ def resolve(sym, root, cache, idx=None):
         if node is None: return f"chưa resolve: {path} không có {qual}"
 
 
+_PROTO = re.compile(r"\b(https?|tcp|udp|grpc|sql\w*|mysql|mqtt|ws|websocket|rest|smtp|ble|bluetooth|rfcomm|ipc|rpc|json|file|import|queue|poll\w*|channel|socket)\b", re.I)
+_MAXKIDS = 12
+
+
+def _semantic(m, objs, links, cons):
+    """Warn-level modelling rules (C4-PERSON-TARGET ... C4-VIEW-SIZE). Cheap, deterministic, tolerant of broken input."""
+    out, add = [], lambda *a: out.append(finding(*a))
+    kind = lambda i: (objs.get(i) or {}).get("kind")
+    chain = lambda i: ancestors(objs, i)[0]
+    owner = lambda i, ks: next((a for a in [i, *chain(i)] if kind(a) in ks), None)
+    kids = {}
+    for oid, o in objs.items():
+        if isinstance(o.get("parent"), str): kids.setdefault(o["parent"], []).append(oid)
+    for oid, o in objs.items():
+        k, p = o.get("kind"), o.get("parent")
+        if k == "component" and sum(kind(a) == "app" for a in chain(oid)) != 1:
+            add("C4-COMP-PARENT", "warn", oid, "component must sit under exactly one app", "set parent so the chain reaches one app")
+        pk = kind(p) if isinstance(p, str) else None
+        if pk is not None and ((k == "app" and pk != "system") or (k == "component" and pk not in ("app", "component", "group")) or pk in ("actor", "store")):
+            add("C4-PARENT-LEVEL", "warn", oid, f"{k} under {pk} breaks the level order", "app goes under system; component under app/component/group; actor and store hold nothing")
+        own = o.get("owns") or []
+        if k != "store" and (str(oid).endswith(".py") or str(o.get("name", "")).endswith(".py") or (isinstance(own, list) and len(own) == 1 and not re.search(r"[*?]", str(own[0])) and "." in pathlib.PurePath(str(own[0])).name)):
+            add("C4-FILE-OBJECT", "warn", oid, "object stands for a single file", "make it a component folder or drop it; files belong in owns")
+        if not any(oid in (x.get("from"), x.get("to")) for x in links.values()) and oid not in kids:
+            add("C4-ORPHAN", "warn", oid, "no links and no children", "link it to the rest or remove it")
+    for p, ks in kids.items():
+        if len(ks) > _MAXKIDS: add("C4-VIEW-SIZE", "warn", p, f"{len(ks)} children (more than {_MAXKIDS}) are unreadable in one view", "group children under intermediate objects")
+    seen_name, edges, used = {}, set(), set()
+    for lid, x in links.items():
+        a, b = x.get("from"), x.get("to")
+        s = f"link {lid}"
+        if kind(a) == "actor" and kind(b) in ("component", "store"): add("C4-PERSON-TARGET", "warn", s, f"actor links to a {kind(b)}", "link the actor to an app or system")
+        if a == b: add("C4-SELF-LINK", "warn", s, "from equals to", "remove the link or point it at another object")
+        if not x.get("name"): add("C4-LINK-NOLABEL", "warn", s, "link has no name", "add a name that says what flows")
+        if x.get("detail") in cons: used.add(x["detail"])
+        ka, kb = kind(a), kind(b)
+        if ka == "component" and kb == "component" and (oa := owner(a, ("app",))) and (ob := owner(b, ("app",))) and oa != ob:
+            add("C4-COMP-CROSS", "warn", s, f"components of different apps ({oa}, {ob})", "link the apps, or move the link to app level")
+        pa, pb = owner(a, ("app", "store")), owner(b, ("app", "store"))
+        if pa and pb and pa != pb and not (cons.get(x.get("detail")) or {}).get("transport") and not _PROTO.search(str(x.get("name") or "")):
+            add("C4-LINK-NOPROTO", "warn", s, f"crosses {pa} -> {pb} with no transport or protocol", "set transport in the detail contract or name the protocol in the link name")
+        if (key := (a, b, x.get("name"))) in seen_name: add("C4-LINK-DUP", "warn", s, f"same from, to, name as link {seen_name[key]}", "merge or rename the duplicate")
+        seen_name.setdefault(key, lid)
+        edges.add((a, b))
+    for (a, b) in sorted(edges, key=str):
+        if a != b and (b, a) in edges and str(a) < str(b): add("C4-LINK-DIR", "warn", f"{a} <-> {b}", "links exist in both directions", "keep one direction per interaction, or name each as request and reply")
+    for cid in cons:
+        if cid not in used: add("C4-CONTRACT-ORPHAN", "warn", f"contract {cid}", "no link points to it as detail", "set it as a link's detail or delete it")
+    apps = {}
+    for x in links.values():
+        a, b = owner(x.get("from"), ("app",)), owner(x.get("to"), ("app",))
+        if a and b and a != b: apps.setdefault(a, set()).add(b)
+    def reach(s):
+        r, st = set(), list(apps.get(s, ()))
+        while st:
+            n = st.pop()
+            if n not in r: r.add(n); st.extend(apps.get(n, ()))
+        return r
+    done = set()
+    for a in apps:
+        if a in done: continue
+        cyc = sorted({a} | {n for n in reach(a) if a in reach(n)}) if a in reach(a) else []
+        if cyc: done.update(cyc); add("C4-CYCLE-APP", "warn", ", ".join(cyc), "apps depend on each other in a cycle", "break the cycle: invert or drop one dependency")
+    for oid, o in objs.items():
+        if o.get("kind") == "store":
+            ap = {owner(y, ("app",)) for x in links.values() for y in (x.get("from"), x.get("to")) if oid in (x.get("from"), x.get("to")) and y != oid} - {None}
+            if len(ap) > 1: add("C4-STORE-SHARED", "warn", oid, f"store used by {len(ap)} apps ({', '.join(sorted(ap))})", "give the store one owner app and let others call that app")
+    for mod, d in m["behavior"].items():
+        init = d.get("initial") if isinstance(d, dict) else None
+        if init is None: continue
+        ts = [t for t in d.get("transitions") or [] if isinstance(t, dict)]
+        r, st = {init}, [init]
+        while st:
+            n = st.pop()
+            for t in ts:
+                if t.get("from") == n and t.get("to") not in r: r.add(t.get("to")); st.append(t.get("to"))
+        for sname in d.get("states") or []:
+            if sname not in r: add("C4-BEHAVIOR-UNREACHABLE", "warn", f"behavior/{mod}.yaml", f"state '{sname}' unreachable from initial '{init}'", "add a transition into it or delete the state")
+    return out
+
+
 def check(m, d, idx=None):
     """(errs, warns, stats) of a loaded model; d is the folder (code root = project.root relative to it); idx as in resolve."""
     errs, warns = [], []
@@ -181,6 +262,7 @@ def check(m, d, idx=None):
             if ends and prev and not _related(objs, prev[1], ends[0]):
                 warns.append(finding("C4-FLOW-BREAK", "warn", where, f"đứt mạch, bắt đầu ở '{ends[0]}' nhưng bước trước kết thúc ở '{prev[1]}'", "thêm bước nối hoặc sắp lại thứ tự"))
             prev = ends or prev
+    warns += _semantic(m, objs, links, cons)
     n = sum(x.get("detail") is not None for x in links.values())
     return errs, warns, {"object": len(objs), "link": len(links), "contract": len(cons), "behavior": len(m["behavior"]), "flow": len(m["flows"]), "detail": n}
 
