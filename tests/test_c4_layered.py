@@ -220,3 +220,13 @@ def test_findings_shape_and_report_modes(folder, capsys):
 def test_strict_fails_on_warning_only(folder, capsys):
     assert L.report(folder) == 0 and L.report(folder, strict=True) == 1
     assert "WARN  [C4-SYMBOL-UNRESOLVED]" in capsys.readouterr().out
+
+
+def test_context_orphan_shown_and_cut_on_line_boundary(lay):
+    c = db.connect(lay)
+    c.execute("UPDATE c4_object SET parent='ghost' WHERE project='demo' AND id='relay'"); c.commit()
+    assert "- relay [" in L.context_text(c, "demo") and "(parent ghost missing)" in L.context_text(c, "demo")
+    full = L.context_text(c, "demo", max_tokens=10**6)
+    out = L.context_text(c, "demo", max_tokens=30)
+    body, marker = out.rsplit("\n", 1)
+    assert marker.startswith("... (cắt") and body in full.splitlines()[:len(body.splitlines())] + [full[:len(body)]] and full.startswith(body + "\n")

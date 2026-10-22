@@ -514,9 +514,12 @@ def context_text(c, project, object=None, max_tokens=2000):
     kids = lambda p: [o for o in objs.values() if o["parent"] == p]
     if object is None:
         out = [f"# {project}: {len(objs)} object, {len(m['links'])} link, {len(m['flows'])} flow"]
-        def walk(p, d):
-            for o in kids(p): out.append("  " * d + "- " + label(o)); walk(o["id"], d + 1)
-        walk(None, 0)
+        def walk(o, d, note=""):
+            out.append("  " * d + "- " + label(o) + note)
+            for k in kids(o["id"]): walk(k, d + 1)
+        for o in objs.values():
+            if not o["parent"]: walk(o, 0)
+            elif o["parent"] not in objs: walk(o, 0, f" (parent {o['parent']} missing)")
         out += ["", "Flow (xem: c4 flow --id F):"] + [f"- {f['id']} ({len(json.loads(f['steps'] or '[]'))} bước): {f['name'] or ''}" for f in m["flows"]]
         out += ["", "Link:"] + [f"- {x['id']}: {x['from_id']}→{x['to_id']} {x['name'] or ''}" + (" +detail" if x["detail"] else "") for x in m["links"].values()]
     else:
@@ -543,4 +546,6 @@ def context_text(c, project, object=None, max_tokens=2000):
             return s.get("at") == object or (x is not None and object in (x["from_id"], x["to_id"]))
         out += ["Flow:"] + [f"- {f['id']}: {f['name'] or ''}" for f in m["flows"] if any(touches(s) for s in json.loads(f["steps"] or "[]"))]
     t = "\n".join(out)
-    return t if len(t) // 4 <= max_tokens else t[:max_tokens * 4] + "\n... (cắt; dùng --max-tokens lớn hơn)"
+    if len(t) // 4 <= max_tokens: return t
+    cut = t[:max_tokens * 4]
+    return (cut[:cut.rfind("\n")] if "\n" in cut else cut) + "\n... (cắt; dùng --max-tokens lớn hơn)"
