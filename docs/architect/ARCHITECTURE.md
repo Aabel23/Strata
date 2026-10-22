@@ -47,7 +47,7 @@ Every table (except `project`) has a `project` column; the primary key is usuall
 |---|---|---|
 | `project` | id, name, root, docs_dir, parent | `parent` builds the project tree in the sidebar |
 | `item` | task, issue, rule, knowledge, draft, note | `status`: proposed / approved / open / doing / done / rejected |
-| `page` | slug, title, kind (research/discussion/note), `blocks` JSON | `text` is the extracted text used for search |
+| `page` | slug, title, kind (research/note), `blocks` JSON | `text` is the extracted text used for search |
 | `doc` | index of HTML files in `docs_dir` | `kind` follows the first folder, `status` = missing when the file disappears |
 | `c4_meta` | map name, absolute `root`, `source` (the imported folder) | one row per project with a map |
 | `c4_object` | actor, system, app, store, component, group | `parent` builds the tree; `owns` lists code globs; `behavior` names a behavior module |

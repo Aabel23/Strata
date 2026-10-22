@@ -142,7 +142,7 @@ Thư viện bên thứ ba nằm trong `viewer/vendor/` (không dùng CDN): `dagr
 
 ## Page (tài liệu dạng block)
 
-Page là một dòng trong bảng `page` (project, slug, title, kind `research|discussion|note`, blocks JSON). Nội dung chữ được đưa vào FTS (`search`, src=`page`).
+Page là một dòng trong bảng `page` (project, slug, title, kind `research|note`, blocks JSON). Nội dung chữ được đưa vào FTS (`search`, src=`page`).
 File page là JSON `{project, slug, title, kind, blocks}`; xem `examples/strata-design.page.json`.
 
 8 loại block (đúng 8, không thêm):
