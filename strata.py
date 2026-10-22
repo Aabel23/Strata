@@ -17,13 +17,13 @@
   strata.py search Q [--project P --src item|page|doc --limit N]
   strata.py mcp --role main|coder|reviewer [--db]   MCP server on stdio
   strata.py task context ID [--budget N] [--db]   ticket + rules + c4 + paths in one budgeted text
-  strata.py item add --project P --kind task|issue|step|gate --title T [--body --priority --status --spec FILE|-] | set ID [--status --priority]
-  strata.py item list [--project --kind --status --owner --ready] | show ID | edit ID [--title --body --spec FILE|- --priority] | ready [--project]
+  strata.py item add --project P --kind task|issue|step|gate --title T [--label L --body --priority --status --spec FILE|-] | set ID [--status --priority]
+  strata.py item list [--project --kind --label --status --owner --ready] | show ID | edit ID [--title --body --spec FILE|- --priority] | ready [--project]
   strata.py roadmap import PLAN.json [--progress PROGRESS.json] [--gates "G0=0;G1=1,2"] --project P --roadmap ID | check --project P --roadmap ID [--json]
   strata.py roadmap init --project P --roadmap ID --template five-phase | pull BLOCK --to PHASE --note N --project P --roadmap ID
   strata.py roadmap criterion set ROADMAP CRIT --project P (--result pass|fail [--value T] | --waive REASON) --as machine|reviewer|user
   strata.py roadmap gate pass GATE --project P --roadmap ID --as user [--evidence E] | reaccept STEP ... --as user   (steps use the item verbs)
-  strata.py item claim ID --as NAME | submit ID --note N [--as NAME] | rework ID --note N | close ID --note N | approve ID [--note --as] | reject ID --note N | release ID | dep add|rm ID DEP   (all: --json)
+  strata.py item claim ID --as NAME | submit ID --note N [--as NAME] | rework ID --note N | close ID --note N (open -> done) | approve ID [--note --as] | reject ID --note N | release ID | dep add|rm ID DEP   (all: --json)
 """
 import argparse, json, pathlib, sqlite3, sys, threading, webbrowser
 from strata import blocks, c4_layered, db, service, symbols
@@ -60,18 +60,18 @@ def _spec_arg(f):
     except (OSError, ValueError) as e: raise ValueError(f"--spec: {e}") from None
 
 
-def _item_line(i): return f"#{i['id']} {i['project']} {i['kind']} [{i['status']}] {i['priority'] or '-'} {i['owner'] or '-'}  {i['title']}"
+def _item_line(i): return f"#{i['id']} {i['project']} {i['kind']} [{i['status']}] {i['priority'] or '-'} {i['owner'] or '-'}  {'[' + i['label'] + '] ' if i.get('label') else ''}{i['title']}"
 
 
 def cmd_item(c, a):
     out = lambda v, text: print(json.dumps(v, ensure_ascii=False) if a.json else text)
     act, who = a.action, getattr(a, "as_", None) or "main"
     if act == "add":
-        i = service.add_item(c, "main", a.project, a.kind, a.title, a.body, a.priority, a.status, _spec_arg(a.spec), a.phase); out({"id": i}, f"ok: item {i}")
+        i = service.add_item(c, "main", a.project, a.kind, a.title, a.body, a.priority, a.status, _spec_arg(a.spec), a.phase, a.label); out({"id": i}, f"ok: item {i}")
     elif act == "set":
         service.set_item(c, "main", a.id, a.status, a.priority); out({"ok": True}, "ok")
     elif act in ("list", "ready"):
-        rows = service.list_items(c, a.project, getattr(a, "kind", None), getattr(a, "status", None), getattr(a, "owner", None), act == "ready" or a.ready)
+        rows = service.list_items(c, a.project, getattr(a, "kind", None), getattr(a, "status", None), getattr(a, "owner", None), act == "ready" or a.ready, getattr(a, "label", None))
         out(rows, "\n".join(map(_item_line, rows)))
     elif act == "show":
         i = service.get_item(c, a.id)
@@ -223,8 +223,8 @@ def main(argv=None):
                   "set": [(["--project"], req), (["path"], {}), (["--feature"], {}), (["--status"], {"choices": ["current", "draft", "outdated", "missing"]}), (["--ord"], {"type": int})]})
     idp, asp, notep = (["id"], {"type": int}), (["--as"], {"dest": "as_"}), (["--note"], {})
     js = (["--json"], {"action": "store_true"})
-    filt = [(["--project"], {}), (["--kind"], {}), (["--status"], {}), (["--owner"], {})]
-    group("item", {"add": [(["--project"], req), (["--kind"], {"required": True, "choices": ["task", "issue", "step", "gate"]}), (["--title"], req), (["--body"], {}),
+    filt = [(["--project"], {}), (["--kind"], {}), (["--label"], {}), (["--status"], {}), (["--owner"], {})]
+    group("item", {"add": [(["--project"], req), (["--kind"], {"required": True, "choices": ["task", "issue", "step", "gate"]}), (["--title"], req), (["--label"], {}), (["--body"], {}),
                            (["--priority"], {}), (["--status"], {"choices": ITEM_STATUS, "default": "open"}), (["--spec"], {}), (["--phase"], {"type": int}), js],
                    "set": [idp, (["--status"], {"choices": ITEM_STATUS}), (["--priority"], {}), js],
                    "list": [*filt, (["--ready"], {"action": "store_true"}), js], "ready": [(["--project"], {}), js], "show": [idp, js],
