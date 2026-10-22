@@ -223,6 +223,72 @@ blocks:
         - ["14", referenced symbol's body_hash changed since verified_at, warning]
 
   - md: |
+      ## Map and detail split (user direction, 2026-10-22)
+      This section supersedes the field lists in the `map.yaml` example above:
+      - `exposes` / `consumes` on modules, and `via` / `uses` / `payload` on relations, move out of the map;
+      - the separate `protocols/` folder is not used: transport lives in the contract entry.
+
+      **The main map holds only objects and where they link.** All detail lives in separate files, joined by id.
+      ```
+      docs/c4/
+      ├── map.yaml                 # objects + links only
+      ├── behavior/<module>.yaml   # state machine or sequence per module (L4)
+      └── contracts/<name>.yaml    # one entry per call: transport, body, code endpoints
+      ```
+
+      A link keeps a short name and summary for people. `detail` is optional and references one contract entry.
+      ```yaml
+      # map.yaml
+      links:
+        - id: app_cmd
+          from: cloud
+          to: relay
+          name: Send machine command
+          summary: App asks the server to forward a command to a machine
+          detail: relay_command.send        # contracts/relay_command.yaml, entry "send"
+      ```
+
+      A contract entry holds everything about the call:
+      ```yaml
+      # contracts/relay_command.yaml
+      - id: send
+        transport: HTTPS POST /app/machine/command/send, HPKE envelope
+        body:
+          request: "{v, enc, ct}  →  sealed {machine_id, command, request_id}"
+          response: "HandlerResult {ok, data | error}"
+          errors: [BUSY 409, TIMEOUT]
+        start: flutter_app/lib/feature/machines/data/machine_service.dart::MachineService.ask
+        end: server/src/relay/relay.py::RelayHub.send
+      ```
+  - table:
+      head: [Rule, Detail]
+      rows:
+        - [Map is block-level, "objects + links (id, from, to, name, summary, detail); no files, functions, protocol or payload in the map"]
+        - [Detail is optional, "a link with no detail is valid; the viewer shows an empty detail box to fill or import later; validate reports coverage (e.g. 42/108 links have detail) as info, not error"]
+        - [Detail references are checked, "a detail id pointing to a missing contract entry is an error"]
+        - [Code endpoints only in contracts, "start / end are symbol ids (file::function) resolved through the symbol index; a renamed or removed function is reported. This replaces L4 file/function objects (Q4) and restores the function-level detail step 0 lost when lifting connections"]
+        - [Shared contracts, "several links may point to the same contract entry; start may then be a list of callers"]
+        - [Behavior is separate, "a module may reference behavior/<module>.yaml; empty until written"]
+
+  - md: |
+      ## Rendering rule (user direction, 2026-10-22)
+      The model holds facts only. The renderer computes every graphic feature itself:
+      layout, direction, colours, edge routing, port or pin placement, bundling, collapsing and flow highlighting.
+      - `positions`, `object_layout`, `layout: LR` and tag colours leave the model and YAML export.
+      - Manually dragged positions, if kept, live in a renderer-owned store that agents never read; deleting it falls back to auto-layout.
+
+      ## Relation to the ASIC-style c4map work (decisions #39–#42, tasks #165–#177)
+      Same idea, cleaner names: netlist = map, DRC = validation, LVS = symbol-index drift, RTL = L4 behavior, gate level = symbol index.
+  - table:
+      head: [Item, Status after this split]
+      rows:
+        - ["#39 kind subtype, #42 DB source of truth", compatible]
+        - ["#41 L4 file/function blocks (generated + hand-drawn)", "amend: generated view from the symbol index; hand-drawn blocks become symbol references in contracts"]
+        - ["#165 object_layout round-trips through YAML", "conflicts with the rendering rule; move to a renderer-owned store"]
+        - ["#165/#169 typed ports + DRC", "open: ports overlap contracts. Proposed: fold ports into contracts (the renderer draws a pin per contract) and point DRC at contracts"]
+        - ["#174 / #176 LVS", same as plan steps 4 and 6]
+
+  - md: |
       ## Provisional decisions (after review, 2026-10-22)
       Nothing is final until the step 0 migration test backs it up.
       Two outside reviews were compared; the table records where they ended up.
