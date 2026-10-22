@@ -23,14 +23,18 @@ def _page_rebuild_due(c):
 
 def _item_phase_due(c):
     cols = [r[1] for r in c.execute("PRAGMA table_info(item)")]
-    return bool(cols) and "phase" not in cols  # ALTER ADD COLUMN: back up first like the rebuilds
+    return bool(cols) and not {"phase", "label"} <= set(cols)  # ALTER ADD COLUMN: back up first like the rebuilds
+
+def _issue_kind_due(c):
+    r = c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='item'").fetchone()
+    return bool(r) and "'issue'" in r[0]  # CHECK predates label: issues are tasks labelled 'issue' (#203)
 
 def _backup_if_rebuild(path):
     """Copy the DB file to <dir>/backups/strata-YYYYmmdd-HHMMSS.db before a destructive item/page rebuild (one backup for both) (before connect() flips it to WAL, so bytes match)."""
     p = db_path(path)
     if p == ":memory:" or not os.path.exists(p): return
     k = sqlite3.connect(p)
-    try: due = _item_rebuild_due(k) or _page_rebuild_due(k) or _item_phase_due(k)
+    try: due = _item_rebuild_due(k) or _page_rebuild_due(k) or _item_phase_due(k) or _issue_kind_due(k)
     finally: k.close()
     if due:
         d = pathlib.Path(p).parent / "backups"; d.mkdir(exist_ok=True)
@@ -101,6 +105,7 @@ def init(path=None):
     c.executescript(SCHEMA.read_text())
     _finish_item(c)
     _finish_page(c)
+    _drop_issue_kind(c)
     if rebuild:  # copy rows from the old-CHECK table into the new one
         cols = ",".join(r["name"] for r in c.execute("PRAGMA table_info(c4_object_old)"))
         c.execute(f"INSERT INTO c4_object({cols}) SELECT {cols} FROM c4_object_old")
@@ -120,6 +125,25 @@ def _finish_item(c):
     if (r := c.execute("PRAGMA integrity_check").fetchone()[0]) != "ok": raise RuntimeError(f"integrity_check: {r}")
     c.commit()
 
+def _drop_issue_kind(c):
+    """Issues become tasks with label 'issue' (open -> approved), then item is rebuilt without 'issue' in its kind CHECK
+    (new table, same ids; item_dep keeps pointing at the name `item`). Idempotent."""
+    if not _issue_kind_due(c): return
+    c.commit()
+    c.execute("UPDATE item SET label='issue', kind='task', status=CASE status WHEN 'open' THEN 'approved' ELSE status END WHERE kind='issue'")
+    c.commit()
+    ddl = re.search(r"CREATE TABLE IF NOT EXISTS item\(.*?\);", SCHEMA.read_text(), re.S).group(0).replace("IF NOT EXISTS item(", "item_new(", 1)
+    cols = ",".join(r["name"] for r in c.execute("PRAGMA table_info(item)"))
+    c.execute("PRAGMA foreign_keys=OFF")  # no-op inside a transaction, so set it first
+    try:
+        c.executescript(f"BEGIN;{ddl}INSERT INTO item_new({cols}) SELECT {cols} FROM item;DROP TABLE item;ALTER TABLE item_new RENAME TO item;COMMIT;")
+        c.executescript(SCHEMA.read_text())  # index and FTS triggers died with the old table
+        if (r := c.execute("PRAGMA integrity_check").fetchone()[0]) != "ok": raise RuntimeError(f"integrity_check: {r}")
+        if c.execute("PRAGMA foreign_key_check").fetchone(): raise RuntimeError("foreign_key_check failed after item rebuild")
+    except BaseException:
+        c.rollback(); raise
+    finally: c.execute("PRAGMA foreign_keys=ON")
+
 def _finish_page(c):
     """Copy page_old (CHECK predates kind 'plan') into the rebuilt page table keeping rowids, so FTS refs stay valid."""
     if not c.execute("SELECT 1 FROM sqlite_master WHERE name='page_old'").fetchone(): return
@@ -133,7 +157,7 @@ def _finish_page(c):
 ADDED = [("c4_connection", "description", "TEXT"),
          ("c4_object", "kind", "TEXT"), ("c4_object", "owns", "JSON"), ("c4_object", "behavior", "TEXT"), ("c4_connection", "detail", "TEXT"),
          ("c4_object", "responsibilities", "JSON"), ("c4_object", "state", "TEXT"),
-         ("item", "phase", "INT"), ("item", "roadmap", "TEXT"), ("doc", "prev_status", "TEXT"), ("doc", "summary", "TEXT"), ("doc", "code", "JSON"), ("c4_meta", "positions", "JSON"), ("c4_meta", "source", "TEXT")]
+         ("item", "phase", "INT"), ("item", "roadmap", "TEXT"), ("item", "label", "TEXT"), ("doc", "prev_status", "TEXT"), ("doc", "summary", "TEXT"), ("doc", "code", "JSON"), ("c4_meta", "positions", "JSON"), ("c4_meta", "source", "TEXT")]
 
 def _migrate(c):
     """ALTER old tables up to the current schema. Returns True if c4_object was renamed to c4_object_old
@@ -210,12 +234,17 @@ def set_project(c, id, root=None, docs_dir=None, name=None, description=None):
     c.execute(f"UPDATE project SET {', '.join(f'{k}=:{k}' for k in new)} WHERE id=:id", {**new, "id": id})
     audit(c, id, "project.set", id, {k: old[k] for k in new}, new); c.commit()
 
-def add_item(c, project, kind, title, body=None, priority=None, status="open", role="cli", spec=None, phase=None, roadmap=None):
+# issues first, then priority (high, medium, low/none), then id; service.py list/ready should ORDER BY this
+ITEM_ORDER = ("(label IS NOT 'issue'), CASE lower(coalesce(priority,'')) WHEN 'p0' THEN 0 WHEN 'p1' THEN 1 WHEN 'high' THEN 1 "
+              "WHEN 'p2' THEN 2 WHEN 'medium' THEN 2 WHEN 'p3' THEN 3 WHEN 'low' THEN 3 ELSE 9 END, id")
+
+def add_item(c, project, kind, title, body=None, priority=None, status="open", role="cli", spec=None, phase=None, roadmap=None, label=None):
+    if kind == "issue": kind, label = "task", label or "issue"  # alias kept for old callers
     if not c.execute("SELECT 1 FROM project WHERE id=?", (project,)).fetchone(): raise KeyError(f"no project {project}")
     t = now()
-    cur = c.execute("INSERT INTO item(project,kind,title,body,status,priority,spec,created_by,created_at,updated_at,phase,roadmap) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (project, kind, title, body, status, priority, None if spec is None else json.dumps(spec, ensure_ascii=False), role, t, t, phase, roadmap))
-    audit(c, project, "item.add", f"item:{cur.lastrowid}", None, {"kind": kind, "title": title, "status": status, **({"phase": phase} if phase is not None else {})}, role)
+    cur = c.execute("INSERT INTO item(project,kind,title,body,status,priority,spec,created_by,created_at,updated_at,phase,roadmap,label) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (project, kind, title, body, status, priority, None if spec is None else json.dumps(spec, ensure_ascii=False), role, t, t, phase, roadmap, label))
+    audit(c, project, "item.add", f"item:{cur.lastrowid}", None, {"kind": kind, "title": title, "status": status, **({"label": label} if label else {}), **({"phase": phase} if phase is not None else {})}, role)
     c.commit(); return cur.lastrowid
 
 def set_item(c, id, status=None, priority=None, role="cli"):

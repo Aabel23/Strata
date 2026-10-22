@@ -1,11 +1,11 @@
 CREATE TABLE IF NOT EXISTS item(
   id INTEGER PRIMARY KEY, project TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK(kind IN ('rule','task','issue','knowledge','draft','note','step','gate')),
+  kind TEXT NOT NULL CHECK(kind IN ('rule','task','knowledge','draft','note','step','gate')),
   title TEXT NOT NULL, body TEXT,
   status TEXT NOT NULL CHECK(status IN ('proposed','approved','open','doing','review','done','rejected')),
   priority TEXT, spec JSON CHECK(spec IS NULL OR json_valid(spec)), always_load INT NOT NULL DEFAULT 0, core INT NOT NULL DEFAULT 0,
   owner TEXT, claimed_at TEXT, created_by TEXT, created_at TEXT, updated_at TEXT, version INT NOT NULL DEFAULT 1,
-  phase INT, roadmap TEXT);
+  phase INT, roadmap TEXT, label TEXT);
 
 -- roadmap steps/gates are addressed by (roadmap, step_key)
 CREATE UNIQUE INDEX IF NOT EXISTS item_step_key ON item(project, json_extract(spec,'$.roadmap'), json_extract(spec,'$.step_key')) WHERE kind IN ('step','gate');
