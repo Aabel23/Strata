@@ -4,8 +4,7 @@ import re
 STATUS = ("done", "plan")
 KINDS = ("research", "discussion", "note")
 # Columns a query block / /api/query may filter on, per source table.
-QUERY_COLS = {"item": {"id", "project", "kind", "status", "priority", "owner", "always_load", "core"},
-              "decision": {"id", "project", "status", "supersedes"}}
+QUERY_COLS = {"item": {"id", "project", "kind", "status", "priority", "owner", "always_load", "core"}}
 SLUG = re.compile(r"^[\w.-]+$")
 
 
@@ -69,7 +68,7 @@ def _c4(b, e):
 
 def _query(b, e):
     src = b.get("src")
-    if src not in QUERY_COLS: return e("src must be item|decision")
+    if src not in QUERY_COLS: return e("src must be item")
     w = b.get("where", {})
     if not _dict(w): return e("'where' must be an object")
     for k, v in w.items():
