@@ -80,11 +80,11 @@ def test_cli_project_doc_item_audit(env):
 def test_api_projects_and_filters(env):
     ps = {x["id"]: x for x in J(env, "/api/projects")}
     assert ps["a"]["parent"] == "g" and ps["a"]["tasks"] == {"doing": 1} and ps["a"]["issues_open"] == 1
-    assert ps["a"]["pages"] == 1 and ps["a"]["docs"] == 3 and ps["a"]["decisions"] == 1 and ps["a"]["last_update"]
+    assert ps["a"]["pages"] == 1 and ps["a"]["docs"] == 3 and ps["a"]["last_update"]
     assert [x["kind"] for x in J(env, "/api/items?project=a")] == ["task", "issue"]
     assert [x["title"] for x in J(env, "/api/items?project=a&kind=issue")] == ["lỗi đăng nhập"]
     assert J(env, "/api/items?status=done") == [] and len(J(env, "/api/items?id=1")) == 1
-    assert [x["title"] for x in J(env, "/api/decisions?project=a")] == ["Chọn SQLite"]
+    assert get(env[0], "/api/decisions")[0] == 404
     assert len(J(env, "/api/docs?project=a")) == 3 and J(env, "/api/docs?project=zz") == []
     assert "text" not in J(env, "/api/docs?project=a")[0]
     assert len(J(env, "/api/audit?project=a&limit=2")) == 2
@@ -257,7 +257,7 @@ def test_api_items_board_fields(env):
     c.execute("INSERT INTO item(project,kind,title,status,spec) VALUES('a','task','phụ','approved',?)", (SPEC,))  # id 4
     c.execute("INSERT INTO item_dep VALUES(4,3)")
     c.execute("INSERT INTO c4_object(id,project,type,name) VALUES('o1','a','system','O1')")
-    c.execute("INSERT INTO c4_link VALUES('a','o1','item',3)"); c.execute("INSERT INTO c4_link VALUES('a','o1','decision',1)")
+    c.execute("INSERT INTO c4_link VALUES('a','o1','item',3)")
     c.commit()
     assert [x["id"] for x in J(env, "/api/items?project=a&ready=1")] == [3]  # 4 waits on 3
     assert [x["id"] for x in J(env, "/api/items?project=a&owner=nobody")] == []
@@ -266,7 +266,7 @@ def test_api_items_board_fields(env):
     d = J(env, "/api/items?id=3")[0]
     assert d["spec"]["acceptance"] == ["a", "b"] and d["claimed_at"]
     assert d["deps"] == {"needs": [], "blocks": [{"id": 4, "title": "phụ", "status": "approved"}]}
-    assert d["links"]["c4"] == ["o1"] and [x["title"] for x in d["links"]["decisions"]] == ["Chọn SQLite"]
+    assert d["links"]["c4"] == ["o1"] and "decisions" not in d["links"]
     assert d["history"][0]["to"] == "doing" and d["history"][0]["actor"] == "coder"
     assert J(env, "/api/items?id=4")[0]["deps"]["needs"][0]["id"] == 3
     assert "deps" not in J(env, "/api/items?project=a")[0]

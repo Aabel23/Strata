@@ -17,7 +17,7 @@ def servable(root, segs):
 VIEWER = pathlib.Path(__file__).resolve().parent.parent / "viewer"
 STATIC = {"/": "app.html", "/app.js": "app.js", "/app.css": "app.css", "/c4": "index.html", "/index.html": "index.html", "/page.js": "page.js", "/swimlane.js": "swimlane.js", "/roadmap.js": "roadmap.js", "/page.css": "page.css"}
 TYPES = {".html": "text/html", ".md": "text/plain", ".yaml": "text/plain", ".js": "application/javascript", ".css": "text/css", ".json": "application/json"}
-SHOW = {"item": "id,project,kind,title,status,priority,owner", "decision": "id,project,title,status"}
+SHOW = {"item": "id,project,kind,title,status,priority,owner"}
 ITEM_KINDS = ("rule", "task", "issue", "knowledge", "draft", "note", "step", "gate")
 ITEM_STATUS = ("proposed", "approved", "open", "doing", "review", "done", "rejected")
 CLOSED = "('done','rejected')"
@@ -67,11 +67,13 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             p = u.path
             if p in STATIC: return self.file(VIEWER / STATIC[p])
             if p in ("/api/projects", "/api/docs", "/api/doc", "/api/search"): autoscan()
+            if p == "/api/version":  # viewer polls this; any CLI/MCP commit or docs edit changes it
+                autoscan()
+                with lock: dv = conn.execute("PRAGMA data_version").fetchone()[0]; ds = hash(repr(sorted(stamps.items(), key=str)))
+                return self.json({"version": f"{dv}:{ds}"})
             if p == "/api/doc": return self.doc(q)
             if p == "/api/projects": return self.json(self.projects())
             if p == "/api/items": return self.items(q)
-            if p == "/api/decisions":
-                return self.json(rows("SELECT * FROM decision" + (" WHERE project=?" if q.get("project") else "") + " ORDER BY id DESC", (q["project"],) if q.get("project") else ()))
             if p == "/api/docs":
                 return self.json(rows("SELECT project,path,title,feature,kind,status,ord,updated_at,summary,json(code) code FROM doc" + (" WHERE project=?" if q.get("project") else "")
                                       + " ORDER BY project,ord,path", (q["project"],) if q.get("project") else ()))
@@ -126,7 +128,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
 
         def query(self, q):
             src = q.pop("src", None); limit = q.pop("limit", "50")
-            if src not in blocks.QUERY_COLS: return self.send_error(400, "src must be item|decision")
+            if src not in SHOW: return self.send_error(400, "src must be item")
             if not (limit.isdigit() and 1 <= int(limit) <= 200): return self.send_error(400, "bad limit")
             where = q
             bad = [k for k in where if k not in blocks.QUERY_COLS[src] or where[k] == ""]
@@ -154,7 +156,6 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 one = lambda sql: rows(sql, (pid,))[0]["n"]
                 r["issues_open"] = one(f"SELECT count(*) n FROM item WHERE project=? AND kind='issue' AND status NOT IN {CLOSED}")
                 r["issues_total"] = one("SELECT count(*) n FROM item WHERE project=? AND kind='issue'")
-                r["decisions"] = one("SELECT count(*) n FROM decision WHERE project=?")
                 r["pages"] = one("SELECT count(*) n FROM page WHERE project=?")
                 r["docs"] = one("SELECT count(*) n FROM doc WHERE project=? AND status!='missing'")
                 r["last_update"] = rows("SELECT max(t) m FROM (SELECT max(updated_at) t FROM item WHERE project=? UNION ALL SELECT max(updated_at) FROM page WHERE project=? "
@@ -176,18 +177,15 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             self.json(out)
 
         def detail(self, it):
-            """deps both ways, C4 objects + decisions linked to them, audit history for one item."""
+            """deps both ways, C4 objects linked to them, audit history for one item."""
             d = service.get_item(conn, it["id"])
             objs = [r["object_id"] for r in conn.execute("SELECT object_id FROM c4_link WHERE project=? AND ref_kind='item' AND ref_id=? ORDER BY object_id", (it["project"], it["id"]))]
-            decs = [dict(r) for r in conn.execute(
-                "SELECT DISTINCT t.id,t.title,t.status FROM c4_link l JOIN c4_link m ON m.project=l.project AND m.object_id=l.object_id AND m.ref_kind='decision' "
-                "JOIN decision t ON t.id=m.ref_id WHERE l.project=? AND l.ref_kind='item' AND l.ref_id=? ORDER BY t.id", (it["project"], it["id"]))]
             hist = []
             for r in conn.execute("SELECT ts,actor_role,tool,before,after FROM audit WHERE target=? ORDER BY id DESC", (f"item:{it['id']}",)):
                 b, a = (json.loads(r[k]) if r[k] else None for k in ("before", "after"))
                 b, a = b if isinstance(b, dict) else {}, a if isinstance(a, dict) else {}
                 hist.append({"time": r["ts"], "actor": a.get("actor") or r["actor_role"], "tool": r["tool"], "from": b.get("status"), "to": a.get("status"), "note": a.get("note")})
-            return {"deps": {"needs": d["depends_on"], "blocks": d["blocks"]}, "links": {"c4": objs, "decisions": decs}, "history": hist}
+            return {"deps": {"needs": d["depends_on"], "blocks": d["blocks"]}, "links": {"c4": objs}, "history": hist}
 
         def audit(self, q):
             limit = q.get("limit", "100")

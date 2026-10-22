@@ -87,10 +87,9 @@ def test_query_filtering(env):
     assert len(rows("src=item")) == 3
     assert [r["title"] for r in rows("src=item&project=p&status=open")] == ["t0"]
     assert len(rows("src=item&limit=1")) == 1
-    assert rows("src=decision") == []
 
 
-@pytest.mark.parametrize("qs", ["src=audit", "", "src=item&body=x", "src=item&nope=1", "src=item&limit=0", "src=item&limit=x",
+@pytest.mark.parametrize("qs", ["src=audit", "src=decision", "", "src=item&body=x", "src=item&nope=1", "src=item&limit=0", "src=item&limit=x",
                                 "src=item&limit=999", "src=item&status=", "src=decision&kind=task", "src=item&1=1)%20OR%20(1=1"])
 def test_query_400(env, qs):
     assert q(env[0], qs)[0] == 400
