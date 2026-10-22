@@ -65,37 +65,6 @@ def test_cli_search(c, tmp_path, capsys):
     assert capsys.readouterr().out.strip().endswith("p needle title")
 
 
-def dec(c, role="main", **kw):
-    a = dict(title="Dùng SQLite", context="ctx", decision="do it", consequences="cons", rejected="postgresql")
-    return service.add_decision(c, role, "p", **{**a, **kw})
-
-
-def test_decision_status_by_role(c):
-    a = dec(c); b = dec(c, "coder"); r = dec(c, "reviewer")
-    st = lambda i: c.execute("SELECT status FROM decision WHERE id=?", (i,)).fetchone()[0]
-    assert (st(a), st(b), st(r)) == ("accepted", "proposed", "proposed")
-    with pytest.raises(PermissionError): service.set_decision_status(c, "coder", b, "accepted")
-    with pytest.raises(PermissionError): dec(c, "coder", supersedes=a)
-    service.set_decision_status(c, "main", b, "accepted"); assert st(b) == "accepted"
-    assert [(r["tool"], r["actor_role"]) for r in c.execute("SELECT tool,actor_role FROM audit WHERE tool LIKE 'decision.%' ORDER BY id")] == \
-        [("decision.add", "main"), ("decision.add", "coder"), ("decision.add", "reviewer"), ("decision.set", "main")]
-
-
-def test_decision_rejected_required_and_supersedes(c):
-    for bad in ("", "  ", "[]"):
-        with pytest.raises(ValueError): dec(c, rejected=bad)
-    a = dec(c); b = dec(c, supersedes=a)
-    assert c.execute("SELECT status FROM decision WHERE id=?", (a,)).fetchone()[0] == "superseded"
-    assert c.execute("SELECT supersedes FROM decision WHERE id=?", (b,)).fetchone()[0] == a
-    with pytest.raises(KeyError): dec(c, supersedes=999)
-
-
-def test_decision_immutable_but_status_and_search_rejected(c):
-    a = dec(c, rejected="mongodbxyz")
-    with pytest.raises(Exception): c.execute("UPDATE decision SET title='x' WHERE id=?", (a,))
-    assert [h["ref"] for h in service.search(c, "mongodbxyz", src="decision")] == [a]
-
-
 def test_non_main_status_rules(c):
     t = service.add_item(c, "main", "p", "task", "T")
     for st in ("approved", "open", "rejected"):
@@ -116,12 +85,10 @@ def test_denials_audited_without_body(c):
     i = service.add_item(c, "main", "p", "task", "t")
     with pytest.raises(PermissionError): service.set_item(c, "reviewer", i, status="done")
     with pytest.raises(PermissionError): service.set_item(c, "coder", 999, priority="p1")
-    with pytest.raises(PermissionError): service.add_decision(c, "coder", "p", "D", "SECRET-CTX", "d", "c", '["x"]', supersedes=1)
-    with pytest.raises(PermissionError): service.set_decision_status(c, "coder", 1, "accepted")
     d = denied(c)
     assert [(r["tool"], r["actor_role"]) for r in d] == [
         ("denied:item.add", "coder"), ("denied:item.add", "invalid"), ("denied:item.transition", "reviewer"),
-        ("denied:item.set", "coder"), ("denied:decision.add", "coder"), ("denied:decision.set", "coder")]
+        ("denied:item.set", "coder")]
     assert d[0]["project"] == "p" and d[2]["project"] == "p" and d[3]["project"] == "-"
     assert "SECRET" not in str(d) and ("T" * 81) not in str(d)
 
@@ -129,9 +96,8 @@ def test_denials_audited_without_body(c):
 def test_missing_project_keyerror(c):
     for p in ("nope", ""):
         with pytest.raises(KeyError): service.add_item(c, "main", p, "task", "t")
-        with pytest.raises(KeyError): service.add_decision(c, "main", p, "t", "c", "d", "q", '["x"]')
         with pytest.raises(KeyError): db.add_item(c, p, "task", "t")
-    assert c.execute("SELECT count(*) FROM audit WHERE tool IN ('item.add','decision.add')").fetchone()[0] == 0
+    assert c.execute("SELECT count(*) FROM audit WHERE tool='item.add'").fetchone()[0] == 0
 
 
 def test_cli_missing_project_clean(tmp_path):

@@ -32,7 +32,6 @@ def env(tmp_path):
     cli(p, "item", "add", "--project", "a", "--kind", "task", "--title", "làm đồ thị", "--status", "doing")
     cli(p, "item", "add", "--project", "a", "--kind", "issue", "--title", "lỗi đăng nhập")
     c = db.connect(p)
-    c.execute("INSERT INTO decision(project,title,status,decision,rejected_options) VALUES('a','Chọn SQLite','accepted','dùng sqlite','[\"pg\"]')")
     db.put_page(c, "a", "s", "Thảo luận đồ thị", "note", [{"type": "md", "text": "bàn về đồ thị"}]); c.commit()
     s = server.make_server(p, None, 0)
     threading.Thread(target=s.serve_forever, daemon=True).start()
@@ -100,9 +99,9 @@ def test_search_across_sources(env):
     got = {(h["src"], h["key"]) for h in J(env, "/api/search?q=do%20thi")}
     assert {("item", "task"), ("page", "s"), ("doc", "research/a.html")} <= got
     assert [h["src"] for h in J(env, "/api/search?q=dang%20nhap")] == ["item"]
-    h = J(env, "/api/search?q=sqlite&project=a")[0]
-    assert h["src"] == "decision" and h["title"] == "Chọn SQLite" and h["project"] == "a" and "snippet" in h
-    assert J(env, "/api/search?q=sqlite&project=g") == []
+    h = J(env, "/api/search?q=do%20thi&project=a")[0]
+    assert h["project"] == "a" and "snippet" in h and "decision" not in {x["src"] for x in J(env, "/api/search?q=sqlite")}
+    assert J(env, "/api/search?q=do%20thi&project=g") == []
     assert J(env, "/api/search?q=%C4%91%E1%BB%93")  # "đồ" folded like the index
     assert J(env, "/api/search?q=zzzz") == [] and get(env[0], "/api/search?q=%22%20OR%20x")[0] == 200  # FTS syntax is neutralised
 
