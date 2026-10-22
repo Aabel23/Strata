@@ -15,7 +15,7 @@
 9. Việc dài chạy nền. Việc độc lập chia subagent song song. Chỉ đọc đủ để hành động.
 10. Báo cáo trung thực: test fail thì nói kèm output; bước nào bỏ qua thì nói.
 11. **Ngôn ngữ mặc định:** dùng tiếng Anh trong hội thoại, tài liệu mới và prompt cho agent; chỉ dùng tiếng Việt khi user yêu cầu hoặc cần giữ nguyên trích dẫn/nội dung gốc.
-12. **Một agent, một module.** Mỗi coder chỉ được sửa trong đúng một thư mục/module do prompt chỉ định; reviewer chỉ nhìn một module (diff và code của module đó). Không có task nào được liên nhiều module hay nhiều tính năng: việc cắt ngang thì tasker tách thành các task con, mỗi task một module, nối nhau bằng phụ thuộc (`dep`) và hợp đồng (contract) giữa các module. Ticket ghi rõ module trong `scope`. Chỉ chat chính được đọc toàn bộ codebase để thiết kế, tách task và viết prompt, nhưng không được sửa code.
+12. **Một agent, một module.** Mỗi coder chỉ được sửa trong đúng một thư mục/module do prompt chỉ định; reviewer xem xét diff của một module, nhưng được đọc thêm các module/mục liên quan đến tính năng bị sửa (theo flow C4 và contract) để kiểm tra flow còn chạy đúng; reviewer không sửa code ngoài module đó. Không có task nào được liên nhiều module hay nhiều tính năng: việc cắt ngang thì tasker tách thành các task con, mỗi task một module, nối nhau bằng phụ thuộc (`dep`) và hợp đồng (contract) giữa các module. Ticket ghi rõ module trong `scope`. Chỉ chat chính được đọc toàn bộ codebase để thiết kế, tách task và viết prompt, nhưng không được sửa code.
 
 ## Luồng làm việc (tính năng hoặc hệ thống mới)
 
