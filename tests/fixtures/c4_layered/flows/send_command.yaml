@@ -1,0 +1,7 @@
+id: send_command
+name: Send a command
+steps:
+  - {link: user_app, text: tap}
+  - {link: app_cmd, values: {command: start}}
+  - {at: relay, transition: t1}
+  - {link: app_cmd, reverse: true, text: result}

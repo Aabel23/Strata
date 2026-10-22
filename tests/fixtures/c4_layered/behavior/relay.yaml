@@ -1,0 +1,6 @@
+module: relay
+form: machine
+initial: idle
+states: {idle: {}, busy: {}}
+transitions:
+  - {id: t1, from: idle, on: send, to: busy}

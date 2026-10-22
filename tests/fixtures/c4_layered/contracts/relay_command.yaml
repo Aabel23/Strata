@@ -1,0 +1,13 @@
+- id: send
+  transport: HTTPS POST /command/send
+  body: {request: "{machine_id, command}", response: "{ok}", errors: [BUSY, TIMEOUT]}
+  start: [src/app.py::App.ask, src/app.py::helper]
+  end: src/relay.py::RelayHub.send
+- id: dart_end
+  transport: HTTPS POST /push
+  start: lib/push.dart::PushService.register
+  end: src/relay.py::RelayHub.push
+- id: gone
+  transport: HTTPS POST /gone
+  start: src/app.py::App.ask
+  end: src/relay.py::RelayHub.removed

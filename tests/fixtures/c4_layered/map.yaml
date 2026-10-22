@@ -1,0 +1,13 @@
+project: {id: demo, name: Demo, root: .}
+objects:
+  - {id: user, kind: actor, name: User, summary: Phone owner}
+  - {id: cloud, kind: system, name: Cloud, summary: Server side, tags: [backend]}
+  - {id: relay, kind: component, parent: cloud, name: Relay, summary: Forwards commands, owns: ["src/**"], behavior: relay}
+  - {id: db, kind: store, name: Database, parent: cloud, summary: Machine state}
+  - {id: app, kind: app, name: App, summary: Mobile app, status: doing}
+links:
+  - {id: app_cmd, from: app, to: relay, name: Send command, summary: App asks the server to forward a command, detail: relay_command.send}
+  - {id: app_ext, from: app, to: relay, name: Push token, summary: Registers a push token, detail: relay_command.dart_end}
+  - {id: app_gone, from: app, to: relay, name: Ghost call, summary: Contract code was removed, detail: relay_command.gone}
+  - {id: relay_db, from: relay, to: db, name: Save state, summary: Persists machine state}
+  - {id: user_app, from: user, to: app, name: Uses, summary: Taps buttons}
