@@ -2,7 +2,7 @@
 
 ## Strata là gì
 
-Công cụ cục bộ, đọc dữ liệu từ SQLite, quản lý nhiều project: task, issue, decision, trang thảo luận, mục lục tài liệu kỹ thuật, bản đồ C4, nhật ký audit. Giao diện web chỉ đọc. Mọi thao tác ghi đi qua CLI.
+Công cụ cục bộ, đọc dữ liệu từ SQLite, quản lý nhiều project: task, issue, trang thảo luận, mục lục tài liệu kỹ thuật, bản đồ C4, nhật ký audit. Giao diện web chỉ đọc. Mọi thao tác ghi đi qua CLI.
 
 - Code: `/home/abel/project/tools/strata` (Python stdlib + PyYAML, JS thuần, không build, không CDN). Có git (xem `git log`).
 - DB thật: `/home/abel/project/tools/strata/strata.db`, đã có dữ liệu.
@@ -21,7 +21,7 @@ Tắt server bằng cách kill PID đang giữ cổng 8740 (`ss -ltnp 'sport = :
 
 ## Lệnh CLI chính
 
-`python3 strata.py -h` liệt kê đủ (init, import-yaml, validate, project, doc, item, page, c4 link/context/flow, search, decision, mcp). Xem thêm `README.md`.
+`python3 strata.py -h` liệt kê đủ (init, import-yaml, validate, project, doc, item, page, c4 link/context/flow, search, mcp). Xem thêm `README.md`.
 
 Agent vẽ/sửa map C4 và flow: đọc `docs/AGENT_C4.md` (giao thức đọc ít token, quy ước YAML, luật viết flow).
 
@@ -29,7 +29,7 @@ Agent vẽ/sửa map C4 và flow: đọc `docs/AGENT_C4.md` (giao thức đọc 
 
 | Phần | File | Test |
 |---|---|---|
-| Schema: item, decision (append-only bằng trigger), page, c4_*, c4_meta, project, doc, audit, FTS5 tiếng Việt (đ→d, truy vấn qua `db.fold`) | `strata/schema.sql`, `strata/db.py` | `tests/test_schema.py`, `test_page.py` |
+| Schema: item, page, c4_*, c4_meta, project, doc, audit, FTS5 tiếng Việt (đ→d, truy vấn qua `db.fold`) | `strata/schema.sql`, `strata/db.py` | `tests/test_schema.py`, `test_page.py` |
 | Nhập C4 từ YAML, validate trên DB | `strata/c4.py` | `test_c4.py` |
 | 8 loại block cho page | `strata/blocks.py` | `test_blocks.py` |
 | Server chỉ GET; chặn header Host; chặn traversal ở `/code/`, `/docs/`, `/vendor/`, `/assets/`; ẩn dotfile và file .db | `strata/server.py` | `test_serve.py`, `test_app.py`, `test_pages_web.py` |
@@ -51,7 +51,7 @@ Agent vẽ/sửa map C4 và flow: đọc `docs/AGENT_C4.md` (giao thức đọc 
 ## Việc còn mở khác
 
 - Chưa chạy reviewer cho đợt giao diện (từ lúc thêm khung nhiều project trở đi).
-- T4, T6, T7, T9 đã xong (service, decision, search, MCP). Việc còn lại: xem item trong Strata (`/api/items?project=strata`).
+- T4, T6, T7, T9 đã xong (service, search, MCP). Việc còn lại: xem item trong Strata (`/api/items?project=strata`).
 - Đăng ký MCP và agent: bước user làm, xem `agent/BOOTSTRAP.md` mục "Cài đặt".
 
 ## Đổi luật 19/10/2026: research ghi vào vault

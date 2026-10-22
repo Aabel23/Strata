@@ -4,7 +4,7 @@ For people who modify the Strata code. For usage see [README.md](../../README.md
 
 ## 1. Overview
 
-Strata is a local tool for managing the knowledge of multiple projects: tasks/issues, decisions, block-based pages, an HTML document index, C4 maps and an audit log. Everything lives in **a single SQLite file**.
+Strata is a local tool for managing the knowledge of multiple projects: tasks/issues, block-based pages, an HTML document index, C4 maps and an audit log. Everything lives in **a single SQLite file**.
 
 Principles:
 
@@ -47,7 +47,6 @@ Every table (except `project`) has a `project` column; the primary key is usuall
 |---|---|---|
 | `project` | id, name, root, docs_dir, parent | `parent` builds the project tree in the sidebar |
 | `item` | task, issue, rule, knowledge, draft, note | `status`: proposed / approved / open / doing / done / rejected |
-| `decision` | ADR: context, decision, consequences, rejected_options | **Append-only**: triggers block deletes and only allow changing `status`. `rejected_options` is required |
 | `page` | slug, title, kind (research/discussion/note), `blocks` JSON | `text` is the extracted text used for search |
 | `doc` | index of HTML files in `docs_dir` | `kind` follows the first folder, `status` = missing when the file disappears |
 | `c4_meta` | map name, absolute `root`, `source` (the imported folder) | one row per project with a map |
@@ -56,9 +55,9 @@ Every table (except `project`) has a `project` column; the primary key is usuall
 | `c4_contract` | call detail of a link: transport, body, `start`/`end` code symbols | id is `<file>.<id>` |
 | `c4_behavior` | states and transitions of one module | |
 | `c4_flow` | JSON list of steps (`link` or `at`) | |
-| `c4_link` | links a C4 object with an item/decision | |
+| `c4_link` | links a C4 object with an item | |
 | `audit` | ts, tool, target, before, after | every write command adds a row |
-| `search` | FTS5 over item, decision, page, doc | triggers keep it in sync |
+| `search` | FTS5 over item, page, doc | triggers keep it in sync |
 
 **Vietnamese search.** The tokenizer `unicode61 remove_diacritics 2` strips diacritics, but `đ` cannot be decomposed, so the triggers convert `đ→d`; queries must go through `db.fold` to be converted the same way.
 
@@ -70,7 +69,7 @@ Default DB: `$STRATA_DB`, otherwise `/home/abel/project/tools/strata/strata.db`.
 
 1. **Load** (`c4_layered.load`): read the folder, reject unknown keys.
 2. **Validate** (`c4_layered.check`): kinds and status, parents, unique ids, link ends, `detail` and `behavior` targets, flow steps and continuity; contract symbols are checked against the Python AST (warnings).
-3. **Import/export**: `c4 import` upserts objects, links, contracts, behavior and flows, deletes what the folder dropped and task/decision links to objects that are gone, and writes an audit row; `c4 export` writes the folder back. `root` is stored as an absolute path.
+3. **Import/export**: `c4 import` upserts objects, links, contracts, behavior and flows, deletes what the folder dropped and task links to objects that are gone, and writes an audit row; `c4 export` writes the folder back. `root` is stored as an absolute path.
 4. **Serve** (`/api/c4`): `read_model` + `viewer_extra` (contracts, behavior) + `links` + `open_issues`; 404 when the project has no map.
 5. **Draw** (`viewer/index.html`): only the direct children of the zoomed object are drawn at a time; links at deeper levels are "lifted" to join the two visible ancestors and merged if they share a direction. Layout uses dagre.
 

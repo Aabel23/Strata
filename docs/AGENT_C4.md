@@ -11,7 +11,7 @@ docs/c4/
 ```
 
 The folder is the source of truth for the map. The DB is a read model built by `c4 import`; the viewer is read-only.
-Link a task or decision to an object with `c4 link` (stored in the DB, not in the folder).
+Link a task to an object with `c4 link` (stored in the DB, not in the folder).
 
 ## 1. Reading path (stop as soon as you have enough)
 
@@ -106,10 +106,10 @@ python3 strata.py c4 flow --project strata --id <flow>      # read the trace bac
 python3 strata.py c4 export OUT_DIR --project P             # DB -> folder (round trip)
 ```
 
-- `import` writes nothing if validation reports errors (`--force` skips that check). It also removes task/decision links
+- `import` writes nothing if validation reports errors (`--force` skips that check). It also removes task links
   whose object no longer exists, and writes an audit row (`c4-import` with before/after counts).
 - Data changes only need a viewer reload. Restart the service only after Python changes.
-- Task and decision links: `c4 link|unlink --project P --object X --item ID` (or `--decision ID`), `c4 links --project P --object X`.
+- Task links: `c4 link|unlink --project P --object X --item ID`, `c4 links --project P --object X`.
   `unlink` also works for an object that was removed from the map.
 
 ## 5. Field reference

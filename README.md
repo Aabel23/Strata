@@ -18,7 +18,7 @@ Map C4 chỉ hiện trong tab Kiến trúc của app shell (`/#/p/P/c4`); mở `
 
 ## App shell nhiều project
 
-`serve` mở `/` là app shell (chỉ đọc): sidebar cây project, tab Tổng quan / Task / Issue / Decision / Thảo luận / Tài liệu / Kiến trúc / Nhật ký, hash route `#/p/<project>/<tab>[/<id>]`, `Ctrl+K` tìm kiếm toàn văn (item, decision, page, doc). Mọi ghi dữ liệu đi qua CLI và để lại một dòng `audit`.
+`serve` mở `/` là app shell (chỉ đọc): sidebar cây project, tab Tổng quan / Task / Issue / Thảo luận / Tài liệu / Kiến trúc / Nhật ký, hash route `#/p/<project>/<tab>[/<id>]`, `Ctrl+K` tìm kiếm toàn văn (item, page, doc). Mọi ghi dữ liệu đi qua CLI và để lại một dòng `audit`.
 
 ```
 python3 strata.py project add ID --name N [--root DIR --docs-dir DIR --parent P --description T]   # docs-dir tương đối tính từ root
@@ -32,16 +32,16 @@ python3 strata.py item set ID [--status S --priority X]
 `doc.kind` lấy từ thư mục đầu (`research|architect|review|plan`, còn lại `other`). Tiêu đề lấy từ `<title>` hoặc `<h1>`.
 
 Route (GET): `/` shell, `/c4` viewer C4, `/pages`, `/page/<p>/<slug>`, `/api/projects` (kèm số đếm), `/api/items?project=&kind=&status=&id=`,
-`/api/decisions?project=`, `/api/docs?project=`, `/api/audit?project=&limit=`, `/api/search?q=&project=` (FTS, bm25, tối đa 30),
+`/api/docs?project=`, `/api/audit?project=&limit=`, `/api/search?q=&project=` (FTS, bm25, tối đa 30),
 `/docs/<project>/<path>` (phục vụ cả cây `docs_dir`; chặn `..`, dotfile, `.db`). Giá trị lọc ngoài whitelist trả 400.
 
 Server HTTP chỉ đọc: không có route POST. Map C4 sửa trong thư mục rồi `c4 import`; mọi ghi khác đi qua CLI/MCP (service có audit).
 
-### Liên kết object với task/decision, context cho agent
+### Liên kết object với task, context cho agent
 
 ```
-python3 strata.py c4 link --project P --object X --item ID        # hoặc --decision ID; unlink cùng cú pháp
-python3 strata.py c4 links --project P --object X                  # liệt kê item/decision đã gắn
+python3 strata.py c4 link --project P --object X --item ID        # unlink cùng cú pháp
+python3 strata.py c4 links --project P --object X                  # liệt kê item đã gắn
 python3 strata.py c4 context --project P [--object X] [--max-tokens 2000]   # văn bản gọn cho agent
 python3 strata.py c4 flow --project P [--id F]                              # trace từng bước của flow
 python3 strata.py c4 contract ID --project P                                # chi tiết một contract
@@ -49,7 +49,7 @@ python3 strata.py c4 contract ID --project P                                # ch
 
 Agent thiết kế/sửa map: đọc [docs/AGENT_C4.md](docs/AGENT_C4.md) trước.
 
-`link/unlink` có audit (`c4.link`/`c4.unlink`); link trùng không ghi thêm. `context` không có `--object` thì in tổng quan cả map (kèm số issue mở); có `--object` thì in object, chuỗi cha, con, connection đã gộp, item/decision liên quan, flow; quá `--max-tokens` (ước len/4) thì cắt từ flow ngược lên, phần cắt ghi `... (cắt: <phần>)`.
+`link/unlink` có audit (`c4.link`/`c4.unlink`); link trùng không ghi thêm. `context` không có `--object` thì in tổng quan cả map (kèm số issue mở); có `--object` thì in object, chuỗi cha, con, connection đã gộp, item liên quan, flow; quá `--max-tokens` (ước len/4) thì cắt từ flow ngược lên, phần cắt ghi `... (cắt: <phần>)`.
 `/api/c4` trả `meta`, `objects`, `connections` (link), `flows`, `contracts`, `behavior`, `links` và `open_issues`; viewer viền đỏ object có issue mở và có ô tìm object. Project chưa import map thì `/api/c4` trả 404 và viewer ghi "No C4 map (layered format) for this project".
 
 ## Hướng dẫn dùng bản đồ C4
@@ -77,7 +77,7 @@ Agent thiết kế/sửa map: đọc [docs/AGENT_C4.md](docs/AGENT_C4.md) trư�
 **Panel chi tiết** (bấm một object):
 - Code: link tới file code thật (mở tab mới); link http(s) mở nguyên văn.
 - Vấn đề: lý do object có huy hiệu "!".
-- Liên quan: task/issue/decision đã gắn bằng `c4 link`.
+- Liên quan: task/issue đã gắn bằng `c4 link`.
 - Bấm một connection để xem mô tả, technology, status.
 
 **Huy hiệu "!"** (góc trên phải object): object có vấn đề chất lượng model: link code chết (`dead_link`), không có link (`no_link`), thiếu mô tả (`no_desc`). Rê chuột để xem lý do. **Viền đỏ**: object có issue mở gắn vào.
@@ -98,8 +98,8 @@ Trong tab Kiến trúc: map, chú giải, tag/tìm object và panel Chi tiết/F
 | `-` | Thu nhỏ |
 | `Ctrl+K` | Tìm toàn văn (chỉ trong app shell) |
 
-**Cho agent** (xem thêm mục "Liên kết object với task/decision"):
-- `c4 link --project P --object X --item ID` (hoặc `--decision ID`) gắn; `unlink` gỡ.
+**Cho agent** (xem thêm mục "Liên kết object với task"):
+- `c4 link --project P --object X --item ID` gắn; `unlink` gỡ.
 - `c4 links --project P --object X` liệt kê cái đã gắn.
 - `c4 context --project P [--object X] [--max-tokens N]` in văn bản gọn để đưa vào prompt.
 
@@ -156,7 +156,7 @@ File page là JSON `{project, slug, title, kind, blocks}`; xem `examples/strata-
 | `legend` | `items: [{label, status: done\|plan}]` |
 | `question` | `q`, `options: [{label, note?}]`, `recommend?` (trùng một label) |
 | `c4` | `project?`, `ids: [..]` (nhúng viewer; id thiếu trong DB chỉ cảnh báo) |
-| `query` | `src: item\|decision`, `where: {cột: giá trị}` (cột trong whitelist), `limit?` 1..200 |
+| `query` | `src: item`, `where: {cột: giá trị}` (cột trong whitelist), `limit?` 1..200 |
 
 ```
 python3 strata.py page validate FILE.json     # exit 1 nếu lỗi, vd "block[3] type layers: missing 'rows'" (block đánh số từ 0)
