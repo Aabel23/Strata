@@ -19,8 +19,8 @@ def _get_item(c, role, id):
     return json.dumps(i, ensure_ascii=False, indent=1) + (f"\n--- body ---\n{body}" if body else "")
 
 
-def _list_items(c, role, project=None, kind=None, status=None, owner=None, ready=False, limit=50):
-    return service.list_items(c, project, kind, status, owner, ready)[:max(1, limit)]
+def _list_items(c, role, project=None, kind=None, status=None, owner=None, ready=False, limit=50, label=None):
+    return service.list_items(c, project, kind, status, owner, ready, label)[:max(1, limit)]
 
 
 def _get_doc(c, role, project, path):
@@ -60,7 +60,7 @@ _w = lambda fn: lambda c, role, **a: (lambda out: {"ok": True, **({"id": out} if
 TOOLS = {
     "list_projects": (lambda c, role: [dict(r) for r in c.execute("SELECT id,name,parent,status FROM project ORDER BY id")], "List projects", schema({}, []), ALL),
     "list_items": (_list_items, "List items by priority; ready=true: approved, deps done", schema(
-        {"project": S(), "kind": S(), "status": STATUS, "owner": S(), "ready": {"type": "boolean"}, "limit": _lim}, []), ALL),
+        {"project": S(), "kind": S(), "status": STATUS, "owner": S(), "ready": {"type": "boolean"}, "limit": _lim, "label": S()}, []), ALL),
     "get_item": (_get_item, "One item with spec, deps both ways, c4 links, recent audit", schema({"id": I()}, ["id"]), ALL),
     "get_doc": (_get_doc, "A project doc (YAML) parsed, with validation errors", schema({"project": S(), "path": S("Relative path under docs_dir")}, ["project", "path"]), ALL),
     "c4_context": (lambda c, role, project, object=None, max_tokens=2000: c4_layered.context_text(c, project, object, max_tokens),
@@ -70,8 +70,8 @@ TOOLS = {
     "task_context": (_context, "Budgeted context bundle for a task: ticket, hard rules, c4, paths", schema({"id": I(), "budget": I("Max chars, default 12000")}, ["id"]), ALL),
     "search": (service.search, "Full-text search over items, pages and docs", schema(
         {"q": S(), "project": S(), "src": {"type": "string", "enum": ["item", "page", "doc"]}, "limit": {"type": "integer"}}, ["q"]), ALL),
-    "add_item": (_w(service.add_item), "Add a task or issue (non-main: issues only, as proposed)", schema({"project": S(), "kind": {"type": "string", "enum": ["task", "issue"]}, "title": S(), "body": S(),
-                 "priority": S(), "status": STATUS, "spec": {"type": "object"}}, ["project", "kind", "title"]), ALL),
+    "add_item": (_w(service.add_item), "Add a task (label issue for issues); non-main roles: label issue only, as proposed", schema({"project": S(), "kind": {"type": "string", "enum": ["task", "issue"]}, "title": S(), "body": S(),
+                 "priority": S(), "status": STATUS, "spec": {"type": "object"}, "label": S()}, ["project", "kind", "title"]), ALL),
     "edit_item": (_w(service.edit_item), "Edit title/body/spec/priority", schema({"id": I(), "title": S(), "body": S(), "spec": {"type": "object"}, "priority": S()}, ["id"]), MAIN),
     "item_claim": (_move("doing"), "Claim an approved item (approved -> doing)", schema({"id": I(), "actor": _actor}, ["id"]), WORK),
     "item_submit": (_move("review"), "Submit for review (doing -> review)", schema({"id": I(), "note": _note, "actor": _actor}, ["id", "note"]), WORK),

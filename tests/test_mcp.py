@@ -196,3 +196,18 @@ def test_task_context_all_roles(tmp_path):
     for role in ("main", "coder", "reviewer"):
         r, out = run(tmp_path, role, [call(1, "task_context", id=1, budget=500)], p)
         assert out[0]["result"]["isError"] is False and len(out[0]["result"]["content"][0]["text"]) <= 500
+
+
+def test_label_issue_and_filter(tmp_path):
+    p = seeded(tmp_path)
+    r, out = run(tmp_path, "reviewer", [
+        call(1, "add_item", project="p", kind="task", title="bug a", label="issue"),
+        call(2, "add_item", project="p", kind="task", title="plain"),
+        call(3, "add_item", project="p", kind="issue", title="bug b"),
+        call(4, "list_items", project="p", label="issue")], p)
+    flags = [o["result"]["isError"] for o in out]
+    assert flags == [False, True, False, False]
+    c = db.connect(p)
+    rows = c.execute("SELECT kind,label,status FROM item WHERE title LIKE 'bug %'").fetchall()
+    assert [tuple(x) for x in rows] == [("task", "issue", "proposed")] * 2
+    assert sorted(json.loads(l)["title"] for l in out[3]["result"]["content"][0]["text"].splitlines()) == ["bug a", "bug b"]
