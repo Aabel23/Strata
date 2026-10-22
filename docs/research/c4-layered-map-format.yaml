@@ -1,11 +1,11 @@
 title: Layered C4 map format (4 zoom levels + symbol index)
-summary: New map format for AI agents. L1 system, L2 container (incl. devices), L3 module with boundary contracts, L4 behavior state machine per module in behavior/<module>.yaml, plus a tree-sitter symbol index and on-demand source slices. Status research, 8 open questions.
+summary: New map format for AI agents. L1 system, L2 container (incl. devices), L3 module with boundary contracts, L4 behavior state machine per module in behavior/<module>.yaml, plus a tree-sitter symbol index and on-demand source slices. Status research; provisional decisions on Q1–Q9, pending the step 0 migration test.
 code: [docs/AGENT_C4.md, strata/c4.py, strata/context.py, examples/project1_app.strata.yaml]
 
 blocks:
   - md: |
       ## Summary
-      **Status: research, nothing decided.**
+      **Status: research. Provisional decisions recorded below; final only after the step 0 migration test.**
 
       The map moves to four zoom levels plus a generated symbol index. An agent then reads map → module → behavior → one function, and never opens a whole file.
       - Levels 1–3 live in one hand-written `docs/c4/map.yaml`.
@@ -223,55 +223,89 @@ blocks:
         - ["14", referenced symbol's body_hash changed since verified_at, warning]
 
   - md: |
-      ## Questions to decide
-      The first questions decide the shape of everything that follows.
-  - question:
-      q: "Q1. In map.yaml, should the hierarchy be nested, or a flat list with parent:?"
-      options:
-        - {label: Nested, note: "hierarchy is visible, no parent-validity table; one-line grep per entity is lost, so agents read through the CLI"}
-        - {label: "Flat with parent:", note: current style}
-      recommend: Nested
-  - question:
-      q: Q2. Should a file be owned by exactly one module?
-      options:
-        - {label: "Exclusive owns + shared: list", note: simple validator}
-        - {label: Allow overlap}
-      recommend: "Exclusive owns + shared: list"
-  - question:
-      q: "Q3. Should event ids use one global namespace (module.event), owned by the emitting module, with the L3 contract as the source of truth?"
-      options: [{label: "Yes"}, {label: "No"}]
-      recommend: "Yes"
-  - question:
-      q: Q4. Should the L4 file and function object types be removed from the map and replaced by the symbol index?
-      options:
-        - {label: "Yes", note: "migration turns links into owns and functions into symbol: references"}
-        - {label: Keep as optional pinned notes}
-      recommend: "Yes"
-  - question:
-      q: Q5. Which indexer should we depend on?
-      options:
-        - {label: tree-sitter-language-pack, note: "pip only, exact ranges; BREAKS Strata hard rule 2 (stdlib + PyYAML only) unless the indexer is an optional extra"}
-        - {label: Python ast only (stdlib), note: "fits rule 2; Python projects only"}
-        - {label: ctags + Python ast, note: "needs a system binary; weaker ranges"}
-      recommend: tree-sitter-language-pack
-  - question:
-      q: Q6. Where should the symbol index be stored?
-      options:
-        - {label: Separate cache DB that can be rebuilt, note: derived data and safe to delete}
-        - {label: Tables in strata.db}
-      recommend: Separate cache DB that can be rebuilt
-  - question:
-      q: "Q7. How should L4 state machines be shaped in v1?"
-      options:
-        - {label: "Flat + any:"}
-        - {label: One level of nested states}
-      recommend: "Flat + any:"
-  - question:
-      q: "Q8. Should the level budgets (600 / 1,200 / 2,500 tokens) be warnings or errors?"
-      options:
-        - {label: Warnings only, note: "the numbers are untested; measure on project1_app with 3 map sizes"}
-        - {label: Errors}
-      recommend: Warnings only
+      ## Provisional decisions (after review, 2026-10-22)
+      Nothing is final until the step 0 migration test backs it up.
+      Two outside reviews were compared; the table records where they ended up.
+  - table:
+      head: [Question, Provisional choice, Reason]
+      rows:
+        - ["Q1. Nested vs flat with parent:", "Flat with parent: (nested only if the migration test shows a measurable gain)", "keeps one-line grep/edit per entity; importer and viewer already use parent; short ids survive parent renames (see Identity)"]
+        - ["Q2. File ownership", "One primary owner per file + explicit shared: list", "deterministic navigation without forcing unnatural boundaries; symbol-level ownership later"]
+        - ["Q3. Global event namespace", "Yes (module.event, owned by the emitter)", stable references]
+        - ["Q4. Remove L4 file/function objects", "Yes, replaced by the symbol index", "they are 84 of 115 objects in project1_app and 40 of 95 in strata, hand-copied and drifting"]
+        - ["Q5. Indexer", "stdlib ast for Python first; tree-sitter as an optional extra", "keeps hard rule 2 (stdlib + PyYAML); both current maps are Python"]
+        - ["Q6. Index storage", Separate rebuildable cache DB, derived data]
+        - ["Q7. L4 machine shape", "Flat states + any: global transitions", easier to validate]
+        - ["Q8. Token budgets", Warnings only, numbers need measuring]
+        - ["Q9. Relations declared, detected, or both", "Both, as separate records joined by endpoints + kind", "different kinds of evidence; see Relation provenance"]
+
+  - md: |
+      ## Design principle
+      One normalized graph inside, many representations outside. Strata already works this way:
+      SQLite (`c4_*` tables) is canonical, YAML is an authoring/import format, the viewer and `c4 context` read the DB.
+      - YAML (flat or nested) is only an authoring format; both normalize to the same graph.
+      - The viewer consumes graph projections; agents consume budgeted context projections.
+      - Call the result **C4-inspired**: L4 here means behavior, not the standard C4 code level. This matters for any later export to Structurizr or LikeC4.
+
+      ## Layout lives outside the model
+      `map.yaml` says what the architecture is; `views/` says how it looks. Moving a node never changes the architecture.
+      ```
+      docs/c4/
+      ├── map.yaml
+      ├── behavior/<module_id>.yaml
+      └── views/{system,containers,modules}.json
+      ```
+
+      ## Identity and renames
+      - ids are short, stable, snake_case; the hierarchy lives in `parent:`, not in the id. Moving or renaming a parent never changes a child id.
+      - Display text lives in `name`; changing it is free.
+      - A real id change goes through one command (`strata c4 rename OLD NEW`, to build) that rewrites the DB, behavior files and `views/`, and reports references it could not rewrite.
+      - Dotted ids (as in the map.yaml example above) put the path in the id, so every move rewrites every reference. This is a further reason for Q1 = flat.
+
+      ## Relation provenance (Q9)
+      A detected import is evidence, not automatically an architectural dependency (utilities, type-only imports, test helpers).
+      ```yaml
+      relations:
+        - {id: roadmap_db, from: roadmap, to: database, kind: dependency}            # declared
+      detected:                                                                       # generated, separate records
+        - {from: roadmap, to: database, kind: import, evidence: strata/roadmap.py}
+      ```
+  - table:
+      head: [Declared, Detected, Meaning]
+      rows:
+        - ["Yes", "Yes", Corroborated]
+        - ["Yes", "No", "Possibly stale, or invisible to static analysis"]
+        - ["No", "Yes", "Candidate undocumented dependency; a suggestion, not an error"]
+
+  - md: |
+      ## Behavior forms
+      v1 keeps two forms (machine, sequence). Behavior files are optional: write them only for stateful or hardware modules.
+      Other forms (data transformations, event handlers, declarative rules) can come after the MVP.
+
+      ## Open rendering questions (resolve before migrating real data)
+      Relation endpoints across levels, cross-level edges, interface visibility, edge aggregation on collapsed nodes, flow navigation, layout restore from `views/`.
+
+  - md: |
+      ## Revised plan
+  - table:
+      head: [Order, Work, Acceptance]
+      rows:
+        - ["0", Lossless migration experiment, "existing maps stay representable and renderable (three tests below)"]
+        - ["1", Finalize Q1–Q9, decisions backed by step 0 evidence]
+        - ["2", L1–L3 model + validation, "contracts, ownership, relations validate"]
+        - ["3", L4 behavior files, "machines and sequences validate against L3"]
+        - ["4", "Symbol index (ast first, tree-sitter optional)", symbols resolve to current source]
+        - ["5", Agent context retrieval, task context without whole-file reads]
+        - ["6", Relation drift detection, declared vs detected compared]
+  - md: |
+      ## Step 0: three tests
+      The adapter is just a new importer writing the new schema into a scratch DB's existing `c4_*` tables, so the viewer needs no changes.
+
+      1. **Data preservation.** Convert `project1_app` and `strata`. Report every object, parent, connection, interface, flow step, status, link and layout entry as kept, replaced, or unresolved. A file/function object becomes a symbol reference only if that symbol exists in source; otherwise it is kept as an unresolved migration record, never dropped silently.
+      2. **Rendering equivalence.** Open the scratch DB in the current viewer. Check hierarchy navigation, edges, collapsed nodes, interface inspection, flow highlighting, layout restore. Compare graph semantics, not pixels.
+      3. **Agent context quality.** 3–5 real Strata tasks run against both formats. Measure tokens retrieved, relevant files/symbols found, missing architecture facts, extra source reads, and whether the correct implementation boundary was found. A smaller map is not better if it causes more exploratory reads.
+
+      Flat and nested YAML are both normalized into the same graph for this test; compare authoring, diff quality, validation and retrieval. If nested shows no measurable gain, keep flat.
 
   - md: |
       ## Problems found (not fixed)
