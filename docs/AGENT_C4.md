@@ -108,6 +108,36 @@ python3 strata.py c4 export OUT_DIR --project P             # DB -> folder (roun
 
 - `import` writes nothing if validation reports errors (`--force` skips that check). It also removes task links
   whose object no longer exists, and writes an audit row (`c4-import` with before/after counts).
+- `validate` returns structured findings: `{id, severity, subject, message, fix}`. `severity` is `error` or `warn`;
+  `subject` is the offending file or object; `fix` is a one-line hint. Text output, one line per finding:
+  `ERROR [C4-DUP-ID] subject: message (fix: ...)` / `WARN  [C4-FLOW-BREAK] subject: message (fix: ...)`.
+- `--json` prints the findings list instead of text. Exit code is non-zero on errors; `--strict` makes warnings fail it too.
+
+| Id | Severity | Fix hint |
+|---|---|---|
+| `C4-READ` | error | fix the YAML syntax or file permissions |
+| `C4-MAP-MISSING` | error | create `map.yaml` in the C4 folder |
+| `C4-BAD-SHAPE` | error | use the expected shape (mapping, or a list of `- id: ...`) |
+| `C4-UNKNOWN-KEY` | error | remove or rename the key per the schema (`map.yaml`: only `project`, `objects`, `links`) |
+| `C4-MISSING-ID` | error | add an `id` to the entry |
+| `C4-MISSING-NAME` | error | add a `name` to the object |
+| `C4-DUP-ID` | error | rename one of the duplicate ids |
+| `C4-BAD-KIND` | error | use one of the allowed object kinds |
+| `C4-BAD-STATUS` | error | use one of the allowed statuses |
+| `C4-PARENT-MISSING` | error | point `parent` at an existing object, or add that object |
+| `C4-PARENT-CYCLE` | error | break the loop: change the `parent` of one object in the chain |
+| `C4-BEHAVIOR-FILE` | error | write a mapping whose `module` matches the file name |
+| `C4-BEHAVIOR-MISSING` | error | create `behavior/<module>.yaml` or drop the object's `behavior` field |
+| `C4-BEHAVIOR-ORPHAN` | error | add an object with the same id, or delete the behavior file |
+| `C4-LINK-END` | error | fix `from`/`to` to point at existing objects |
+| `C4-LINK-DETAIL` | error | set `detail` to an existing contract id (`file.id`) or remove it |
+| `C4-CONTRACT-BAD` | error | give the contract an id, plus `start` and `end` as `path::Qual.name` |
+| `C4-FLOW-ID` | error | make the flow `id` match the file name |
+| `C4-FLOW-STEP` | error | write the step as `{link, reverse?}` or `{at, transition?}` with existing ids; `transition` only with `at` |
+| `C4-SYMBOL-UNRESOLVED` | warn | fix `path::Qual.name` to match the code, or create the symbol |
+| `C4-TRANSITION` | warn | add the transition to the object's behavior, or fix the id |
+| `C4-FLOW-BREAK` | warn | add a bridging step or reorder the steps (the `đứt mạch` gap) |
+
 - Data changes only need a viewer reload. Restart the service only after Python changes.
 - Task links: `c4 link|unlink --project P --object X --item ID`, `c4 links --project P --object X`.
   `unlink` also works for an object that was removed from the map.
