@@ -15,24 +15,6 @@ CREATE TABLE IF NOT EXISTS item_dep(
   depends_on INTEGER NOT NULL REFERENCES item(id) ON DELETE CASCADE,
   PRIMARY KEY(item_id,depends_on), CHECK(item_id<>depends_on));
 
-CREATE TABLE IF NOT EXISTS decision(
-  id INTEGER PRIMARY KEY, project TEXT NOT NULL, title TEXT NOT NULL,
-  status TEXT NOT NULL CHECK(status IN ('proposed','accepted','superseded')),
-  context TEXT, decision TEXT, consequences TEXT,
-  rejected_options TEXT NOT NULL CHECK(trim(rejected_options) NOT IN ('','[]')),
-  supersedes INTEGER REFERENCES decision(id), created_at TEXT);
-
-CREATE TRIGGER IF NOT EXISTS decision_no_replace BEFORE INSERT ON decision WHEN EXISTS(SELECT 1 FROM decision WHERE id=NEW.id)
-BEGIN SELECT RAISE(ABORT,'decision is append-only'); END;
-CREATE TRIGGER IF NOT EXISTS decision_no_delete BEFORE DELETE ON decision
-BEGIN SELECT RAISE(ABORT,'decision is append-only'); END;
-CREATE TRIGGER IF NOT EXISTS decision_status_only BEFORE UPDATE ON decision
-WHEN NEW.id IS NOT OLD.id OR NEW.project IS NOT OLD.project OR NEW.title IS NOT OLD.title
-  OR NEW.context IS NOT OLD.context OR NEW.decision IS NOT OLD.decision
-  OR NEW.consequences IS NOT OLD.consequences OR NEW.rejected_options IS NOT OLD.rejected_options
-  OR NEW.supersedes IS NOT OLD.supersedes OR NEW.created_at IS NOT OLD.created_at
-BEGIN SELECT RAISE(ABORT,'decision: only status may change'); END;
-
 CREATE TABLE IF NOT EXISTS c4_object(
   id TEXT NOT NULL, project TEXT NOT NULL,
   type TEXT NOT NULL CHECK(type IN ('actor','system','app','store','component','group','file','function')),
@@ -68,12 +50,6 @@ CREATE TRIGGER IF NOT EXISTS item_au AFTER UPDATE ON item BEGIN
   INSERT INTO search VALUES(replace(replace(NEW.title,'đ','d'),'Đ','D'),replace(replace(NEW.body,'đ','d'),'Đ','D'),'item',NEW.id,NEW.project); END;
 CREATE TRIGGER IF NOT EXISTS item_ad AFTER DELETE ON item BEGIN
   DELETE FROM search WHERE src='item' AND ref=OLD.id; END;
-
--- decision text is immutable and rows undeletable, so insert sync is enough
-CREATE TRIGGER IF NOT EXISTS decision_ai AFTER INSERT ON decision BEGIN
-  INSERT INTO search VALUES(replace(replace(NEW.title,'đ','d'),'Đ','D'),
-    replace(replace(trim(coalesce(NEW.context,'')||' '||coalesce(NEW.decision,'')||' '||coalesce(NEW.consequences,'')||' '||coalesce(NEW.rejected_options,'')),'đ','d'),'Đ','D'),
-    'decision',NEW.id,NEW.project); END;
 
 CREATE TABLE IF NOT EXISTS page(
   project TEXT NOT NULL, slug TEXT NOT NULL, title TEXT NOT NULL,
@@ -113,8 +89,8 @@ CREATE TRIGGER IF NOT EXISTS doc_au AFTER UPDATE ON doc BEGIN
 CREATE TRIGGER IF NOT EXISTS doc_ad AFTER DELETE ON doc BEGIN
   DELETE FROM search WHERE src='doc' AND ref=OLD.rowid; END;
 
--- links an object to a task/issue/decision; no FK (objects are re-imported, decisions are append-only)
+-- links an object to a task/issue; no FK (objects are re-imported)
 CREATE TABLE IF NOT EXISTS c4_link(
   project TEXT NOT NULL, object_id TEXT NOT NULL,
-  ref_kind TEXT NOT NULL CHECK(ref_kind IN ('item','decision')), ref_id INTEGER NOT NULL,
+  ref_kind TEXT NOT NULL CHECK(ref_kind IN ('item')), ref_id INTEGER NOT NULL,
   PRIMARY KEY(project,object_id,ref_kind,ref_id));

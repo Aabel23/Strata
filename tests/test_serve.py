@@ -128,14 +128,6 @@ def test_servable_symlink_into_dot_dir(tmp_path):
     assert server.servable(tmp_path, ["link.json"]) is None
 
 
-def test_decision_insert_or_replace_blocked(tmp_path):
-    c = db.init(tmp_path / "d.db")
-    ins = "INSERT OR REPLACE INTO decision(id,project,title,status,rejected_options) VALUES(?, 'p','t','proposed','[1]')"
-    c.execute(ins, (1,)); c.execute(ins, (2,))
-    with pytest.raises(Exception, match="append-only"): c.execute(ins, (1,))
-    c.execute("UPDATE decision SET status='accepted' WHERE id=1")
-
-
 def test_put_page_audited_without_body(tmp_path):
     c = db.init(tmp_path / "d.db")
     db.put_page(c, "p", "s", "T", "note", [{"type": "md", "text": "SECRETBODY"}])

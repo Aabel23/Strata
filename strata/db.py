@@ -142,10 +142,16 @@ def _migrate(c):
     for t, col, typ in ADDED:
         cols = [r["name"] for r in c.execute(f"PRAGMA table_info({t})")]
         if cols and col not in cols: c.execute(f"ALTER TABLE {t} ADD COLUMN {col} {typ}")
-    t = c.execute("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='decision_ai'").fetchone()
-    if t and "rejected_options" not in t["sql"]:  # old index body lacks rejected options: schema.sql recreates the trigger, reindex here
-        c.execute("DROP TRIGGER decision_ai"); c.execute("DELETE FROM search WHERE src='decision'")
-        c.execute("INSERT INTO search SELECT replace(replace(title,'đ','d'),'Đ','D'), replace(replace(trim(coalesce(context,'')||' '||coalesce(decision,'')||' '||coalesce(consequences,'')||' '||coalesce(rejected_options,'')),'đ','d'),'Đ','D'), 'decision', id, project FROM decision")
+    if c.execute("SELECT 1 FROM sqlite_master WHERE name='decision'").fetchone():  # decisions removed (#211): drop table, triggers, index rows, links
+        c.execute("DELETE FROM search WHERE src='decision'")
+        for t in ("decision_ai", "decision_no_replace", "decision_no_delete", "decision_status_only"): c.execute(f"DROP TRIGGER IF EXISTS {t}")
+        c.execute("DROP TABLE decision")
+    l = c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='c4_link'").fetchone()
+    if l and "'decision'" in l["sql"]:  # SQLite cannot alter the old CHECK: rebuild with item rows only
+        c.execute("CREATE TABLE c4_link_new(project TEXT NOT NULL, object_id TEXT NOT NULL, ref_kind TEXT NOT NULL CHECK(ref_kind IN ('item')), "
+                  "ref_id INTEGER NOT NULL, PRIMARY KEY(project,object_id,ref_kind,ref_id))")
+        c.execute("INSERT INTO c4_link_new SELECT project,object_id,ref_kind,ref_id FROM c4_link WHERE ref_kind='item'")
+        c.execute("DROP TABLE c4_link"); c.execute("ALTER TABLE c4_link_new RENAME TO c4_link")
     r = c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='c4_object'").fetchone()
     if r and "'function'" not in r["sql"]:
         c.execute("ALTER TABLE c4_object RENAME TO c4_object_old"); return True
@@ -191,6 +197,18 @@ def add_project(c, id, name, root=None, docs_dir=None, parent=None, description=
          "docs_dir": docs_dir and os.path.abspath(docs_dir), "parent": parent}
     c.execute("INSERT INTO project(id,name,description,root,docs_dir,parent) VALUES(:id,:name,:description,:root,:docs_dir,:parent)", r)
     audit(c, id, "project.add", id, None, r); c.commit()
+
+def set_project(c, id, root=None, docs_dir=None, name=None, description=None):
+    """Đổi root/docs_dir/name/description của project đã có; chỉ ghi trường được truyền."""
+    old = c.execute("SELECT * FROM project WHERE id=?", (id,)).fetchone()
+    if old is None: raise ValueError(f"không có project {id}")
+    base = root or old["root"]
+    if docs_dir and base and not os.path.isabs(docs_dir): docs_dir = os.path.join(base, docs_dir)
+    new = {k: v for k, v in {"root": root and os.path.abspath(root), "docs_dir": docs_dir and os.path.abspath(docs_dir),
+                             "name": name, "description": description}.items() if v is not None}
+    if not new: raise ValueError("không có trường nào để đổi")
+    c.execute(f"UPDATE project SET {', '.join(f'{k}=:{k}' for k in new)} WHERE id=:id", {**new, "id": id})
+    audit(c, id, "project.set", id, {k: old[k] for k in new}, new); c.commit()
 
 def add_item(c, project, kind, title, body=None, priority=None, status="open", role="cli", spec=None, phase=None, roadmap=None):
     if not c.execute("SELECT 1 FROM project WHERE id=?", (project,)).fetchone(): raise KeyError(f"no project {project}")
@@ -278,18 +296,17 @@ def set_doc(c, project, path, feature=None, status=None, ord=None):
     audit(c, project, "doc.set", f"doc:{path}", dict(r), new); c.commit()
 
 
-# ---- C4 object <-> item/decision links ----
+# ---- C4 object <-> item links ----
 def _link_target(c, project, object, item, decision, must_exist=True):
-    if (item is None) == (decision is None): raise ValueError("give exactly one of --item / --decision")
+    if decision is not None or item is None: raise ValueError("give --item")
     if must_exist and not c.execute("SELECT 1 FROM c4_object WHERE project=? AND id=?", (project, object)).fetchone():
         raise ValueError(f"no object {project}/{object}")
-    kind, rid = ("item", item) if item is not None else ("decision", decision)
-    if not c.execute(f"SELECT 1 FROM {kind} WHERE project=? AND id=?", (project, rid)).fetchone():
-        raise ValueError(f"no {kind} {rid} in project {project}")
-    return kind, rid
+    if not c.execute("SELECT 1 FROM item WHERE project=? AND id=?", (project, item)).fetchone():
+        raise ValueError(f"no item {item} in project {project}")
+    return "item", item
 
 def link(c, project, object, item=None, decision=None):
-    """Returns True if added, False if it already existed (no audit then)."""
+    """Returns True if added, False if it already existed (no audit then). `decision` stays only so old callers get a clean ValueError."""
     kind, rid = _link_target(c, project, object, item, decision)
     if not c.execute("INSERT OR IGNORE INTO c4_link VALUES(?,?,?,?)", (project, object, kind, rid)).rowcount: return False
     audit(c, project, "c4.link", f"{object}->{kind}:{rid}", None, {"object": object, "ref_kind": kind, "ref_id": rid}); c.commit()
@@ -302,12 +319,10 @@ def unlink(c, project, object, item=None, decision=None):
     return True
 
 def links_for(c, project, object=None):
-    """{items:[{id,kind,title,status}], decisions:[{id,title,status}]} for one object; for object=None, {object_id: that} for the whole project."""
+    """{items:[{id,kind,title,status}]} for one object; for object=None, {object_id: that} for the whole project."""
     out = {}
-    for kind, cols in (("item", "t.id,t.kind,t.title,t.status"), ("decision", "t.id,t.title,t.status")):
-        for r in c.execute(f"SELECT l.object_id oid,{cols} FROM c4_link l JOIN {kind} t ON t.id=l.ref_id "
-                           f"WHERE l.project=? AND l.ref_kind='{kind}' AND t.project=? "
-                           + ("AND l.object_id=? " if object else "") + "ORDER BY t.id", (project, project, *([object] if object else []))):
-            d = dict(r); o = out.setdefault(d.pop("oid"), {"items": [], "decisions": []})
-            o["items" if kind == "item" else "decisions"].append(d)
-    return out.get(object, {"items": [], "decisions": []}) if object else out
+    for r in c.execute("SELECT l.object_id oid,t.id,t.kind,t.title,t.status FROM c4_link l JOIN item t ON t.id=l.ref_id "
+                       "WHERE l.project=? AND t.project=? " + ("AND l.object_id=? " if object else "") + "ORDER BY t.id",
+                       (project, project, *([object] if object else []))):
+        d = dict(r); out.setdefault(d.pop("oid"), {"items": []})["items"].append(d)
+    return out.get(object, {"items": []}) if object else out
