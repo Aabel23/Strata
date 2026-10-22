@@ -1,4 +1,4 @@
-"""task context: one budgeted text bundle for a coder (decisions 11, 28)."""
+"""task context: one budgeted text bundle for a coder."""
 import json, pathlib, re, sys
 from strata import c4_layered, service
 
@@ -20,15 +20,11 @@ def build(c, item_id, budget=12000):
     tk += [f"depends_on #{d['id']} [{d['status']}] {d['title']}" for d in i["depends_on"]]
     if not spec and i["body"]: tk.append(i["body"])
     objs = [r[0] for r in c.execute("SELECT object_id FROM c4_link WHERE project=? AND ref_kind='item' AND ref_id=? ORDER BY object_id", (i["project"], item_id))]
-    ids = {r[0] for o in objs for r in c.execute("SELECT ref_id FROM c4_link WHERE project=? AND ref_kind='decision' AND object_id=?", (i["project"], o))}
-    ids |= {int(n) for n in re.findall(r"decision\s+#?(\d+)", json.dumps(spec, ensure_ascii=False), re.I)}
-    dec = [f"#{d['id']} {d['title']} — {(d['decision'] or '')[:160]}" for d in
-           (c.execute("SELECT id,title,decision FROM decision WHERE project=? AND id=?", (i["project"], n)).fetchone() for n in sorted(ids)) if d]
     root = (c.execute("SELECT root FROM project WHERE id=?", (i["project"],)).fetchone() or [None])[0]
     rules = _rules(root)
     if rules is None: warn.append("CLAUDE.md '## Luật cứng' missing, skipped")
     touch = (spec.get("scope") or {}).get("touch") or []
-    secs = [("ticket", "\n".join(tk)), ("hard rules", rules), ("decisions", "## Decisions\n" + "\n".join(dec) if dec else None)]
+    secs = [("ticket", "\n".join(tk)), ("hard rules", rules)]
     out, used = [], 0
     for name, t in secs:
         if not t: continue
