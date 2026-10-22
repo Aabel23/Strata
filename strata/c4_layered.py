@@ -1,5 +1,5 @@
 """Layered C4 folder: map.yaml + contracts/ + behavior/ + flows/ <-> DB (design: docs/research/c4-layered-map-format.yaml)."""
-import ast, json, os, pathlib, re
+import ast, glob, json, os, pathlib, re
 import yaml
 from strata import symbols
 
@@ -210,6 +210,52 @@ def _semantic(m, objs, links, cons):
     return out
 
 
+CODE_EXT = {".py", ".js", ".html", ".css", ".sql"}
+
+
+def _skip(parts): return any(x in symbols.SKIP or x.startswith(".") for x in parts)
+
+
+def _expand(owns_by_object, root):
+    """{object: {entry: set of root-relative files}}; each entry is globbed once, a matched directory owns everything below it."""
+    root, out = pathlib.Path(root), {}
+    for oid, owns in owns_by_object.items():
+        for e in owns if isinstance(owns, list) else []:
+            fs = set()
+            for h in glob.glob(str(e), root_dir=root, recursive=True) if isinstance(e, str) and e else []:
+                if (root / h).is_dir():
+                    for dp, dns, fns in os.walk(root / h):
+                        dns[:] = [x for x in dns if not _skip([x])]
+                        fs.update((pathlib.Path(dp) / f).relative_to(root).as_posix() for f in fns)
+                else: fs.add(pathlib.PurePath(h).as_posix())
+            out.setdefault(oid, {})[e] = fs
+    return out
+
+
+def coverage(owns_by_object, root):
+    """{directory: [files]} of code files (CODE_EXT) under root owned by no object; skips symbols.SKIP and hidden dirs."""
+    root = pathlib.Path(root).resolve()
+    owned = set().union(*(f for d in _expand(owns_by_object, root).values() for f in d.values()))
+    out = {}
+    for dp, dns, fns in os.walk(root):
+        dns[:] = sorted(x for x in dns if not _skip([x]))
+        rel = pathlib.Path(dp).relative_to(root)
+        miss = sorted(f for f in fns if pathlib.Path(f).suffix in CODE_EXT and (rel / f).as_posix() not in owned)
+        if miss: out[rel.as_posix()] = miss
+    return out
+
+
+def _owns_findings(objs, root):
+    ex, out, by_file = _expand({i: o.get("owns") for i, o in objs.items()}, root), [], {}
+    for oid, ents in ex.items():
+        for e, fs in ents.items():
+            if not fs: out.append(finding("C4-OWNS-EMPTY", "warn", oid, f"owns '{e}' matches no file under the project root", "fix the path or glob, or remove the entry"))
+        for f in set().union(*ents.values()): by_file.setdefault(f, []).append(oid)
+    for f, os_ in sorted(by_file.items()):
+        if len(os_) > 1: out.append(finding("C4-OWNS-OVERLAP", "warn", f, f"file is owned by {' and '.join(sorted(os_))}", "narrow the owns of one object so each file has a single owner"))
+    return out
+
+
 def check(m, d, idx=None):
     """(errs, warns, stats) of a loaded model; d is the folder (code root = project.root relative to it); idx as in resolve."""
     errs, warns = [], []
@@ -263,6 +309,7 @@ def check(m, d, idx=None):
                 warns.append(finding("C4-FLOW-BREAK", "warn", where, f"đứt mạch, bắt đầu ở '{ends[0]}' nhưng bước trước kết thúc ở '{prev[1]}'", "thêm bước nối hoặc sắp lại thứ tự"))
             prev = ends or prev
     warns += _semantic(m, objs, links, cons)
+    warns += _owns_findings(objs, root)
     n = sum(x.get("detail") is not None for x in links.values())
     return errs, warns, {"object": len(objs), "link": len(links), "contract": len(cons), "behavior": len(m["behavior"]), "flow": len(m["flows"]), "detail": n}
 
