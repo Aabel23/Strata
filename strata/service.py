@@ -27,15 +27,17 @@ def _phase(c, project, phase):
     return phase, act and act[0]
 
 
-def add_item(c, role, project, kind, title, body=None, priority=None, status="open", spec=None, phase=None):
-    info = {"kind": kind, "title": title}
+def add_item(c, role, project, kind, title, body=None, priority=None, status=None, spec=None, phase=None, label=None):
+    if kind == "issue": kind, label = "task", "issue"  # alias: an issue is a task labelled issue
+    if status is None: status = "approved" if label == "issue" else "open"
+    info = {"kind": kind, "title": title, **({"label": label} if label else {})}
     _role(c, role, "item.add", project, None, info)
-    if role != "main" and kind != "issue": _deny(c, role, "item.add", project, None, info, f"{role} may only add issues")
+    if role != "main" and (kind, label) != ("task", "issue"): _deny(c, role, "item.add", project, None, info, f"{role} may only add issues")
     if role != "main": status = "proposed"
     if spec is not None and not isinstance(spec, dict): raise ValueError("spec must be a JSON object")
-    if phase is not None or kind == "issue": phase, rid = _phase(c, project, phase)
+    if phase is not None or label == "issue": phase, rid = _phase(c, project, phase)
     else: rid = None
-    return db.add_item(c, project, kind, title, body, priority, status, role, spec, phase, rid)
+    return db.add_item(c, project, kind, title, body, priority, status, role, spec, phase, rid, label)
 
 
 # (from, to) -> (roles allowed, note required). Owner/dep/version rules live in transition().
@@ -45,7 +47,6 @@ RULES = {("proposed", "approved"): ({"main"}, False), ("proposed", "rejected"): 
          ("review", "done"): ({"main"}, False), ("review", "doing"): ({"main"}, True),
          ("open", "doing"): ({"main", "coder"}, False), ("open", "done"): ({"main"}, True), ("open", "rejected"): ({"main"}, True),
          ("rejected", "proposed"): ({"main"}, False)}
-PRIO = "CASE lower(coalesce(priority,'')) WHEN 'p0' THEN 0 WHEN 'p1' THEN 1 WHEN 'high' THEN 1 WHEN 'p2' THEN 2 WHEN 'medium' THEN 2 WHEN 'p3' THEN 3 WHEN 'low' THEN 3 ELSE 9 END"
 
 
 def _spec(r): return json.loads(r["spec"]) if r["spec"] else {}
@@ -144,14 +145,15 @@ def _out(r):
     return {**{k: r[k] for k in r.keys() if k != "spec"}, "spec": _spec(r) or None}
 
 
-def list_items(c, project=None, kind=None, status=None, owner=None, ready=False):
+def list_items(c, project=None, kind=None, status=None, owner=None, ready=False, label=None):
     """Items, sorted by priority then id. ready: approved task/step whose deps are all done and spec not blocked."""
     w, a = [], []
-    for col, v in (("project", project), ("kind", kind), ("status", status), ("owner", owner)):
+    if kind == "issue": kind, label = "task", "issue"  # alias
+    for col, v in (("project", project), ("kind", kind), ("label", label), ("status", status), ("owner", owner)):
         if v: w.append(f"{col}=?"); a.append(v)
     if ready:
         w.append("kind IN ('task','step') AND status='approved' AND NOT EXISTS(SELECT 1 FROM item_dep d JOIN item i ON i.id=d.depends_on WHERE d.item_id=item.id AND i.status!='done')")
-    rows = [_out(r) for r in c.execute(f"SELECT * FROM item {'WHERE ' + ' AND '.join(w) if w else ''} ORDER BY {PRIO},id", a)]
+    rows = [_out(r) for r in c.execute(f"SELECT * FROM item {'WHERE ' + ' AND '.join(w) if w else ''} ORDER BY {db.ITEM_ORDER}", a)]
     return [r for r in rows if not (ready and (r["spec"] or {}).get("blocked"))]
 
 

@@ -117,3 +117,21 @@ def test_search_validation(c):
 def test_default_db_absolute():
     import pathlib
     assert pathlib.Path(db.DEFAULT_DB).is_absolute() and db.DEFAULT_DB.endswith("strata.db")
+
+
+def test_issue_is_labelled_task(c):
+    for role in ("reviewer", "coder"):
+        i = service.add_item(c, role, "p", "task", "I", label="issue")
+        assert tuple(c.execute("SELECT kind,label,status FROM item WHERE id=?", (i,)).fetchone()) == ("task", "issue", "proposed")
+        with pytest.raises(PermissionError, match="only add issues"): service.add_item(c, role, "p", "task", "X")
+    a = service.add_item(c, "main", "p", "issue", "alias")
+    assert tuple(c.execute("SELECT kind,label,status FROM item WHERE id=?", (a,)).fetchone()) == ("task", "issue", "approved")
+
+
+def test_issue_first_and_label_filter(c):
+    t = service.add_item(c, "main", "p", "task", "T", priority="p0")
+    i = service.add_item(c, "main", "p", "issue", "I", priority="p3")
+    assert [x["id"] for x in service.list_items(c, "p")][:2] == [i, t]
+    assert [x["id"] for x in service.list_items(c, "p", label="issue")] == [i]
+    assert [x["id"] for x in service.list_items(c, "p", kind="issue")] == [i]
+    assert i in [x["id"] for x in service.list_items(c, "p", ready=True)]

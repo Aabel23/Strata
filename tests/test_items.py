@@ -127,7 +127,9 @@ def test_approve_gate(c):
         t = task(c, status="proposed", spec=spec)
         with pytest.raises(PermissionError, match="spec incomplete|open_questions"): service.transition(c, "main", t, "approved")
     service.transition(c, "main", task(c, status="proposed"), "approved")
-    for kind in ("issue", "step", "gate"):  # gate applies to task only
+    i = service.add_item(c, "main", "p", "issue", "k", status="proposed")  # an issue is a task now: the gate applies
+    with pytest.raises(PermissionError, match="spec incomplete"): service.transition(c, "main", i, "approved")
+    for kind in ("step", "gate"):  # gate applies to task only
         i = service.add_item(c, "main", "p", kind, "k", status="proposed")
         service.transition(c, "main", i, "approved")
         assert st(c, i)[0] == "approved"
