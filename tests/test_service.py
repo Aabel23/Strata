@@ -135,3 +135,13 @@ def test_issue_first_and_label_filter(c):
     assert [x["id"] for x in service.list_items(c, "p", label="issue")] == [i]
     assert [x["id"] for x in service.list_items(c, "p", kind="issue")] == [i]
     assert i in [x["id"] for x in service.list_items(c, "p", ready=True)]
+
+
+def test_set_item_atomic(c, monkeypatch):
+    t = service.add_item(c, "main", "p", "task", "T")
+    snap = lambda: ([tuple(r) for r in c.execute("SELECT status,priority,version FROM item WHERE id=?", (t,))], c.execute("SELECT count(*) FROM audit").fetchone()[0])
+    before = snap()
+    def boom(*a, **k): raise RuntimeError("boom")
+    monkeypatch.setattr(db, "set_item", boom)
+    with pytest.raises(RuntimeError): service.set_item(c, "main", t, "doing", "high")
+    assert snap() == before

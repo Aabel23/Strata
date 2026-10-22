@@ -59,7 +59,7 @@ def _gate(spec):
     return miss + (["open_questions must be empty"] if spec.get("open_questions") else [])
 
 
-def transition(c, role, id, to, actor=None, note=None):
+def transition(c, role, id, to, actor=None, note=None, _commit=True):
     """The one place that moves an item between statuses (CLI and MCP). Compare-and-swap on status+version; every denial is audited."""
     r = c.execute("SELECT * FROM item WHERE id=?", (id,)).fetchone()
     if not r: raise KeyError(f"no item {id}")
@@ -93,7 +93,7 @@ def transition(c, role, id, to, actor=None, note=None):
     if not n: d("item changed concurrently, reload and retry")
     db.audit(c, r["project"], "item.transition", f"item:{id}", {"status": frm, "owner": r["owner"]},
              {"status": to, "actor": actor, "note": note, "version": r["version"] + 1}, role)
-    c.commit()
+    if _commit: c.commit()
 
 
 def set_item(c, role, id, status=None, priority=None):
@@ -101,8 +101,11 @@ def set_item(c, role, id, status=None, priority=None):
     if role not in ROLES or (priority is not None and role != "main"):
         _deny(c, role, "item.set", r and r["project"], f"item:{id}", {"id": id, "status": status, "priority": priority}, f"{role} may not set priority" if role in ROLES else f"unknown role {role!r}")
     if not r: raise KeyError(f"no item {id}")
-    if status is not None: transition(c, role, id, status)
-    if priority is not None: db.set_item(c, id, None, priority, role)
+    try:  # one commit for both writes (db.set_item commits at its end); denials commit their own audit row inside _deny
+        if status is not None: transition(c, role, id, status, _commit=priority is None)
+        if priority is not None: db.set_item(c, id, None, priority, role)
+    except Exception:
+        c.rollback(); raise
 
 
 def edit_item(c, role, id, title=None, body=None, spec=None, priority=None, phase=None):
