@@ -289,6 +289,22 @@ blocks:
         - ["#174 / #176 LVS", same as plan steps 4 and 6]
 
   - md: |
+      ## Pruning (user decision, 2026-10-22)
+      - **DRC is dropped.** Ports fold into contracts, so port rules have nothing to check. Task #169 was rejected and its code removed (task #185).
+      - **Stored layout is dropped.** The renderer always auto-lays out: no `positions`, `object_layout`, layout API or Drawflow editor (task #185).
+      - **Validate is kept, minimal.** It is the import gate and the drift detector. Only three checks:
+        1. ids are unique and every reference exists (parent, link from/to, link detail, behavior file);
+        2. contract `start` / `end` resolve to real code through the symbol index;
+        3. flow steps use existing links (continuity warning kept).
+      - The earlier 14-rule list (ownership globs, budgets, state-machine reachability and the rest) is deferred, not planned.
+
+      ## Flows in the new split
+      - Flows move out of the map into `flows/<id>.yaml`.
+      - Steps follow block-level links: `{link: app_cmd}`. Function-level paths come from the link's contract (`start` → `end`), so typical flows drop from 60+ steps to 5–15.
+      - `{at: module, transition: t1}` points into the module's behavior file instead of free text.
+      - Steps keep only real values (`values:`); `reverse: true` and the continuity check stay.
+
+  - md: |
       ## Provisional decisions (after review, 2026-10-22)
       Nothing is final until the step 0 migration test backs it up.
       Two outside reviews were compared; the table records where they ended up.
