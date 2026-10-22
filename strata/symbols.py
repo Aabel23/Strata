@@ -1,5 +1,5 @@
 """Symbol index of Python source (stdlib ast) in a rebuildable cache DB next to strata.db (design: docs/research/c4-layered-map-format.yaml)."""
-import ast, hashlib, os, pathlib, sqlite3
+import ast, hashlib, os, pathlib, posixpath, sqlite3
 
 SKIP = {"venv", ".venv", ".git", "node_modules", "__pycache__"}
 CAP = 200
@@ -23,6 +23,16 @@ def inside(root, rel):
     if os.path.isabs(rel) or pathlib.PureWindowsPath(rel).is_absolute(): return None
     f = (pathlib.Path(root) / rel).resolve()
     return f if f.is_relative_to(pathlib.Path(root).resolve()) else None
+
+
+def norm(rel):
+    """Canonical cache key for a rel path (a/../a/x.py -> a/x.py); None when absolute, escaping root or empty."""
+    if os.path.isabs(rel) or pathlib.PureWindowsPath(rel).is_absolute(): return None
+    n = posixpath.normpath(rel.replace("\\", "/"))
+    return None if n in (".", "..") or n.startswith("../") else n
+
+
+def _like(t): return t.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _sig(n):
@@ -77,8 +87,8 @@ def index(c, project, root):
 
 def refresh(c, project, root, rel):
     """Bring one file up to date with disk (hash re-check before slicing). False when the path is outside root / not a file."""
-    f = inside(root, rel)
-    if f is None or not f.is_file() or f.suffix != ".py": return False
+    rel = norm(rel); f = rel and inside(root, rel)
+    if not f or not f.is_file() or f.suffix != ".py": return False
     _index_file(c, project, rel, f); c.commit(); return True
 
 
@@ -87,20 +97,21 @@ def line(r): return f"{r['kind']} {r['id'].partition('::')[2]}{r['signature']}" 
 
 def ls(c, project, target, public=False):
     t = target.rstrip("/")
-    rows = c.execute("SELECT * FROM symbol WHERE project=? AND (file=? OR file LIKE ?) ORDER BY file, start_line", (project, t, t.replace("%", "") + "/%" if t else "%")).fetchall()
+    rows = c.execute("SELECT * FROM symbol WHERE project=? AND (file=? OR file LIKE ? ESCAPE '\\') ORDER BY file, start_line", (project, t, _like(t) + "/%" if t else "%")).fetchall()
     return [r for r in rows if not public or r["visibility"] == "public"]
 
 
 def find(c, project, pat):
-    return c.execute("SELECT * FROM symbol WHERE project=? AND id LIKE ? ORDER BY id", (project, f"%{pat}%")).fetchall()
+    return c.execute("SELECT * FROM symbol WHERE project=? AND id LIKE ? ESCAPE '\\' ORDER BY id", (project, f"%{_like(pat)}%")).fetchall()
 
 
 def show(c, project, root, sid, sig_only=False, ctx=0):
     """(text, ok). Prints the symbol's lines from disk; a dead id lists candidates."""
     path, _, qual = sid.partition("::")
     if not qual: return "sai dạng path::Qual.name", False
-    f = inside(root, path)
-    if f is None: return f"{path}: ngoài root, từ chối đọc", False
+    path = norm(path) if inside(root, path) else None
+    if path is None: return f"{sid.partition('::')[0]}: ngoài root, từ chối đọc", False
+    f = inside(root, path); sid = f"{path}::{qual}"
     if not refresh(c, project, root, path): return f"không có file Python {path}", False
     r = c.execute("SELECT * FROM symbol WHERE project=? AND id=?", (project, sid)).fetchone()
     if not r:
@@ -108,7 +119,8 @@ def show(c, project, root, sid, sig_only=False, ctx=0):
         return f"không có {sid}" + "".join(f"\n  ứng viên: {x[0]}" for x in cand), False
     head = f"# {r['id']} dòng {r['start_line']}-{r['end_line']}"
     if sig_only: return f"{head}\n{line(r)}", True
-    src = f.read_text(encoding="utf-8").split("\n")
+    try: src = f.read_text(encoding="utf-8").split("\n")
+    except (UnicodeDecodeError, OSError): return f"{path}: không đọc được (không phải UTF-8)", False
     a, b = max(1, r["start_line"] - ctx), min(len(src), r["end_line"] + ctx)
     cut = b - a + 1 > CAP
     if cut: b = a + CAP - 1
@@ -117,9 +129,9 @@ def show(c, project, root, sid, sig_only=False, ctx=0):
 
 def resolves(c, project, root, sym):
     """True/False from the index when `path::qual` is fresh in it, None when the index cannot say (file missing/stale/unindexed)."""
-    path, _, qual = sym.partition("::")
-    f = inside(root, path)
-    if f is None or not f.is_file(): return None
+    path, _, qual = sym.partition("::"); path = norm(path); sym = f"{path}::{qual}"
+    f = path and inside(root, path)
+    if not f or not f.is_file(): return None
     st = f.stat(); row = c.execute("SELECT mtime, size FROM file WHERE project=? AND path=?", (project, path)).fetchone()
     if not row or (row["mtime"], row["size"]) != (st.st_mtime, st.st_size): return None
     return c.execute("SELECT 1 FROM symbol WHERE project=? AND id=?", (project, sym)).fetchone() is not None

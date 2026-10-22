@@ -65,3 +65,16 @@ def test_cli(tmp_path, capsys, monkeypatch):
     capsys.readouterr(); assert r("sym", "ls", "m.py", "--project", "p", "--public") == 0 and "def A.m" in capsys.readouterr().out
     assert r("sym", "show", "m.py::f", "--project", "p", "--sig-only") == 0 and r("sym", "find", "A", "--project", "p") == 0
     assert r("sym", "show", "../m.py::f", "--project", "p") == 1 and "ngoài root" in capsys.readouterr().out
+
+
+def test_alias_like_and_non_utf8(idx, monkeypatch):
+    root, c = idx
+    (root / "pkg/a_b.py").write_text("def q(): pass\n"); (root / "pkg/axb.py").write_text("def r(): pass\n"); (root / "pkg/lat.py").write_bytes("def z(): 'é'\n".encode("latin-1"))
+    assert S.refresh(c, "p", root, "pkg/../pkg/a.py") and S.refresh(c, "p", root, "pkg/a.py")
+    assert c.execute("SELECT count(*) FROM file WHERE path LIKE '%a.py'").fetchone()[0] == 1 and not S.refresh(c, "p", root, "../x.py")
+    assert S.show(c, "p", root, "pkg/../pkg/a.py::A.m")[1] and S.resolves(c, "p", root, "pkg/../pkg/a.py::A.m") is True
+    S.index(c, "p", root)
+    assert [r["name"] for r in S.find(c, "p", "a_b")] == ["q"] and [r["name"] for r in S.ls(c, "p", "pkg/a_b.py")] == ["q"] and not S.find(c, "p", "%")
+    assert S.show(c, "p", root, "pkg/lat.py::z")[1] is False       # latin-1 file: no symbols, no raise
+    def boom(*a, **k): raise UnicodeDecodeError("utf-8", b"\xe9", 0, 1, "x")   # file turns non-UTF-8 between refresh and read
+    monkeypatch.setattr(pathlib.Path, "read_text", boom); t, ok = S.show(c, "p", root, "pkg/a.py::A.m"); assert not ok and "UTF-8" in t
