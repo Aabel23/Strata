@@ -107,23 +107,21 @@ const ICON={
   tasks:'<rect x="2" y="2" width="12" height="12" rx="2"/><path d="M5 8l2 2 4-4"/>',
   issues:'<circle cx="8" cy="8" r="6"/><path d="M8 5v3.5M8 11h0"/>',
   docs:'<path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3M6 8h4M6 11h4"/>',
-  decisions:'<path d="M8 2v12M3 5h10M3 5l-1.5 4h3zM13 5l-1.5 4h3z"/>',
   c4:'<rect x="5.5" y="1.5" width="5" height="4" rx="1"/><rect x="1.5" y="10.5" width="5" height="4" rx="1"/><rect x="9.5" y="10.5" width="5" height="4" rx="1"/><path d="M8 5.5V8M4 10.5V8h8v2.5"/>',
   notes:'<path d="M3 2h10v12H3z"/><path d="M6 5h4M6 8h4"/>'
 };
-const MODULES=[["overview","Overview"],["tasks","Task"],["issues","Issue"],["docs","Docs"],["decisions","Decision"],["notes","Notes & knowledge"],["c4","C4 architecture"]];
+const MODULES=[["overview","Overview"],["tasks","Task"],["issues","Issue"],["docs","Docs"],["notes","Notes & knowledge"],["c4","C4 architecture"]];
 const TASK_COLS=["proposed","approved","open","doing","done","rejected"];
 const NOTE_KINDS=["rule","knowledge","draft","note"];
 const PALETTE=["#3dd6c6","#6ea8ff","#b49cff","#ffb15c","#5bd17a","#f07aa8","#e8d36a"];
 
-let D={pages:[],items:[],decisions:[],c4:new Set()}, P=null, MOD="overview", SUB=null, filter="";
+let D={pages:[],items:[],c4:new Set()}, P=null, MOD="overview", SUB=null, filter="";
 
 async function boot(){
-  const [pages,items,decisions]=await Promise.all([
+  const [pages,items]=await Promise.all([
     get("/api/pages").catch(()=>[]),
-    get("/api/query?src=item&limit=200").catch(()=>[]),
-    get("/api/query?src=decision&limit=200").catch(()=>[])]);
-  D={pages,items,decisions,c4:new Set()};
+    get("/api/query?src=item&limit=200").catch(()=>[])]);
+  D={pages,items,c4:new Set()};
   // /api/c4 has no project list (and meta.name is not the project id): probe the projects we know, plus the one in the URL.
   const hp=decodeURIComponent(location.hash.slice(2).split("/")[0]||"");
   const names=[...new Set([...projects(),hp].filter(Boolean))];
@@ -131,7 +129,7 @@ async function boot(){
   ok.filter(Boolean).forEach(p=>D.c4.add(p));
   route();
 }
-const projects=()=>[...new Set([...D.pages,...D.items,...D.decisions].map(x=>x.project).concat([...D.c4]))].filter(Boolean).sort();
+const projects=()=>[...new Set([...D.pages,...D.items].map(x=>x.project).concat([...D.c4]))].filter(Boolean).sort();
 const of=(arr,p)=>arr.filter(x=>x.project===p);
 const match=t=>!filter||String(t||"").toLowerCase().includes(filter);
 
@@ -158,7 +156,7 @@ function render(){
   if(!projects().length) pj.append(el("div","empty","No data yet. Use strata.py c4 import / page put."));
   // sidebar: modules with counts
   const md=$("#modules"); md.replaceChildren();
-  const cnt={tasks:kind("task").length,issues:kind("issue").length,docs:of(D.pages,P).length,decisions:of(D.decisions,P).length,notes:of(D.items,P).filter(x=>NOTE_KINDS.includes(x.kind)).length,c4:D.c4.has(P)?"●":""};
+  const cnt={tasks:kind("task").length,issues:kind("issue").length,docs:of(D.pages,P).length,notes:of(D.items,P).filter(x=>NOTE_KINDS.includes(x.kind)).length,c4:D.c4.has(P)?"●":""};
   MODULES.forEach(([k,label])=>{
     const r=el("div","md"+(k===MOD?" on":""));
     r.insertAdjacentHTML("afterbegin",`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">${ICON[k]}</svg>`);
@@ -169,7 +167,7 @@ function render(){
   document.title=(P?P+" · ":"")+"Strata";
   const v=$("#view"); v.replaceChildren(); v.className="";
   if(!P) return;
-  ({overview,tasks:board("task"),issues:board("issue"),docs,decisions,notes,c4})[MOD](v);
+  ({overview,tasks:board("task"),issues:board("issue"),docs,notes,c4})[MOD](v);
 }
 const kind=k=>of(D.items,P).filter(x=>x.kind===k);
 
@@ -184,7 +182,6 @@ function overview(v){
   tile(g,"In progress",t.filter(x=>x.status==="doing").length,"tasks in doing",()=>nav(P,"tasks"));
   tile(g,"Open issues",kind("issue").filter(x=>!["done","rejected"].includes(x.status)).length,`/${kind("issue").length} issue`,()=>nav(P,"issues"));
   tile(g,"Docs",of(D.pages,P).length,"pages",()=>nav(P,"docs"));
-  tile(g,"Decision",of(D.decisions,P).length,`${of(D.decisions,P).filter(x=>x.status==="accepted").length} accepted`,()=>nav(P,"decisions"));
   tile(g,"C4 architecture",D.c4.has(P)?"Yes":"—",D.c4.has(P)?"open diagram":"model not imported",()=>nav(P,"c4"));
   const doing=t.filter(x=>x.status==="doing"||x.status==="open").slice(0,8);
   list(w,"Open tasks",doing,x=>[x.title,x.status,"#"+x.id],()=>nav(P,"tasks"));
@@ -235,12 +232,6 @@ function docs(v){
   const cur=pages.find(x=>x.slug===SUB)||pages[0];
   if(cur){const f=el("iframe");f.title=cur.title;f.src=`/page/${enc(P)}/${enc(cur.slug)}`;body.append(f);body.style.minHeight="0"}
   else body.append(el("div","empty","Select a doc."));
-}
-function decisions(v){
-  const w=el("div","pad");v.append(w);
-  const xs=of(D.decisions,P).filter(x=>match(x.title));
-  w.append(el("h1","","Decisions (ADR)"),el("div","sub","Append-only log; only status can change."));
-  list(w,`${xs.length} decisions`,xs,x=>[x.title,x.status,"ADR-"+x.id],()=>{});
 }
 function notes(v){
   const w=el("div","pad");v.append(w);

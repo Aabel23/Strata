@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="vi">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,44 +9,44 @@
 </head>
 <body>
 <div id="shell">
-  <aside id="side" aria-label="Điều hướng">
+  <aside id="side" aria-label="Navigation">
     <a id="brand" href="#/"><span id="moon" aria-hidden="true"></span><span class="foil">Strata</span><span id="band" aria-hidden="true"></span></a>
-    <div class="slabel">Dự án</div>
+    <div class="slabel">Projects</div>
     <div id="tree"></div>
-    <div class="slabel" id="tablabel">Mục</div>
+    <div class="slabel" id="tablabel">Sections</div>
     <nav id="tabs"></nav>
-    <div id="sidefoot"><button id="theme" class="ib" aria-label="Đổi sáng/tối" title="Đổi sáng/tối"></button><button id="help" class="ib" aria-label="Phím tắt" title="Phím tắt (?)">?</button></div>
+    <div id="sidefoot"><button id="theme" class="ib" aria-label="Toggle light/dark" title="Toggle light/dark"></button><button id="help" class="ib" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button></div>
   </aside>
-  <div id="side-resize" role="separator" aria-label="Thay đổi độ rộng sidebar" aria-orientation="vertical" tabindex="0"></div>
+  <div id="side-resize" role="separator" aria-label="Resize sidebar" aria-orientation="vertical" tabindex="0"></div>
   <div id="scrim"></div>
   <div id="main">
     <header id="top">
       <button id="menu" class="ib" aria-label="Menu">☰</button>
       <nav id="crumbs" aria-label="Breadcrumb"></nav>
-      <button id="searchbtn" aria-label="Tìm kiếm"><span>Tìm kiếm…</span><kbd>Ctrl K</kbd></button>
+      <button id="searchbtn" aria-label="Search"><span>Search…</span><kbd>Ctrl K</kbd></button>
     </header>
     <div id="content"></div>
   </div>
 </div>
 <div id="pal" hidden>
-  <div id="palbox" class="edge" role="dialog" aria-label="Tìm kiếm">
-    <input id="q" type="search" placeholder="Gõ lệnh hoặc tìm task, issue, decision, thảo luận, tài liệu…" autocomplete="off" role="combobox" aria-controls="hits" aria-expanded="true">
+  <div id="palbox" class="edge" role="dialog" aria-label="Search">
+    <input id="q" type="search" placeholder="Type a command or search tasks, issues, discussions, docs…" autocomplete="off" role="combobox" aria-controls="hits" aria-expanded="true">
     <ul id="hits" role="listbox"></ul>
-    <div id="palfoot"><span><kbd>↑</kbd><kbd>↓</kbd> chọn</span><span><kbd>Enter</kbd> mở</span><span><kbd>Esc</kbd> đóng</span></div>
+    <div id="palfoot"><span><kbd>↑</kbd><kbd>↓</kbd> select</span><span><kbd>Enter</kbd> open</span><span><kbd>Esc</kbd> close</span></div>
   </div>
 </div>
 <div id="keys" hidden>
-  <div id="keysbox" class="edge" role="dialog" aria-label="Phím tắt">
-    <h2>Phím tắt</h2>
+  <div id="keysbox" class="edge" role="dialog" aria-label="Keyboard shortcuts">
+    <h2>Keyboard shortcuts</h2>
     <dl>
-      <dt><kbd>Ctrl K</kbd> <kbd>/</kbd></dt><dd>Tìm kiếm, lệnh</dd>
-      <dt><kbd>G</kbd> rồi <kbd>O T M I D P R A L</kbd></dt><dd>Tổng quan, Task, Lộ trình, Issue, Decision, Thảo luận, Tài liệu, Kiến trúc, Nhật ký</dd>
-      <dt><kbd>J</kbd> <kbd>K</kbd></dt><dd>Dòng sau / trước</dd>
-      <dt><kbd>Enter</kbd></dt><dd>Mở dòng đang chọn</dd>
-      <dt><kbd>F</kbd></dt><dd>Tới bộ lọc</dd>
-      <dt><kbd>[</kbd></dt><dd>Thu / mở sidebar</dd>
-      <dt><kbd>Alt ←</kbd> <kbd>Alt →</kbd></dt><dd>Tài liệu trước / sau</dd>
-      <dt><kbd>Esc</kbd></dt><dd>Đóng lớp trên cùng</dd>
+      <dt><kbd>Ctrl K</kbd> <kbd>/</kbd></dt><dd>Search, commands</dd>
+      <dt><kbd>G</kbd> then <kbd>O T M I P R A L</kbd></dt><dd>Overview, Task, Roadmap, Issue, Discussion, Docs, Architecture, Log</dd>
+      <dt><kbd>J</kbd> <kbd>K</kbd></dt><dd>Next / previous row</dd>
+      <dt><kbd>Enter</kbd></dt><dd>Open selected row</dd>
+      <dt><kbd>F</kbd></dt><dd>Go to filter</dd>
+      <dt><kbd>[</kbd></dt><dd>Collapse / expand sidebar</dd>
+      <dt><kbd>Alt ←</kbd> <kbd>Alt →</kbd></dt><dd>Previous / next doc</dd>
+      <dt><kbd>Esc</kbd></dt><dd>Close top layer</dd>
     </dl>
   </div>
 </div>

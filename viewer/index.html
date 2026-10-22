@@ -446,7 +446,7 @@ function paint(){
   document.querySelectorAll("#stage>svg:not(.old) .node").forEach(el=>{el.classList.toggle("sel",el.dataset.id===selected);el.classList.toggle("fade",dimAll&&!rel.has(el.dataset.id))});
   document.querySelectorAll("#stage>svg:not(.old) .edge").forEach(el=>{el.classList.toggle("rel",relE.has(el.dataset.e));el.classList.toggle("pick",el.dataset.c?el.dataset.c===pickConn||(!pickConn&&pk.has(el.dataset.e)):pk.has(el.dataset.e));el.classList.toggle("fade",dimAll&&!relE.has(el.dataset.e)&&!pk.has(el.dataset.e))});
 }
-function deselect(){const open=selected||$("#pinfo").dataset.open;selected=null;pickConn=null;pickEdge=null;delete $("#pinfo").dataset.open;$("#pinfo").innerHTML=EMPTY;paint();return !!open}
+function deselect(){const open=selected||$("#pinfo").dataset.open;delete $("#pinfo").dataset.step;selected=null;pickConn=null;pickEdge=null;delete $("#pinfo").dataset.open;$("#pinfo").innerHTML=EMPTY;paint();return !!open}
 function go(F,replace){
   if(flat){flat=false;$("#flat").classList.remove("on")}
   const ch=F!==focus; history[ch&&!replace?"pushState":"replaceState"](null,"",location.search+"#"+(F||"")); return nav(F);
@@ -581,8 +581,8 @@ $("#up").onclick=()=>{if(M&&focus)go(byId[focus].parent||null)};
 function tabTo(p){document.querySelectorAll(".ptabs a").forEach(a=>a.classList.toggle("on",a.dataset.p===p));$("#pinfo").hidden=p!=="info";$("#pflows").hidden=p!=="flows"}
 document.querySelectorAll(".ptabs a").forEach(a=>a.onclick=()=>tabTo(a.dataset.p));
 function related(id){
-  const l=M.links[id]; if(!l||!(l.items.length+l.decisions.length)) return "";
-  return `<div class="lbl">Related</div><ul>${l.items.map(i=>`<li>${esc(i.kind)} #${i.id} [${esc(i.status)}] ${esc(i.title)}</li>`).join("")}${l.decisions.map(d=>`<li>decision #${d.id} [${esc(d.status)}] ${esc(d.title)}</li>`).join("")}</ul>`;
+  const l=M.links[id]; if(!l||!l.items.length) return "";
+  return `<div class="lbl">Related</div><ul>${l.items.map(i=>`<li>${esc(i.kind)} #${i.id} [${esc(i.status)}] ${esc(i.title)}</li>`).join("")}</ul>`;
 }
 const has=v=>v!=null&&v!==""&&!(Array.isArray(v)&&!v.length);
 const fld=(l,v)=>has(v)?`<div class="lbl">${l}</div><div class="field">${esc(v)}</div>`:"";
@@ -595,8 +595,8 @@ function objHead(o){
   <span class="chip">${esc(TYPE_LABEL[o.type]||o.type||"")}</span>${o.status?`<span class="chip">${esc(o.status)}</span>`:""}${(o.tags||[]).map(t=>`<span class="chip">#${esc(t)}</span>`).join("")}
   ${fld("Description",o.description)}`;
 }
-function showObj(o){
-  tabTo("info"); $("#pinfo").dataset.open="1"; pickConn=null; pickEdge=null;
+function showObj(o,keepTab){
+  if(!keepTab) tabTo("info"); $("#pinfo").dataset.open="1"; delete $("#pinfo").dataset.step; pickConn=null; pickEdge=null;
   const inc=conns().filter(c=>c.to===o.id), out=conns().filter(c=>c.from===o.id);
   $("#pinfo").innerHTML=`<div id="objhead">${objHead(o)}</div>
   ${has(o.owns)?`<div class="lbl">Owns</div><div class="field mono">${o.owns.map(esc).join("<br>")}</div>`:""}${layBehavior(o)}
@@ -630,8 +630,8 @@ function connBody(c){
   ${c.status&&c.status!=="live"?`<span class="chip">${esc(c.status)}</span>`:""}${fld("Summary",c.description)}${layContract(c)}${flh}`;
 }
 function bindFlows(){$("#pinfo").querySelectorAll("[data-f]").forEach(el=>el.onclick=()=>{flow=el.dataset.f;step=+el.dataset.s;renderFlows();tabTo("flows");showStep()})}
-function showConn(c){
-  tabTo("info"); $("#pinfo").dataset.open="1"; pickConn=c.id; pickEdge=null; selected=null;
+function showConn(c,keepTab){
+  if(!keepTab) tabTo("info"); $("#pinfo").dataset.open="1"; delete $("#pinfo").dataset.step; pickConn=c.id; pickEdge=null; selected=null;
   $("#pinfo").innerHTML=`<div class="lbl">Connection</div><h2>${esc(c.name||"Connection")}</h2>${connBody(c)}`;
   bindFlows(); paint();
 }
@@ -639,7 +639,7 @@ function showConn(c){
 function showEdge(e,key){
   if(e.list.length===1) return showConn(e.list[0]);
   const all=expanded.has(key);
-  tabTo("info"); $("#pinfo").dataset.open="1"; pickConn=null; pickEdge=key; selected=null;
+  tabTo("info"); $("#pinfo").dataset.open="1"; delete $("#pinfo").dataset.step; pickConn=null; pickEdge=key; selected=null;
   $("#pinfo").innerHTML=`<div class="ehead"><div class="lbl">Connection</div><button id="eall">${all?"Merge":"Show all"}</button></div><h2>${esc(nm(e.from))} → ${esc(nm(e.to))}</h2>
   <div class="lbl">${e.list.length} connections, click to see the contract</div><div class="clist">${e.list.map(cRow).join("")}</div>`;
   $("#eall").onclick=()=>{if(all)expanded.delete(key);else{expanded.add(key);springKey=key}render(true);showEdge(e,key)};
@@ -669,7 +669,19 @@ function stepScope(st){
 const scopePath=F=>[M.name||"Landscape",...(F?chain(F).map(nm):[])].join(" › ");
 // Steps never move the camera: a step inside a closed module lights that module;
 // the user drills in when they want, and the highlight follows to that level.
-function showStep(){render(true)}
+function showStep(){render(true);stepDetail()}
+// Details follow the current flow step: the link (with its contract) or the object an `at` step works in.
+// Fills the Details tab without switching to it, so stepping through a flow keeps the flow list in view.
+function stepDetail(){
+  // No step, or its object/link is gone: drop a stale step detail (other Details stay as they are).
+  const st=curStep(), e=st&&stepEnds(st), o=e?.at&&byId[e.at], c=!e?.at&&M.connections.find(x=>x.id===e?.c?.id);
+  if(!o&&!c){if($("#pinfo").dataset.step)deselect(); delete $("#pinfo").dataset.step; return}
+  if(o) showObj(o,true); else showConn(c,true); $("#pinfo").dataset.step="1";
+  const v=st.payload||st.values;
+  $("#pinfo").insertAdjacentHTML("afterbegin",`<div class="lbl">Flow step ${step+1}${st.reverse?" · reverse":""}</div>
+  ${has(st.text)?`<div class="field">${esc(st.text)}</div>`:""}${has(st.transition)?`<div class="lbl">Transition</div><div class="field mono">${esc(st.transition)}</div>`:""}
+  ${has(v)?`<pre>${esc(typeof v==="string"?v:JSON.stringify(v,null,2))}</pre>`:""}<hr style="border:0;border-top:1px solid var(--line);margin:12px 0">`);
+}
 function renderFlows(){
   const fl=M?.flows||[];
   if(!fl.length){$("#pflows").innerHTML='<p class="empty">This model has no flows.</p>';return}
@@ -765,9 +777,18 @@ $("#home").href="/#/p/"+encodeURIComponent(P.get("project")||"")+"/c4";
 if(window.top===window){location.replace("/#/p/"+encodeURIComponent(P.get("project")||"")+"/c4"+location.hash.replace(/^#(.+)/,"/$1"))}
 document.body.classList.add("embed");
 if(P.get("shell")) document.body.classList.add("shell");
-fetch("/api/c4"+location.search).then(r=>r.ok?r.json():Promise.reject(r.status))
-  .then(d=>load({...d.meta,objects:d.objects,connections:d.connections,flows:d.flows,links:d.links,open_issues:d.open_issues,layered:d.layered,contracts:d.contracts,behavior:d.behavior}))
-  .catch(e=>{$("#drop").textContent=e===404?"No C4 map (layered format) for this project":`Could not load model (${e}).`});
+const fetchModel=()=>fetch("/api/c4"+location.search).then(r=>r.ok?r.json():Promise.reject(r.status))
+  .then(d=>({...d.meta,objects:d.objects,connections:d.connections,flows:d.flows,links:d.links,open_issues:d.open_issues,layered:d.layered,contracts:d.contracts,behavior:d.behavior}));
+fetchModel().then(load).catch(e=>{$("#drop").textContent=e===404?"No C4 map (layered format) for this project":`Could not load model (${e}).`});
+/* live: after a `c4 import` (or a linked task/issue change) reload the model and stay on the same level, flow and step */
+{let ver=null;const live=async()=>{
+  if(document.hidden||busy||drag)return;
+  try{const v=(await (await fetch("/api/version")).json()).version;if(ver!==null&&v!==ver){
+    const m=await fetchModel(),fl=flow,st=step,sel=selected,c={...cam};
+    load(m);  // load() re-opens the level named in the hash
+    if(sel&&byId[sel])selected=sel;cam=c;render(true);
+    if(fl&&(M.flows||[]).some(x=>x.id===fl)){flow=fl;$("#flow").value=fl;setStep(st)}}ver=v}catch{}};
+ setInterval(live,2000);document.addEventListener("visibilitychange",live)}
 </script>
 </body>
 </html>
