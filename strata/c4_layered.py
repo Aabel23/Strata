@@ -5,7 +5,7 @@ from strata import symbols
 
 STATUS = {"live", "future", "doing", "maintenance", "deprecated", "removed"}
 KINDS = {"actor", "system", "app", "store", "component", "group"}
-KEYS = {"objects": {"id", "parent", "kind", "name", "summary", "status", "tags", "owns", "behavior"},
+KEYS = {"objects": {"id", "parent", "kind", "name", "summary", "status", "tags", "owns", "behavior", "tech"},
         "links": {"id", "from", "to", "name", "summary", "detail", "status"},
         "contracts": {"id", "transport", "body", "start", "end"},
         "flows": {"id", "name", "steps"},
@@ -149,6 +149,7 @@ def _semantic(m, objs, links, cons):
         pk = kind(p) if isinstance(p, str) else None
         if pk is not None and ((k == "app" and pk != "system") or (k == "component" and pk not in ("app", "component", "group")) or pk in ("actor", "store")):
             add("C4-PARENT-LEVEL", "warn", oid, f"{k} under {pk} breaks the level order", "app goes under system; component under app/component/group; actor and store hold nothing")
+        if k in ("app", "store") and not o.get("tech"): add("C4-TECH-MISSING", "warn", oid, f"{k} has no tech", "add tech: the language, framework or engine it runs on")
         own = o.get("owns") or []
         if k != "store" and (str(oid).endswith(".py") or str(o.get("name", "")).endswith(".py") or (isinstance(own, list) and len(own) == 1 and not re.search(r"[*?]", str(own[0])) and "." in pathlib.PurePath(str(own[0])).name)):
             add("C4-FILE-OBJECT", "warn", oid, "object stands for a single file", "make it a component folder or drop it; files belong in owns")
@@ -270,6 +271,7 @@ def check(m, d, idx=None):
     for oid, o in objs.items():
         if not o.get("name"): errs.append(finding("C4-MISSING-NAME", "error", oid, "thiếu name", "thêm name"))
         if o.get("kind") not in KINDS: errs.append(finding("C4-BAD-KIND", "error", oid, f"kind '{o.get('kind')}' không hợp lệ", f"dùng một trong {sorted(KINDS)}"))
+        if o.get("tech") is not None and not isinstance(o["tech"], str): errs.append(finding("C4-BAD-TECH", "error", oid, "tech must be a string", "write tech as text, e.g. 'Python 3.12, sqlite3'"))
         if o.get("status", "live") not in STATUS: errs.append(finding("C4-BAD-STATUS", "error", oid, "status sai", f"dùng một trong {sorted(STATUS)}"))
         p = o.get("parent")
         if p is not None and p not in objs: errs.append(finding("C4-PARENT-MISSING", "error", oid, f"parent '{p}' không tồn tại", "sửa parent thành id object có thật hoặc thêm object đó"))
@@ -340,7 +342,7 @@ def _rows(m, project):
     """{table: {key: row}} the folder would write (key = the table's id column)."""
     return {
         "object": {o["id"]: {"id": o["id"], "project": project, "type": o.get("kind"), "name": o.get("name"), "parent": o.get("parent"),
-                             "description": o.get("summary"), "tags": j(o.get("tags")), "status": o.get("status"), "owns": j(o.get("owns")), "behavior": o.get("behavior")} for o in m["objects"]},
+                             "description": o.get("summary"), "tags": j(o.get("tags")), "status": o.get("status"), "owns": j(o.get("owns")), "behavior": o.get("behavior"), "technology": o.get("tech")} for o in m["objects"]},
         "connection": {x["id"]: {"id": x["id"], "project": project, "from_id": x.get("from"), "to_id": x.get("to"), "name": x.get("name"),
                                  "description": x.get("summary"), "detail": x.get("detail"), "status": x.get("status")} for x in m["links"]},
         "contract": {r["id"]: {"project": project, "id": r["id"], "transport": r.get("transport"), "body": j(r.get("body")),
@@ -419,7 +421,7 @@ def export_dir(c, project, d):
     dump(d / "map.yaml", {
         "project": keep(id=project, name=meta["name"], root=pathlib.Path(os.path.relpath(meta["root"] or d.resolve(), d.resolve())).as_posix()),
         "objects": [keep(id=o["id"], parent=o["parent"], kind=o["type"], name=o["name"], summary=o["description"], status=o["status"],
-                         tags=jl(o["tags"]), owns=jl(o["owns"]), behavior=o["behavior"]) for o in q("object")],
+                         tags=jl(o["tags"]), owns=jl(o["owns"]), behavior=o["behavior"], tech=o["technology"]) for o in q("object")],
         "links": [keep(id=x["id"], **{"from": x["from_id"]}, to=x["to_id"], name=x["name"], summary=x["description"], detail=x["detail"], status=x["status"]) for x in q("connection")]})
     files = {}
     for r in q("contract"):
@@ -508,7 +510,7 @@ def contract_text(c, project, id):
 def context_text(c, project, object=None, max_tokens=2000):
     from strata import db
     m = _model(c, project); objs = m["objects"]
-    label = lambda o: f"{o['id']} [{o['type']}] {o['name'] or ''}"
+    label = lambda o: f"{o['id']} [{o['type']}{': ' + o['technology'] if o['technology'] else ''}] {o['name'] or ''}"
     kids = lambda p: [o for o in objs.values() if o["parent"] == p]
     if object is None:
         out = [f"# {project}: {len(objs)} object, {len(m['links'])} link, {len(m['flows'])} flow"]
