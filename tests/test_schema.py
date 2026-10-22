@@ -56,3 +56,10 @@ def test_old_decision_schema_migrates(tmp_path):
     assert not c.execute("SELECT 1 FROM sqlite_master WHERE name LIKE 'decision%'").fetchone()
     assert [tuple(r) for r in c.execute("SELECT ref_kind,ref_id FROM c4_link")] == [("item", 7)]
     with pytest.raises(sqlite3.IntegrityError): c.execute("INSERT INTO c4_link VALUES('p','o','decision',1)")
+
+def test_audit_append_only(c):
+    c.execute("INSERT INTO audit(tool) VALUES('x')")
+    for sql in ("UPDATE audit SET tool='y'", "DELETE FROM audit"):
+        with pytest.raises(sqlite3.DatabaseError):
+            c.execute(sql)
+    assert c.execute("SELECT count(*) FROM audit").fetchone()[0] == 1

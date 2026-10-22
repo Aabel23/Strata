@@ -37,6 +37,9 @@ CREATE TABLE IF NOT EXISTS c4_behavior(
 CREATE TABLE IF NOT EXISTS audit(
   id INTEGER PRIMARY KEY, ts TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   project TEXT, actor_role TEXT, tool TEXT, target TEXT, before JSON, after JSON);
+-- the review->done guard trusts audit rows, so they must not be editable
+CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit BEGIN SELECT RAISE(ABORT,'audit is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit BEGIN SELECT RAISE(ABORT,'audit is append-only'); END;
 
 -- đ/Đ do not decompose, so triggers fold them to d/D; fold queries too (db.fold)
 CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(
