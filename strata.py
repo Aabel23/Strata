@@ -10,8 +10,11 @@
   strata.py doc validate FILE                     check a doc YAML (no DB)
   strata.py doc scan --project P | set --project P PATH [--feature --status --ord]
   strata.py c4 link|unlink|links --project P --object X [--item ID | --decision ID]   (links: list only)
+  strata.py c4 import DIR --project P [--force] | export DIR --project P | validate DIR   layered folder (map.yaml + contracts/ behavior/ flows/)
   strata.py c4 context --project P [--object X] [--max-tokens N]
   strata.py c4 flow --project P [--id F]          numbered step trace (no --id: list flows)
+  strata.py c4 contract ID --project P            one contract of a layered project
+  strata.py sym index --project P | ls PATH|DIR --project P [--public] | show ID --project P [--sig-only --ctx N] | find PATTERN --project P   Python symbol index (cache next to the DB)
   strata.py search Q [--project P --src item|decision|page|doc --limit N]
   strata.py decision add --project P --title T --context C --decision D --consequences Q --rejected R [--supersedes N] | set N --status S
   strata.py mcp --role main|coder|reviewer [--db]   MCP server on stdio
@@ -25,7 +28,7 @@
   strata.py item claim ID --as NAME | submit ID --note N [--as NAME] | rework ID --note N | close ID --note N | approve ID [--note --as] | reject ID --note N | release ID | dep add|rm ID DEP   (all: --json)
 """
 import argparse, json, pathlib, sqlite3, sys, threading, webbrowser
-from strata import blocks, c4, db, service
+from strata import blocks, c4, c4_layered, db, service, symbols
 
 
 def cmd_page(a):
@@ -112,6 +115,30 @@ def cmd_roadmap(a):
     return 0
 
 
+def cmd_sym(a):
+    c = db.init(a.db)
+    r = c.execute("SELECT coalesce(p.root, m.root) FROM project p LEFT JOIN c4_meta m ON m.project=p.id WHERE p.id=?", (a.project,)).fetchone()
+    if not r or not r[0]: print(f"ERROR project {a.project!r} chưa có root"); return 1
+    root, sc = r[0], symbols.connect(symbols.cache_path(db.db_path(a.db)))
+    if a.action == "index": print("indexed {}: {} file đổi, {} nguyên, {} xoá".format(a.project, *symbols.index(sc, a.project, root)))
+    elif a.action == "ls":
+        last = None
+        for s in symbols.ls(sc, a.project, a.path, a.public):
+            if s["file"] != last and a.path.rstrip("/") != s["file"]: print(f"{s['file']}:")
+            last = s["file"]; print(symbols.line(s))
+    elif a.action == "find":
+        for s in symbols.find(sc, a.project, a.pattern): print(f"{s['id']}  {symbols.line(s).partition(' ')[0]}{s['signature']}")
+    else:
+        text, ok = symbols.show(sc, a.project, root, a.id, a.sig_only, a.ctx); print(text if ok else "ERROR " + text); return 0 if ok else 1
+    return 0
+
+
+def _idx(a):
+    """(symbol cache conn, project) for `c4 validate --project` when the cache file exists, else None (direct ast)."""
+    p = symbols.cache_path(db.db_path(a.db))
+    return (symbols.connect(p), a.project) if a.project and p.exists() else None
+
+
 def cmd_write(a):
     """project / doc / item: the only write path besides import-yaml and page put."""
     c = db.init(a.db)
@@ -135,6 +162,22 @@ def cmd_write(a):
             print(c4.context_text(c, a.project, a.object, a.max_tokens))
         elif a.cmd == "c4" and a.action == "flow":
             print(c4.flow_text(c, a.project, a.id))
+        elif a.cmd == "c4" and a.action == "contract":
+            print(c4_layered.contract_text(c, a.project, a.id))
+        elif a.cmd == "c4" and a.action == "import":
+            n = c4_layered.import_dir(c, a.dir, a.project, a.force)
+            print(f"imported {a.project}: " + ", ".join(f"{v} {k}" for k, v in n.items()))
+        elif a.cmd == "c4" and a.action == "export":
+            c4_layered.export_dir(c, a.project, a.dir); print(f"exported {a.project}: {a.dir}")
+        elif a.cmd == "c4" and a.action == "port":
+            if a.port_action == "add":
+                schema = json.loads(a.schema) if a.schema else None
+                service.add_c4_port(c, "main", a.project, a.object, a.id, a.name, a.direction, a.kind, schema)
+                print("ok")
+            else:
+                for p in service.list_c4_ports(c, a.project, a.object): print(json.dumps(p, ensure_ascii=False))
+        elif a.cmd == "c4" and a.action == "kind":
+            service.set_c4_kind(c, "main", a.project, a.object, a.kind); print("ok")
         elif a.cmd == "c4" and a.action == "links":
             l = db.links_for(c, a.project, a.object)
             for i in l["items"]: print(f"{i['kind']} #{i['id']} [{i['status']}] {i['title']}")
@@ -163,6 +206,7 @@ def main(argv=None):
         return p
     add("init")
     add("import-yaml", (["file"], {}), (["--project"], {"required": True}), (["--force"], {"action": "store_true"}))
+    add("export-yaml", (["file"], {}), (["--project"], {"required": True}))
     add("validate", (["file"], {"nargs": "?"}), (["--project"], {}))
     add("serve", (["--project"], {}), (["--port"], {"type": int, "default": 8740}), (["--host"], {"default": "127.0.0.1"}), (["--allow-host"], {"action": "append", "default": []}))
     pg = sub.add_parser("page"); ps = pg.add_subparsers(dest="action", required=True)
@@ -204,14 +248,31 @@ def main(argv=None):
     group("decision", {"add": [(["--project"], req), (["--title"], req), (["--context"], req), (["--decision"], req), (["--consequences"], req),
                                (["--rejected"], req), (["--supersedes"], {"type": int})],
                        "set": [(["id"], {"type": int}), (["--status"], {"required": True, "choices": ["proposed", "accepted", "superseded"]})]})
+    group("sym", {"index": [(["--project"], req)], "ls": [(["path"], {}), (["--project"], req), (["--public"], {"action": "store_true"})],
+                  "show": [(["id"], {}), (["--project"], req), (["--sig-only"], {"action": "store_true"}), (["--ctx"], {"type": int, "default": 0})],
+                  "find": [(["pattern"], {}), (["--project"], req)]})
     add("mcp", (["--role"], {"required": True, "choices": service.ROLES}))
+    g4 = sub.add_parser("c4"); gs4 = g4.add_subparsers(dest="action", required=True)
     ref = [(["--project"], req), (["--object"], req), (["--item"], {"type": int}), (["--decision"], {"type": int})]
-    group("c4", {"link": ref, "unlink": ref, "links": ref[:2],
-                 "context": [(["--project"], req), (["--object"], {}), (["--max-tokens"], {"type": int, "default": 2000})],
-                 "flow": [(["--project"], req), (["--id"], {})]})
+    for n, args in {"link": ref, "unlink": ref, "links": ref[:2],
+                    "context": [(["--project"], req), (["--object"], {}), (["--max-tokens"], {"type": int, "default": 2000})],
+                    "flow": [(["--project"], req), (["--id"], {})], "contract": [(["id"], {}), (["--project"], req)],
+                    "import": [(["dir"], {}), (["--project"], req), (["--force"], {"action": "store_true"})],
+                    "export": [(["dir"], {}), (["--project"], req)], "validate": [(["dir"], {}), (["--project"], {})]}.items():
+        p = gs4.add_parser(n); p.add_argument("--db")
+        for x in args: p.add_argument(*x[0], **x[1])
+    p = gs4.add_parser("port"); p.add_argument("--db")
+    ps4 = p.add_subparsers(dest="port_action", required=True)
+    p = ps4.add_parser("add"); p.add_argument("--db"); p.add_argument("--project", required=True); p.add_argument("--object", required=True); p.add_argument("--id", required=True); p.add_argument("--name", required=True)
+    p.add_argument("--direction", required=True, choices=["input", "output"]); p.add_argument("--kind"); p.add_argument("--schema")
+    p = ps4.add_parser("list"); p.add_argument("--db"); p.add_argument("--project", required=True); p.add_argument("--object")
+    p = gs4.add_parser("kind"); p.add_argument("--db"); ks4 = p.add_subparsers(dest="kind_action", required=True)
+    p = ks4.add_parser("set"); p.add_argument("--db"); p.add_argument("--project", required=True); p.add_argument("--object", required=True); p.add_argument("--kind", required=True)
     a = ap.parse_args(argv)
     if a.cmd == "doc" and a.action == "validate": return cmd_doc_validate(a)
     if a.cmd == "roadmap": return cmd_roadmap(a)
+    if a.cmd == "sym": return cmd_sym(a)
+    if a.cmd == "c4" and a.action == "validate": return c4_layered.report(a.dir, _idx(a))
     if a.cmd in ("project", "doc", "item", "c4", "search", "decision", "task"): return cmd_write(a)
     if a.cmd == "mcp":
         from strata import mcp
@@ -222,6 +283,10 @@ def main(argv=None):
         try: n = c4.import_yaml(db.init(a.db), a.file, a.project, a.force)
         except (OSError, ValueError, TypeError, AttributeError, sqlite3.IntegrityError) as e: print("ERROR import:", e); return 1
         print(f"imported {a.project}: {n['object']} object, {n['connection']} connection, {n['flow']} flow"); return 0
+    if a.cmd == "export-yaml":
+        try: c4.export_yaml(db.init(a.db), a.project, a.file)
+        except (OSError, ValueError, KeyError, TypeError) as e: print("ERROR export:", e); return 1
+        print(f"exported {a.project}: {a.file}"); return 0
     if a.cmd == "validate":
         if a.project: return c4.validate_db(db.init(a.db), a.project)
         if a.file: return c4.validate_file(a.file)

@@ -1,11 +1,11 @@
 """C4 model: YAML import into the DB, and validation (from a YAML file or from the DB)."""
-import json, pathlib
+import json, os, pathlib
 import yaml
 
 TYPES = {"actor", "system", "app", "store", "component", "group", "file", "function"}
 IFACE_KINDS = {"http", "function", "queue", "event"}
-CONN_KINDS = {"network", "call", "queue"}
-STATUS = {"live", "future", "deprecated", "removed"}
+CONN_KINDS = {"api", "network", "call", "queue"}
+STATUS = {"live", "future", "doing", "maintenance", "deprecated", "removed"}
 # Which parent types each type may sit under (None = top level).
 PARENTS = {"actor": {None, "group"}, "system": {None, "group"}, "group": {None, "group", "system", "app"},
            "app": {"system", "group"}, "store": {"system", "group"}, "component": {"app", "group"},
@@ -13,8 +13,9 @@ PARENTS = {"actor": {None, "group"}, "system": {None, "group"}, "group": {None, 
 
 
 KEYS = {
-    "objects": {"id", "type", "name", "parent", "technology", "description", "tags", "links", "status", "responsibilities", "state", "interfaces"},  # interfaces: nested by read_model
-    "connections": {"id", "from", "to", "name", "technology", "status", "direction", "tags", "description", "feature", "interface", "payload", "kind"},
+    "objects": {"id", "type", "name", "parent", "technology", "description", "tags", "links", "status", "responsibilities", "state", "interfaces", "kind", "ports"},  # nested contracts
+    "ports": {"id", "name", "direction", "kind", "schema"},
+    "connections": {"id", "from", "to", "name", "technology", "status", "direction", "tags", "description", "feature", "interface", "payload", "kind", "from_port", "to_port"},
     "interfaces": {"id", "object", "kind", "name", "signature", "purpose", "input", "output", "errors"},
     "flows": {"id", "name", "steps"},
     "steps": {"id", "connection", "at", "from", "to", "text", "payload", "interface", "reverse"}}
@@ -54,7 +55,8 @@ def check(m, root):
     # Unquoted ", " inside a flow mapping silently becomes an extra key: flag any unknown key.
     for sec, keys in KEYS.items():
         rows = m.get(sec) or []
-        if sec == "steps": rows = [(f"flow {f.get('id')} bước {i}", st) for f in m.get("flows") or [] for i, st in enumerate(f.get("steps") or [], 1) if isinstance(st, dict)]
+        if sec == "ports": rows = [(f"object {o.get('id')} port {p.get('id')}", p) for o in m.get("objects") or [] if isinstance(o, dict) for p in o.get("ports") or [] if isinstance(p, dict)]
+        elif sec == "steps": rows = [(f"flow {f.get('id')} bước {i}", st) for f in m.get("flows") or [] for i, st in enumerate(f.get("steps") or [], 1) if isinstance(st, dict)]
         else: rows = [(f"{sec} {r.get('id')}", r) for r in rows if isinstance(r, dict)]
         for where, r in rows:
             bad = [k for k in r if k not in keys]
@@ -88,6 +90,16 @@ def check(m, root):
         ifaces[i.get("id")] = i
         if i.get("object") not in objs: errs.append(f"interface {i.get('id')}: object '{i.get('object')}' không tồn tại")
         if i.get("kind") is not None and i["kind"] not in IFACE_KINDS: errs.append(f"interface {i.get('id')}: kind '{i['kind']}' không hợp lệ")
+    ports = {}
+    for o in ol:
+        for p in o.get("ports") or []:
+            if not isinstance(p, dict):
+                errs.append(f"object {o.get('id')}: port phải là mapping"); continue
+            pid = p.get("id")
+            if not pid: errs.append(f"object {o.get('id')}: port thiếu id")
+            elif pid in ports: errs.append(f"trùng id port: {pid}")
+            else: ports[pid] = (o.get("id"), p)
+            if p.get("direction") not in ("input", "output"): errs.append(f"port {pid}: direction phải là input hoặc output")
     used = set()
     cl = [c for c in m.get("connections") or [] if isinstance(c, dict)]
     _dups(errs, "connection", [c for c in cl if "id" in c])
@@ -101,6 +113,10 @@ def check(m, root):
             if i is None: errs.append(f"connection {cid}: interface '{c['interface']}' không tồn tại")
             elif i.get("object") != c.get("to"): errs.append(f"connection {cid}: interface '{c['interface']}' không thuộc '{c.get('to')}'")
         if c.get("kind") is not None and c["kind"] not in CONN_KINDS: errs.append(f"connection {cid}: kind '{c['kind']}' không hợp lệ")
+        for field, end in (("from_port", "from"), ("to_port", "to")):
+            pid = c.get(field)
+            if pid is not None and (pid not in ports or ports[pid][0] != c.get(end)):
+                errs.append(f"connection {cid}: {field} '{pid}' không thuộc object '{c.get(end)}'")
         if not c.get("technology"): warns.append(f"connection {cid} ({c.get('from')}→{c.get('to')}): thiếu technology")
     fl = [f for f in m.get("flows") or [] if isinstance(f, dict)]
     _dups(errs, "flow", fl)
@@ -202,31 +218,36 @@ def import_yaml(c, path, project, force=False):
     conns = [{**x, "id": x.get("id", f"c{i}")} for i, x in enumerate(m.get("connections") or [])]
     flows = m.get("flows") or []
     ifaces = m.get("interfaces") or []
-    for kind, rows in (("object", objs), ("connection", conns), ("flow", flows), ("interface", ifaces)):
+    ports = [dict(p, object=o["id"]) for o in objs for p in o.get("ports") or []]
+    for kind, rows in (("object", objs), ("connection", conns), ("flow", flows), ("interface", ifaces), ("port", ports)):
         ids = [r.get("id") for r in rows]
         if None in ids or len(set(ids)) != len(ids): raise ValueError(f"{kind}: thiếu hoặc trùng id")
     j = lambda v: json.dumps(v, ensure_ascii=False) if v is not None else None
     with c:
         before = _counts(c, project)
-        c.execute("INSERT INTO c4_meta VALUES(?,?,?,?,?) ON CONFLICT(project) DO UPDATE SET name=excluded.name,"
-                  "root=excluded.root,layout=excluded.layout,tags=excluded.tags",
-                  (project, m.get("name") or project, str(root), m.get("layout"), j(m.get("tags"))))
+        c.execute("INSERT INTO c4_meta(project,name,root,layout,tags,source) VALUES(?,?,?,?,?,?) ON CONFLICT(project) DO UPDATE SET name=excluded.name,"
+                  "root=excluded.root,layout=excluded.layout,tags=excluded.tags,source=excluded.source",
+                  (project, m.get("name") or project, str(root), m.get("layout"), j(m.get("tags")), str(pathlib.Path(path).resolve())))
         for o in objs:
-            c.execute("INSERT INTO c4_object(id,project,type,name,parent,technology,description,tags,links,status,responsibilities,state) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) "
+            c.execute("INSERT INTO c4_object(id,project,type,name,parent,technology,description,tags,links,status,responsibilities,state,kind) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) "
                       "ON CONFLICT(project,id) DO UPDATE SET type=excluded.type,name=excluded.name,parent=excluded.parent,"
                       "technology=excluded.technology,description=excluded.description,tags=excluded.tags,links=excluded.links,status=excluded.status,"
-                      "responsibilities=excluded.responsibilities,state=excluded.state",
+                      "responsibilities=excluded.responsibilities,state=excluded.state,kind=excluded.kind",
                       (o["id"], project, o.get("type"), o.get("name"), o.get("parent"), o.get("technology"),
-                       o.get("description"), j(o.get("tags")), j(o.get("links")), o.get("status"), j(o.get("responsibilities")), o.get("state")))
+                       o.get("description"), j(o.get("tags")), j(o.get("links")), o.get("status"), j(o.get("responsibilities")), o.get("state"), o.get("kind")))
+        for p in ports:
+            c.execute("INSERT INTO c4_port(project,id,object_id,name,direction,kind,schema_json) VALUES(?,?,?,?,?,?,?) "
+                      "ON CONFLICT(project,id) DO UPDATE SET object_id=excluded.object_id,name=excluded.name,direction=excluded.direction,kind=excluded.kind,schema_json=excluded.schema_json",
+                      (project, p["id"], p["object"], p.get("name"), p.get("direction"), p.get("kind"), j(p.get("schema"))))
         for x in conns:
-            c.execute("INSERT INTO c4_connection(id,project,from_id,to_id,name,technology,status,direction,tags,description,feature,interface,payload,kind) "
-                      "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            c.execute("INSERT INTO c4_connection(id,project,from_id,to_id,name,technology,status,direction,tags,description,feature,interface,payload,kind,from_port_id,to_port_id) "
+                      "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                       "ON CONFLICT(project,id) DO UPDATE SET from_id=excluded.from_id,to_id=excluded.to_id,name=excluded.name,"
                       "technology=excluded.technology,status=excluded.status,direction=excluded.direction,tags=excluded.tags,description=excluded.description,"
-                      "feature=excluded.feature,interface=excluded.interface,payload=excluded.payload,kind=excluded.kind",
+                      "feature=excluded.feature,interface=excluded.interface,payload=excluded.payload,kind=excluded.kind,from_port_id=excluded.from_port_id,to_port_id=excluded.to_port_id",
                       (x["id"], project, x.get("from"), x.get("to"), x.get("name"), x.get("technology"),
                        x.get("status"), x.get("direction"), j(x.get("tags")), x.get("description"),
-                       x.get("feature"), x.get("interface"), j(x.get("payload")), x.get("kind")))
+                       x.get("feature"), x.get("interface"), j(x.get("payload")), x.get("kind"), x.get("from_port"), x.get("to_port")))
         for i in ifaces:
             c.execute("INSERT INTO c4_interface(project,id,object_id,kind,name,signature,purpose,input,output,errors) VALUES(?,?,?,?,?,?,?,?,?,?) "
                       "ON CONFLICT(project,id) DO UPDATE SET object_id=excluded.object_id,kind=excluded.kind,name=excluded.name,"
@@ -237,9 +258,12 @@ def import_yaml(c, path, project, force=False):
             c.execute("INSERT INTO c4_flow(id,project,name,steps) VALUES(?,?,?,?) "
                       "ON CONFLICT(project,id) DO UPDATE SET name=excluded.name,steps=excluded.steps",
                       (f["id"], project, f.get("name"), j(f.get("steps"))))
-        for t, rows in (("object", objs), ("connection", conns), ("flow", flows), ("interface", ifaces)):
+        for t, rows in (("connection", conns), ("flow", flows), ("interface", ifaces), ("port", ports), ("object", objs)):
             keep = [r["id"] for r in rows]
-            c.execute(f"DELETE FROM c4_{t} WHERE project=? AND id NOT IN ({','.join('?' * len(keep))})", (project, *keep))
+            if t == "port":
+                c.execute(f"DELETE FROM c4_port WHERE project=? AND id NOT IN ({','.join('?' * len(keep))})", (project, *keep))
+            else:
+                c.execute(f"DELETE FROM c4_{t} WHERE project=? AND id NOT IN ({','.join('?' * len(keep))})", (project, *keep))
         after = _counts(c, project)
         c.execute("INSERT INTO audit(project,actor_role,tool,target,before,after) VALUES(?,?,?,?,?,?)",
                   (project, "cli", "import-yaml", str(path), j(before), j(after)))
@@ -258,12 +282,12 @@ def read_model(c, project):
     """The model dict (same shape as the YAML) or None if the project was never imported.
 
     Shape (keys whose value is NULL are omitted, except `interfaces`, always a list):
-      {name, root, layout?, tags?: {tag: {color}},
+      {name, root, layout?, tags?: {tag: {color}}, source?: YAML path,
        objects: [{id, type: actor|system|app|store|component|group|file|function, name, parent?, technology?,
-                  description?, tags?: [str], links?: [path|url], status?, responsibilities?: [str], state?: str,
+                  description?, tags?: [str], links?: [path|url], status?, responsibilities?: [str], state?: str, kind?: str,
                   interfaces: [{id, object, kind?: http|function|queue|event, name?, signature?, purpose?,
                                 input?, output?, errors?: [str]}]}],
-       connections: [{id, from, to, name?, technology?, status?, direction?, tags?, description?,
+       connections: [{id, from, to, name?, technology?, status?, direction?, tags?, description?, from_port?, to_port?,
                       feature?: str, interface?: interface id on `to`, payload?: {request?, response?},
                       kind?: network|call|queue}],
        flows: [{id, name?, steps: [{id?, connection+reverse? | at | from+to, text?, payload?: str, interface?}]}],
@@ -274,11 +298,40 @@ def read_model(c, project):
     if not meta: return None
     q = lambda t: c.execute(f"SELECT * FROM c4_{t} WHERE project=? ORDER BY rowid", (project,))
     ifaces = [_row(r, (("object_id", "object"),), ("errors",)) for r in q("interface")]
-    objects = [_row(r, jsons=("tags", "links", "responsibilities")) for r in q("object")]
-    for o in objects: o["interfaces"] = [i for i in ifaces if i["object"] == o["id"]]
-    return {**_row(meta, jsons=("tags",)), "root": meta["root"], "objects": objects,
-            "connections": [_row(r, (("from_id", "from"), ("to_id", "to")), ("tags", "payload")) for r in q("connection")],
-            "flows": [_row(r, jsons=("steps",)) for r in q("flow")], "interfaces": ifaces}
+    objects = [_row(r, jsons=("tags", "links", "responsibilities", "owns")) for r in q("object")]
+    ports = [_row(r, (("object_id", "object"),), ("schema_json",)) for r in c.execute("SELECT * FROM c4_port WHERE project=? ORDER BY rowid", (project,))]
+    for p in ports:
+        if "schema_json" in p: p["schema"] = p.pop("schema_json")
+    for o in objects:
+        o["interfaces"] = [i for i in ifaces if i["object"] == o["id"]]
+        attached = [{k: v for k, v in p.items() if k != "object"} for p in ports if p["object"] == o["id"]]
+        if attached: o["ports"] = attached
+    connections = [_row(r, (("from_id", "from"), ("to_id", "to"), ("from_port_id", "from_port"), ("to_port_id", "to_port")), ("tags", "payload")) for r in q("connection")]
+    result = {**_row(meta, jsons=("tags",)), "root": meta["root"], "objects": objects,
+              "connections": connections, "flows": [_row(r, jsons=("steps",)) for r in q("flow")], "interfaces": ifaces}
+    result.pop("positions", None)  # legacy column, no longer used
+    return result
+
+
+def export_model(c, project):
+    """Return a YAML-ready model in canonical import shape, excluding DB-only fields."""
+    m = read_model(c, project)
+    if m is None: raise KeyError(f"project {project!r} has no C4 model")
+    source = pathlib.Path(m.get("source") or ".").resolve()
+    root = pathlib.Path(m.get("root") or ".").resolve()
+    m["root"] = pathlib.Path(os.path.relpath(root, source.parent)).as_posix()
+    m.pop("source", None); m.pop("project", None)
+    m["objects"] = [{k: v for k, v in o.items() if k not in ("interfaces",) and (k != "ports" or v)} for o in m["objects"]]
+    if not m.get("tags"): m.pop("tags", None)
+    return m
+
+
+def export_yaml(c, project, path):
+    """Export the DB model to a YAML file; root remains anchored to its original absolute path."""
+    m = export_model(c, project)
+    original_root = pathlib.Path((c.execute("SELECT root FROM c4_meta WHERE project=?", (project,)).fetchone()[0] or ".")).resolve()
+    m["root"] = pathlib.Path(os.path.relpath(original_root, pathlib.Path(path).resolve().parent)).as_posix()
+    pathlib.Path(path).write_text(yaml.safe_dump(m, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 
 # ---- text context for agents (port of lift/view in viewer/index.html) ----
@@ -306,7 +359,8 @@ def _est(s): return len(s) // 4
 
 
 def context_text(c, project, object=None, max_tokens=2000):
-    from strata import db
+    from strata import c4_layered, db
+    if c4_layered.is_layered(c, project): return c4_layered.context_text(c, project, object, max_tokens)
     m = read_model(c, project)
     if m is None: raise ValueError(f"project '{project}' chưa import")
     byid = {o["id"]: o for o in m["objects"]}
@@ -399,6 +453,8 @@ def _path(byid, i):
 
 def flow_text(c, project, flow=None):
     """Numbered one-line-per-step trace of a flow, or the flow list when flow is None."""
+    from strata import c4_layered
+    if c4_layered.is_layered(c, project): return c4_layered.flow_text(c, project, flow)
     m = read_model(c, project)
     if m is None: raise ValueError(f"project '{project}' chưa import")
     if flow is None:
@@ -423,3 +479,4 @@ def flow_text(c, project, flow=None):
         if s.get("payload"): ln += f" | payload: {s['payload']}"
         out.append(ln)
     return "\n".join(out)
+

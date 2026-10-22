@@ -87,12 +87,15 @@ def _finish_page(c):
 # columns added after a table was first created: (table, column, type)
 ADDED = [("c4_connection", "description", "TEXT"), ("c4_connection", "feature", "TEXT"), ("c4_connection", "interface", "TEXT"),
          ("c4_connection", "payload", "JSON"), ("c4_connection", "kind", "TEXT"),
+         ("c4_connection", "from_port_id", "TEXT"), ("c4_connection", "to_port_id", "TEXT"),
+         ("c4_object", "kind", "TEXT"), ("c4_object", "owns", "JSON"), ("c4_object", "behavior", "TEXT"), ("c4_connection", "detail", "TEXT"),
          ("c4_object", "responsibilities", "JSON"), ("c4_object", "state", "TEXT"),
-         ("item", "phase", "INT"), ("item", "roadmap", "TEXT"), ("doc", "prev_status", "TEXT"), ("doc", "summary", "TEXT"), ("doc", "code", "JSON")]
+         ("item", "phase", "INT"), ("item", "roadmap", "TEXT"), ("doc", "prev_status", "TEXT"), ("doc", "summary", "TEXT"), ("doc", "code", "JSON"), ("c4_meta", "positions", "JSON"), ("c4_meta", "source", "TEXT")]
 
 def _migrate(c):
     """ALTER old tables up to the current schema. Returns True if c4_object was renamed to c4_object_old
     (its type CHECK predates 'file'/'function' and SQLite cannot alter a CHECK) for init to copy back."""
+    c.execute("DROP TABLE IF EXISTS object_layout")  # stored layout removed (#185): renderer lays out
     for t, col, typ in ADDED:
         cols = [r["name"] for r in c.execute(f"PRAGMA table_info({t})")]
         if cols and col not in cols: c.execute(f"ALTER TABLE {t} ADD COLUMN {col} {typ}")

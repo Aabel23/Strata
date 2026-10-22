@@ -35,6 +35,8 @@ Route (GET): `/` shell, `/c4` viewer C4, `/pages`, `/page/<p>/<slug>`, `/api/pro
 `/api/decisions?project=`, `/api/docs?project=`, `/api/audit?project=&limit=`, `/api/search?q=&project=` (FTS, bm25, tối đa 30),
 `/docs/<project>/<path>` (phục vụ cả cây `docs_dir`; chặn `..`, dotfile, `.db`). Giá trị lọc ngoài whitelist trả 400.
 
+Route (POST, chỉ các ngoại lệ C4 có phạm vi hẹp — xem [CLAUDE.md](CLAUDE.md) luật cứng #1): `/api/c4/object` nhận `op=create|update|move|delete` (payload object/fields tương ứng; payload cũ `{id, fields}` vẫn sửa name/description/technology/status); `/api/c4/port` nhận `op=create|update|delete`; `/api/c4/link` nhận `op=create|update|delete`. Bố cục do viewer tự tính, không lưu. Các route giữ kiểm tra Host/Origin/JSON/size, validate model, ghi DB và audit transactionally. SQLite là nguồn chuẩn; YAML chỉ import/export.
+
 ### Liên kết object với task/decision, context cho agent
 
 ```

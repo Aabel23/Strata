@@ -1,112 +1,123 @@
-# Kiến trúc Strata
+# Strata Architecture
 
-Tài liệu cho người sửa code Strata. Cách dùng xem [README.md](../../README.md); agent vẽ map C4 xem [AGENT_C4.md](../AGENT_C4.md).
+For people who modify the Strata code. For usage see [README.md](../../README.md); for agents drawing the C4 map see [AGENT_C4.md](../AGENT_C4.md).
 
-## 1. Tổng quan
+## 1. Overview
 
-Strata là công cụ cục bộ quản lý tri thức nhiều project: task/issue, decision, page dạng block, mục lục tài liệu HTML, bản đồ C4 và nhật ký audit. Tất cả nằm trong **một file SQLite**.
+Strata is a local tool for managing the knowledge of multiple projects: tasks/issues, decisions, block-based pages, an HTML document index, C4 maps and an audit log. Everything lives in **a single SQLite file**.
 
-Nguyên tắc:
+Principles:
 
-- **Ghi qua CLI, đọc qua web.** Server chỉ có `GET`. Mọi thay đổi dữ liệu đi qua `strata.py` và để lại dòng `audit`.
-- **Model trước, sơ đồ sau.** C4 viết bằng YAML, nạp vào DB; viewer vẽ từ DB, không lưu toạ độ.
-- **Không phụ thuộc nặng.** Python stdlib + PyYAML; JS thuần, không build, không CDN (thư viện ngoài nằm ở `viewer/vendor/`).
+- **Write through audited services.** CLI/MCP and three scoped viewer routes use the shared service layer. `POST /api/c4/object` mutates objects; `/api/c4/port` mutates ports; `/api/c4/link` mutates connections; no route stores layout. Every route validates and writes the DB source of truth and audit row transactionally, with Host, Origin, JSON, and size checks. YAML is only an import/export format; it is not mutated by viewer edits.
+- **Database is the source of truth.** C4 YAML is an import/export format; the viewer reads the DB. The renderer owns layout: no coordinates are stored.
+- **No heavy dependencies.** Python stdlib + PyYAML; vanilla JS, no build, no CDN (third-party libraries live in `viewer/vendor/`).
 
 ```
- YAML / JSON / docs_dir ──► strata.py (CLI) ──► SQLite ◄── strata/server.py (GET) ◄── trình duyệt (viewer/)
+ YAML / JSON / docs_dir ──► strata.py (CLI) ──► SQLite ◄── strata/server.py (GET + scoped C4 POST) ◄── browser (viewer/)
                                    │                                     ▲
-                                   └──────── c4 context / flow ──► agent ┘ (văn bản gọn)
+                                   └──────── c4 context / flow ──► agent ┘ (compact text)
 ```
 
-## 2. Cấu trúc thư mục
+## 2. Directory layout
 
-| Đường dẫn | Vai trò |
+| Path | Role |
 |---|---|
-| `strata.py` | Điểm vào CLI (argparse), gọi xuống các module trong `strata/` |
-| `strata/schema.sql` | Toàn bộ schema: bảng, trigger append-only, FTS5 |
-| `strata/db.py` | Kết nối, `init` + migrate, CRUD project/doc/item/page/link, audit, `fold` cho tìm kiếm |
-| `strata/c4.py` | Đọc/validate YAML, nạp vào DB (upsert + xoá phần bị bỏ), `read_model`, phát hiện issue, `context`, trace flow |
-| `strata/blocks.py` | Validate 8 loại block của page |
-| `strata/server.py` | HTTP server chỉ đọc: file tĩnh, `/api/*`, `/docs/*`, `/code/*` |
-| `viewer/app.html`, `app.js`, `app.css` | App shell nhiều project (sidebar, tab, Ctrl+K, theme) |
-| `viewer/index.html` | Viewer C4 (zoom theo tầng, flow, tag, tìm object) |
-| `viewer/page.html`, `page.js`, `page.css` | Hiển thị page dạng block |
+| `strata.py` | CLI entry point (argparse), calls into the modules in `strata/` |
+| `strata/schema.sql` | The whole schema: tables, append-only triggers, FTS5 |
+| `strata/db.py` | Connection, `init` + migrate, CRUD for project/doc/item/page/link, audit, `fold` for search |
+| `strata/c4.py` | Read/validate YAML, load into the DB (upsert + delete what was dropped), `read_model`, issue detection, `context`, flow trace |
+| `strata/roadmap.py` | Roadmap import, syncing steps/gates into items, phases/criteria, gate checks and audit |
+| `strata/blocks.py` | Validates the 8 block types of a page |
+| `strata/server.py` | HTTP server: static files, GET `/api/*`, four scoped C4 POST routes, `/docs/*`, `/code/*` |
+| `viewer/app.html`, `app.js`, `app.css` | Multi-project app shell (sidebar, tabs, Ctrl+K, theme) |
+| `viewer/index.html` | C4 viewer (zoom by level, flows, tags, object search) |
+| `viewer/page.html`, `page.js`, `page.css` | Renders block-based pages |
+| `viewer/roadmap.js`, `viewer/app.js` | Draws the roadmap block and the roadmap tab / task board |
 | `viewer/vendor/` | `dagre` (layout), `mermaid` |
-| `viewer/assets/` | SVG trang trí phần đầu trang Tổng quan |
-| `examples/` | Model C4 mẫu (`*.strata.yaml`), page mẫu (`*.page.json`) |
-| `scripts/` | Công cụ phụ (trace ảnh hero sang SVG), không thuộc runtime |
-| `tests/` | pytest, mỗi module một file |
+| `viewer/assets/` | Decorative SVGs for the top of the Overview page |
+| `examples/` | Sample C4 models (`*.strata.yaml`), sample pages (`*.page.json`) |
+| `scripts/` | Auxiliary tools (tracing the hero image to SVG), not part of the runtime |
+| `tests/` | pytest, one file per module |
 
-## 3. Mô hình dữ liệu
+## 3. Data model
 
-Mọi bảng (trừ `project`) có cột `project`; khoá chính thường là `(project, id)`.
+Every table (except `project`) has a `project` column; the primary key is usually `(project, id)`.
 
-| Bảng | Nội dung | Ghi chú |
+| Table | Content | Notes |
 |---|---|---|
-| `project` | id, name, root, docs_dir, parent | `parent` tạo cây project ở sidebar |
+| `project` | id, name, root, docs_dir, parent | `parent` builds the project tree in the sidebar |
 | `item` | task, issue, rule, knowledge, draft, note | `status`: proposed / approved / open / doing / done / rejected |
-| `decision` | ADR: context, decision, consequences, rejected_options | **Append-only**: trigger chặn xoá và chỉ cho đổi `status`. Bắt buộc có `rejected_options` |
-| `page` | slug, title, kind (research/discussion/note), `blocks` JSON | `text` là chữ trích ra để tìm kiếm |
-| `doc` | mục lục file HTML trong `docs_dir` | `kind` theo thư mục đầu, `status` = missing khi file biến mất |
-| `c4_meta` | tên model, `root` tuyệt đối, layout, định nghĩa tag | một dòng mỗi project |
-| `c4_object` | actor, system, app, store, component, group, file, function | `parent` tạo cây; `links` trỏ file code |
-| `c4_connection` | from → to, kind (network/call/queue), status, interface, payload | |
-| `c4_interface` | hợp đồng gọi được của object: http/function/queue/event | |
-| `c4_flow` | danh sách step JSON tham chiếu connection hoặc object | |
-| `c4_link` | gắn object C4 với item/decision | |
-| `audit` | ts, tool, target, before, after | mọi lệnh ghi đều thêm dòng |
-| `search` | FTS5 trên item, decision, page, doc | trigger tự đồng bộ |
+| `decision` | ADR: context, decision, consequences, rejected_options | **Append-only**: triggers block deletes and only allow changing `status`. `rejected_options` is required |
+| `page` | slug, title, kind (research/discussion/note), `blocks` JSON | `text` is the extracted text used for search |
+| `doc` | index of HTML files in `docs_dir` | `kind` follows the first folder, `status` = missing when the file disappears |
+| `c4_meta` | model name, absolute `root`, layout, tag definitions | one row per project |
+| `c4_object` | actor, system, app, store, component, group, file, function | `parent` builds the tree; `kind` stores a subtype; `links` point to code files |
+| `c4_port` | typed input/output port attached to an object | id is unique within a project; optional JSON schema |
+| `c4_connection` | from → to, kind (network/call/queue), status, interface, payload | may reference its source and target ports |
+| `c4_interface` | callable contract of an object: http/function/queue/event | |
+| `c4_flow` | JSON list of steps referencing connections or objects | |
+| `c4_link` | links a C4 object with an item/decision | |
+| `audit` | ts, tool, target, before, after | every write command adds a row |
+| `search` | FTS5 over item, decision, page, doc | triggers keep it in sync |
 
-**Tìm kiếm tiếng Việt.** Tokenizer `unicode61 remove_diacritics 2` bỏ dấu, nhưng `đ` không tách được nên trigger đổi `đ→d`; câu truy vấn phải qua `db.fold` để đổi giống vậy.
+**Vietnamese search.** The tokenizer `unicode61 remove_diacritics 2` strips diacritics, but `đ` cannot be decomposed, so the triggers convert `đ→d`; queries must go through `db.fold` to be converted the same way.
 
-**Migrate.** `db.init` chạy `ALTER TABLE ADD COLUMN` theo danh sách `ADDED`. Khi cần đổi `CHECK` (SQLite không sửa được), bảng cũ được đổi tên thành `*_old`, tạo lại, rồi chép dữ liệu sang. Thêm cột mới: thêm vào `schema.sql` **và** `ADDED`.
+**Migration.** `db.init` runs `ALTER TABLE ADD COLUMN` according to the `ADDED` list. When a `CHECK` must change (SQLite cannot alter it), the old table is renamed to `*_old`, recreated, and the data copied over. To add a column: add it to `schema.sql` **and** `ADDED`.
 
-DB mặc định: `$STRATA_DB`, nếu không có thì `/home/abel/project/tools/strata/strata.db`. Mọi lệnh nhận `--db FILE`.
+Default DB: `$STRATA_DB`, otherwise `/home/abel/project/tools/strata/strata.db`. Every command accepts `--db FILE`.
 
-## 4. Luồng C4
+## 4. C4 flow
 
-1. **Đọc YAML** (`c4.read_yaml`): kiểm khoá hợp lệ theo `KEYS`, interface lồng trong object được tách ra.
-2. **Validate**: type thuộc `TYPES`, cha hợp lệ theo `PARENTS`, id không trùng, connection/flow trỏ tới thứ tồn tại, kind/status hợp lệ.
-3. **Nạp** (`import-yaml`): upsert từng object/connection/interface/flow, xoá những dòng không còn trong YAML, đổi `root` thành đường dẫn tuyệt đối.
-4. **Phục vụ** (`/api/c4`): `read_model` + `issues_by_object` (`dead_link`, `no_link`, `no_desc`) + `links` + `open_issues`.
-5. **Vẽ** (`viewer/index.html`): mỗi lần chỉ vẽ con trực tiếp của object đang zoom; connection ở tầng sâu được "nâng" lên nối giữa hai tổ tiên đang hiển thị và gộp nếu trùng hướng. Layout bằng dagre.
+1. **Read YAML** (`c4.read_yaml`): check keys against `KEYS`; interfaces nested in an object are split out.
+2. **Validate**: type is in `TYPES`, parent valid per `PARENTS`, ids unique, connections/flows point to things that exist, kind/status valid.
+3. **Load/export**: `import-yaml` upserts objects, ports, connections, interfaces and flows; `export-yaml` serializes the DB model. `root` is stored as an absolute path.
+4. **Serve** (`/api/c4`): `read_model` + `issues_by_object` (`dead_link`, `no_link`, `no_desc`) + `links` + `open_issues`.
+5. **Draw** (`viewer/index.html`): only the direct children of the zoomed object are drawn at a time; connections at deeper levels are "lifted" to link the two visible ancestors and merged if they share a direction. Layout uses dagre.
 
-Cây cha–con hợp lệ:
+Valid parent–child tree:
 
-| type | Tầng | Cha được phép |
+| type | Level | Allowed parent |
 |---|---|---|
 | `actor`, `system` | L1 Context | top level, `group` |
 | `app`, `store` | L2 Container | `system`, `group` |
 | `component` | L3 Component | `app`, `group` |
 | `file`, `function` | L4 Code | `component`, `file` |
-| `group` | gom nhóm | top level, `group`, `system`, `app` |
+| `group` | grouping | top level, `group`, `system`, `app` |
 
-**Cho agent.** `c4 context` in cây gọn có giới hạn token (ước `len/4`), cắt từ flow ngược lên khi vượt. `c4 flow --id F` in mỗi bước một dòng: `N. A → B [kind] text (interface) | payload: …`.
+**For agents.** `c4 context` prints a compact tree with a token limit (estimated as `len/4`), trimming from the flows upward when exceeded. `c4 flow --id F` prints one line per step: `N. A → B [kind] text (interface) | payload: …`.
 
 ## 5. Server
 
-`strata/server.py` dùng `http.server` stdlib, một connection SQLite dùng chung có khoá (`lock`).
+`strata/server.py` uses the stdlib `http.server` with one shared SQLite connection guarded by a lock (`lock`).
 
-Bảo vệ:
+Protections:
 
-- **Chặn DNS rebinding:** header `Host` phải là `127.0.0.1:PORT` hoặc `localhost:PORT`, nếu không trả 403.
-- **Chặn path traversal** ở `/docs/`, `/code/`, `/vendor/`, `/assets/`: resolve rồi kiểm `is_relative_to(root)`.
-- **Ẩn file nhạy cảm:** dotfile, `*.db`, `*.sqlite*` trả 404.
-- **Whitelist lọc:** `/api/items`, `/api/query` chỉ nhận cột/giá trị cho phép, sai trả 400.
-- `/code/*` luôn trả `text/plain`.
+- **DNS rebinding block:** the `Host` header must be `127.0.0.1:PORT` or `localhost:PORT`, otherwise 403 is returned.
+- **Path traversal block** on `/docs/`, `/code/`, `/vendor/`, `/assets/`: resolve, then check `is_relative_to(root)`.
+- **Hide sensitive files:** dotfiles, `*.db`, `*.sqlite*` return 404.
+- **Filter whitelist:** `/api/items`, `/api/query` only accept allowed columns/values, anything else returns 400.
+- `/code/*` always returns `text/plain`.
 
-Giới hạn đã biết: tài liệu HTML ở `/docs/` phục vụ cùng origin với app, không bị cô lập. Chỉ nên trỏ `docs_dir` vào tài liệu mình tin.
+Known limitation: HTML documents under `/docs/` are served from the same origin as the app and are not isolated. Only point `docs_dir` at documents you trust.
 
-Page tự làm mới: `page.js` hỏi `/api/page/<p>/<s>/version` mỗi 2 giây (`updated_at` + `PRAGMA data_version`).
+Pages refresh themselves: `page.js` polls `/api/page/<p>/<s>/version` every 2 seconds (`updated_at` + `PRAGMA data_version`).
 
-## 6. Mở rộng
+## 6. Extending
 
-- **Lệnh CLI mới:** thêm subparser trong `strata.py`, logic ở `strata/db.py` hoặc `strata/c4.py`, ghi `audit` nếu có ghi.
-- **Trường C4 mới:** `KEYS` + validate trong `c4.py`, cột trong `schema.sql` + `ADDED` trong `db.py`, câu `INSERT … ON CONFLICT` khi nạp, rồi viewer.
-- **API mới:** chỉ `GET`, giữ khoá `lock` khi đọc DB, lọc bằng whitelist.
-- **Block page:** đang cố định đúng 8 loại; muốn thêm phải chốt với chủ project trước.
+### Roadmaps by phase
 
-## 7. Chạy và kiểm thử
+The source definition is `docs/plan/<roadmap>.yaml`. The `roadmap-<id>` page stores the plan content, and `blocks.def` stores phases, C4 blocks, and criteria. Steps and gates are items with `spec.roadmap` and `spec.step_key`, so steps use the standard item workflow for claiming, submitting, and approving work. `item_dep` links gates to their steps.
+
+`strata/roadmap.py` validates definitions, C4 blocks, and criteria. Imports upsert existing records and retain omitted steps as orphans. If acceptance or verification details change after a step is done, the step becomes stale and requires user reacceptance. Criterion results are audited, `confirm_by` controls who can record them, and only the user can waive a criterion. A gate can pass only when its steps are done and all core criteria pass or have been waived by the user. `/api/roadmap` is read-only; the viewer renders its data without changing state.
+
+See [Create and Run a Roadmap](../guide/roadmap.yaml) and [Task Board and Roadmap Viewer](../guide/viewer-roadmap.yaml).
+
+- **New CLI command:** add a subparser in `strata.py`, put the logic in `strata/db.py` or `strata/c4.py`, and write `audit` if it writes.
+- **New C4 field:** `KEYS` + validation in `c4.py`, a column in `schema.sql` + `ADDED` in `db.py`, the `INSERT … ON CONFLICT` statement on load, then the viewer.
+- **New API:** hold `lock` when reading or writing the shared DB connection, and filter inputs with a whitelist. Viewer POSTs are limited to `/api/c4/object`, `/api/c4/port`, and `/api/c4/link`; layout is computed by the viewer and never stored; all use the service transaction and audit. Do not add a generic write route. Update CLAUDE.md rule #1 and section 1 if this allowlist changes.
+- **Page blocks:** fixed at exactly 8 types; adding one requires agreement from the project owner first.
+
+## 7. Running and testing
 
 ```
 python3 strata.py init --db /tmp/x.db
@@ -115,4 +126,4 @@ python3 strata.py serve --db /tmp/x.db                   # http://127.0.0.1:8740
 python3 -m pytest -q
 ```
 
-Trên máy chính, server chạy bằng systemd user `strata.service` cổng 8740: sửa Python thì `systemctl --user restart strata`, sửa CSS/JS thì chỉ cần tải lại trang (Ctrl+Shift+R).
+On the main machine the server runs as the systemd user unit `strata.service` on port 8740: after changing Python run `systemctl --user restart strata`; after changing CSS/JS just reload the page (Ctrl+Shift+R).

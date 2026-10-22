@@ -1,6 +1,6 @@
 # Hướng dẫn agent: thiết kế và sửa bản đồ C4 trong Strata
 
-Strata giữ kiến trúc dự án trong SQLite (`/home/abel/project/tools/strata/strata.db`), nhập từ một file YAML.
+Strata giữ kiến trúc dự án trong SQLite (`/home/abel/project/tools/strata/strata.db`). YAML là định dạng import/export; SQLite là nguồn dữ liệu chuẩn.
 Viewer vẽ map C4 zoom được (L1 hệ thống → L4 file/hàm) và tô từng bước của flow lên map.
 Agent đọc map qua CLI (văn bản gọn), chỉ mở YAML ở phần cần sửa.
 
@@ -78,14 +78,25 @@ python3 strata.py c4 flow --project <p> --id <flow>   # đọc lại trace
 ```
 
 Dữ liệu đổi thì chỉ cần reload trang viewer; không cần `systemctl --user restart strata` (chỉ cần khi sửa Python).
-`import-yaml` là upsert và xoá phần không còn trong YAML, nên YAML là nguồn sự thật của map. Có lỗi từ `validate` (thiếu name, id trùng, parent vòng/không tồn tại...) thì không ghi gì; `--force` để bỏ qua.
+`import-yaml` là upsert và xoá phần không còn trong YAML. Bản đồ gồm `kind`, `ports` và `from_port`/`to_port`; không lưu toạ độ, viewer luôn tự xếp bố cục. `export-yaml FILE --project P` xuất trạng thái hiện tại từ DB. Có lỗi từ `validate` (thiếu name, id trùng, parent vòng/không tồn tại...) thì không ghi gì; `--force` để bỏ qua.
+
+Các thao tác CLI có audit:
+
+```bash
+python3 strata.py c4 port add --project P --object OBJ --id PORT --name "request" --direction input --kind json --schema '{"type":"object"}'
+python3 strata.py c4 port list --project P [--object OBJ]
+python3 strata.py c4 kind set --project P --object OBJ --kind service
+```
+
+Viewer chỉ được POST tới `/api/c4/object`, `/api/c4/port` và `/api/c4/link`. Các route cùng dùng service, kiểm tra Host/Origin/JSON/body size, validate toàn model và ghi DB + audit trong một transaction. Thay đổi từ viewer chỉ ghi SQLite; muốn YAML thì chạy `export-yaml`. Không thêm route ghi tổng quát.
 
 ## 6. Tham chiếu trường
 
 | Thực thể | Trường bắt buộc | Trường tuỳ chọn |
 |---|---|---|
-| object | `id`, `type` (actor/system/app/store/component/group/file/function), `name` | `parent`, `technology`, `description`, `tags`, `links`, `status` (live/future/deprecated/removed), `responsibilities`, `state` |
-| connection | `id`, `from`, `to` | `name`, `kind` (network/call/queue), `technology`, `interface` (thuộc `to`), `payload {request, response}`, `direction`, `feature`, `description`, `status`, `tags` |
+| object | `id`, `type` (actor/system/app/store/component/group/file/function), `name` | `kind` subtype, `parent`, `technology`, `description`, `tags`, `links`, `status` (live/future/doing/maintenance/deprecated/removed; chấm góc thẻ: xanh/xám/đỏ/vàng/cam/mờ), `responsibilities`, `state`, `ports` |
+| port | `id`, `name`, `direction` (`input`/`output`) | `kind`, `schema` JSON; khai báo lồng trong object |
+| connection | `id`, `from`, `to` | `from_port`, `to_port`, `name`, `kind` (api/network/call/queue; `api` cho cửa vào dịch vụ API), `technology`, `interface` (thuộc `to`), `payload {endpoints, request, response}` (`request`/`response`: danh sách trường `"tên: ghi chú"` hoặc `{name, type, note}`; `endpoints`: `[{api: "POST /path", note, request, response}]` mỗi API một thẻ), `direction`, `feature`, `description`, `status`, `tags` |
 | interface | `id`, `object` | `kind` (http/function/queue/event), `name`, `signature`, `purpose`, `input`, `output`, `errors` |
 | flow | `id`, `steps` | `name` |
 | step | đúng một: `connection` \| `at` \| (cũ) `from`+`to` | `id`, `reverse` (chỉ với connection), `text`, `payload` (chuỗi), `interface` |

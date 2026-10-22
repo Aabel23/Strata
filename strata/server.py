@@ -1,7 +1,7 @@
 """HTTP server: C4 viewer, pages and their JSON APIs. All data comes from the DB."""
 import http.server, json, mimetypes, pathlib, re, socket, sqlite3, threading
 from urllib.parse import parse_qs, unquote, urlsplit
-from strata import blocks, c4, db, roadmap, service
+from strata import blocks, c4, c4_layered, db, roadmap, service
 
 SERVE_EXT = set(".py .js .mjs .ts .tsx .css .html .htm .md .txt .yaml .yml .json .toml .c .h .cpp .hpp .dart .java .kt .go .rs .svg .png .jpg .jpeg .gif .webp".split())
 
@@ -54,11 +54,48 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
         return project or (ps[0]["project"] if len(ps) == 1 else None)
 
     class H(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):
+        def host_ok(self):
             port = self.server.server_address[1]
             ok = {f"[{h}]:{port}" if ":" in h else f"{h}:{port}" for h in bound} | {f"localhost:{port}", f"127.0.0.1:{port}"} | extra | {f"{h}:{port}" for h in extra}
-            if (self.headers.get("Host") or "").lower() not in ok:
-                return self.send_error(403)  # DNS rebinding guard
+            return (self.headers.get("Host") or "").lower() in ok  # DNS rebinding guard
+
+        def do_POST(self):
+            """Narrow same-origin mutation routes for C4 objects, ports, and links."""
+            host = (self.headers.get("Host") or "").lower()
+            # same-origin JSON only: a cross-site form cannot set this Origin or content type
+            if not self.host_ok() or (self.headers.get("Origin") or "").lower() != f"http://{host}" \
+               or not (self.headers.get("Content-Type") or "").startswith("application/json"): return self.send_error(403)
+            path = urlsplit(self.path).path
+            if path not in ("/api/c4/object", "/api/c4/port", "/api/c4/link"): return self.send_error(404)
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                if not 0 < n <= 200_000: return self.send_error(400, "bad body size")
+                b = json.loads(self.rfile.read(n))
+                if not isinstance(b, dict): raise ValueError("body must be a JSON object")
+                proj = b.get("project") or default_project()
+                with lock:
+                    op = b.get("op")
+                    if path == "/api/c4/object":
+                        if op is None:  # #162 compatibility: {id, fields}
+                            obj = service.update_c4_object_fields(conn, "main", proj, b.get("id"), b.get("fields"))
+                            return self.json({"ok": True, "object": obj})
+                        else:
+                            result = service.mutate_c4_object(conn, "main", proj, op, b.get("id"), b.get("fields"), b.get("object"), b.get("parent"))
+                            if op == "update":
+                                model = c4.read_model(conn, proj)
+                                obj = next(o for o in model["objects"] if o["id"] == b.get("id"))
+                                return self.json({"ok": True, "object": obj})
+                            return self.json({"ok": True, **result})
+                    elif path == "/api/c4/port":
+                        obj = service.mutate_c4_port(conn, "main", proj, op, b.get("id"), b.get("object"), b.get("fields"), b.get("port"))
+                    else:
+                        obj = service.mutate_c4_link(conn, "main", proj, op, b.get("id"), b.get("fields"), b.get("link"))
+                return self.json({"ok": True, **(obj if isinstance(obj, dict) else {"object": obj})})
+            except KeyError as e: return self.send_error(404, str(e).strip("'"))
+            except (ValueError, TypeError, AttributeError, sqlite3.IntegrityError) as e: return self.send_error(400, str(e).splitlines()[0][:200])
+
+        def do_GET(self):
+            if not self.host_ok(): return self.send_error(403)
             u = urlsplit(self.path)
             q = {k: v[-1] for k, v in parse_qs(u.query, keep_blank_values=True).items()}
             parts = [unquote(x) for x in u.path.split("/")]  # ['', 'api', ...]
@@ -91,6 +128,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 proj = q.get("project") or default_project()
                 with lock:
                     m = c4.read_model(conn, proj)
+                    extra = c4_layered.viewer_extra(conn, proj) if m and c4_layered.is_layered(conn, proj) else {}
                     links = db.links_for(conn, proj) if m else {}
                     open_issues = [r["object_id"] for r in conn.execute(
                         "SELECT DISTINCT l.object_id FROM c4_link l JOIN item t ON t.id=l.ref_id WHERE l.project=? AND l.ref_kind='item' "
@@ -98,8 +136,9 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 if not m: return self.send_error(404)
                 m.pop("interfaces")  # already nested under each object
                 issues = c4.issues_by_object(m, pathlib.Path(m.pop("root")))
+                m.pop("source", None)
                 meta = {k: m.pop(k) for k in ("name", "layout", "tags") if k in m}
-                return self.json({"meta": meta, **m, "issues": issues, "links": links, "open_issues": open_issues})
+                return self.json({"meta": meta, **m, "issues": issues, "links": links, "open_issues": open_issues, **extra})
             if parts[1:2] == ["code"]:
                 with lock: m = c4.read_model(conn, q.get("project") or default_project())
                 f = m and servable(m["root"], parts[2:])
@@ -218,6 +257,14 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
+
+        def send_response_only(self, code, message=None):
+            """The HTTP status line is Latin-1 only; our 400 messages (c4.py validation text) are Vietnamese
+            and can contain characters outside it, which crashes the connection instead of sending the 400.
+            Fall back to a lossy replace for the status line only — the real text still reaches the body."""
+            try: http.server.BaseHTTPRequestHandler.send_response_only(self, code, message)
+            except UnicodeEncodeError:
+                http.server.BaseHTTPRequestHandler.send_response_only(self, code, (message or "").encode("latin-1", "replace").decode("latin-1"))
 
         def log_message(self, *a): pass
 

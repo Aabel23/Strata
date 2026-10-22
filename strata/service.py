@@ -1,5 +1,5 @@
 """Write/read layer shared by CLI and MCP: role checks, audit on every write."""
-import json, re
+import json, pathlib, re
 from strata import db
 
 ROLES = ("main", "coder", "reviewer")
@@ -218,3 +218,248 @@ def search(c, q, project=None, src=None, limit=30, role="main"):
         r = c.execute(f"SELECT title, {col} AS k FROM {SRC_TABLE[h['src']]} WHERE {key}=?", (h["ref"],)).fetchone()
         h["title"], h["key"] = (r["title"], r["k"]) if r else ("", "")
     return hits
+
+
+# ---- C4 canvas data ----
+def add_c4_port(c, role, project, object_id, id, name, direction, kind=None, schema=None):
+    info = {"object": object_id, "id": id, "name": name, "direction": direction, "kind": kind}
+    _role(c, role, "c4.port.add", project, f"c4_port:{id}", info)
+    if role != "main": _deny(c, role, "c4.port.add", project, f"c4_port:{id}", info, f"{role} may not edit C4")
+    if direction not in ("input", "output"): raise ValueError("direction must be input or output")
+    if not all(isinstance(v, str) and v.strip() for v in (id, object_id, name)): raise ValueError("port id, object, and name are required")
+    if schema is not None and not isinstance(schema, (dict, list)): raise ValueError("port schema must be an object or array")
+    if not c.execute("SELECT 1 FROM c4_object WHERE project=? AND id=?", (project, object_id)).fetchone(): raise KeyError(f"no C4 object {object_id!r} in project {project!r}")
+    c.execute("INSERT INTO c4_port(project,id,object_id,name,direction,kind,schema_json) VALUES(?,?,?,?,?,?,?)",
+              (project, id, object_id, name, direction, kind, json.dumps(schema, ensure_ascii=False) if schema is not None else None))
+    db.audit(c, project, "c4.port.add", f"c4_port:{id}", None, info, role); c.commit()
+
+
+def list_c4_ports(c, project, object_id=None):
+    sql = "SELECT id,object_id AS object,name,direction,kind,schema_json FROM c4_port WHERE project=?"
+    args = [project]
+    if object_id is not None: sql += " AND object_id=?"; args.append(object_id)
+    out = []
+    for r in c.execute(sql + " ORDER BY object_id,id", args):
+        d = dict(r)
+        if d["schema_json"] is not None: d["schema"] = json.loads(d.pop("schema_json"))
+        else: d.pop("schema_json")
+        out.append(d)
+    return out
+
+
+def set_c4_kind(c, role, project, object_id, kind):
+    info = {"object": object_id, "kind": kind}
+    _role(c, role, "c4.kind.set", project, f"c4_object:{object_id}", info)
+    if role != "main": _deny(c, role, "c4.kind.set", project, f"c4_object:{object_id}", info, f"{role} may not edit C4")
+    if kind is not None and (not isinstance(kind, str) or not kind.strip()): raise ValueError("kind must be a non-empty string or null")
+    before = c.execute("SELECT kind FROM c4_object WHERE project=? AND id=?", (project, object_id)).fetchone()
+    if not before: raise KeyError(f"no C4 object {object_id!r} in project {project!r}")
+    c.execute("UPDATE c4_object SET kind=? WHERE project=? AND id=?", (kind, project, object_id))
+    db.audit(c, project, "c4.kind.set", f"c4_object:{object_id}", {"kind": before["kind"]}, {"kind": kind}, role); c.commit()
+
+
+# C4 HTTP edits use the same transactional service boundary as CLI writes.
+C4_OBJECT_FIELDS = {"type", "name", "parent", "technology", "description", "tags", "links", "status",
+                    "responsibilities", "state", "kind"}
+C4_PORT_FIELDS = {"name", "direction", "kind", "schema"}
+C4_LINK_FIELDS = {"from", "to", "name", "technology", "status", "direction", "tags", "description",
+                  "feature", "interface", "payload", "kind", "from_port", "to_port"}
+
+
+def _required_text(value, label):
+    if not isinstance(value, str) or not value.strip(): raise ValueError(f"{label} must be a non-empty string")
+
+
+def _validate_port(port):
+    for key in ("id", "name", "direction"): _required_text(port.get(key), f"port {key}")
+    if port["direction"] not in ("input", "output"): raise ValueError("port direction must be input or output")
+    if port.get("kind") is not None: _required_text(port["kind"], "port kind")
+    if port.get("schema") is not None and not isinstance(port["schema"], (dict, list)): raise ValueError("port schema must be an object or array")
+
+
+def _validate_link(link):
+    for key in ("id", "from", "to"): _required_text(link.get(key), f"link {key}")
+    for key in ("name", "technology", "status", "direction", "description", "feature", "interface", "kind", "from_port", "to_port"):
+        if link.get(key) is not None and not isinstance(link[key], str): raise ValueError(f"link {key} must be a string")
+    if link.get("tags") is not None and (not isinstance(link["tags"], list) or not all(isinstance(v, str) for v in link["tags"])):
+        raise ValueError("link tags must be an array of strings")
+    if link.get("payload") is not None and not isinstance(link["payload"], dict): raise ValueError("link payload must be an object")
+
+
+def _validate_object(obj):
+    for key in ("id", "type", "name"): _required_text(obj.get(key), f"object {key}")
+    if obj.get("parent") is not None and not isinstance(obj["parent"], str): raise ValueError("object parent must be a string or null")
+    for key in ("technology", "description", "status", "state", "kind"):
+        if obj.get(key) is not None and not isinstance(obj[key], str): raise ValueError(f"object {key} must be a string")
+    for key in ("tags", "links", "responsibilities"):
+        if obj.get(key) is not None and (not isinstance(obj[key], list) or not all(isinstance(v, str) for v in obj[key])):
+            raise ValueError(f"object {key} must be an array of strings")
+
+
+def _c4_mutation(c, project, role, op, mutate):
+    from strata import c4
+    _role(c, role, op, project)
+    if role != "main": _deny(c, role, op, project, None, {}, f"{role} may not edit C4")
+    if not c.execute("SELECT 1 FROM c4_meta WHERE project=?", (project,)).fetchone(): raise KeyError(f"no C4 model for project {project!r}")
+    c.execute("BEGIN IMMEDIATE")
+    try:
+        m = c4.read_model(c, project)
+        meta = c.execute("SELECT root FROM c4_meta WHERE project=?", (project,)).fetchone()
+        change = mutate(m)
+        result, target = change[:2]
+        m["interfaces"] = [i for o in m["objects"] for i in o.get("interfaces", [])]
+        errs = c4.check(m, pathlib.Path(meta["root"] or "."))[0]
+        if errs: raise ValueError("; ".join(errs[:4]))
+        _store_c4_model(c, project, m)
+        before, after = change[2:] if len(change) == 4 else (None, result)
+        db.audit(c, project, op, target, before, after, role)
+        c.commit()
+        return result
+    except Exception:
+        c.rollback()
+        raise
+
+
+def _store_c4_model(c, project, m):
+    """Replace one validated project's relational C4 rows, preserving its meta and task links."""
+    j = lambda v: json.dumps(v, ensure_ascii=False) if v is not None else None
+    for table in ("c4_connection", "c4_flow", "c4_interface", "c4_port", "c4_object"):
+        c.execute(f"DELETE FROM {table} WHERE project=?", (project,))
+    for o in m["objects"]:
+        c.execute("INSERT INTO c4_object(id,project,type,name,parent,technology,description,tags,links,status,responsibilities,state,kind) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (o["id"], project, o.get("type"), o.get("name"), o.get("parent"), o.get("technology"), o.get("description"),
+                   j(o.get("tags")), j(o.get("links")), o.get("status"), j(o.get("responsibilities")), o.get("state"), o.get("kind")))
+    for o in m["objects"]:
+        for p in o.get("ports") or []:
+            c.execute("INSERT INTO c4_port(project,id,object_id,name,direction,kind,schema_json) VALUES(?,?,?,?,?,?,?)",
+                      (project, p["id"], o["id"], p["name"], p["direction"], p.get("kind"), j(p.get("schema"))))
+        for i in o.get("interfaces") or []:
+            c.execute("INSERT INTO c4_interface(project,id,object_id,kind,name,signature,purpose,input,output,errors) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                      (project, i["id"], o["id"], i.get("kind"), i.get("name"), i.get("signature"), i.get("purpose"),
+                       i.get("input"), i.get("output"), j(i.get("errors"))))
+    for x in m["connections"]:
+        c.execute("INSERT INTO c4_connection(id,project,from_id,to_id,name,technology,status,direction,tags,description,feature,interface,payload,kind,from_port_id,to_port_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (x["id"], project, x["from"], x["to"], x.get("name"), x.get("technology"), x.get("status"), x.get("direction"),
+                   j(x.get("tags")), x.get("description"), x.get("feature"), x.get("interface"), j(x.get("payload")), x.get("kind"), x.get("from_port"), x.get("to_port")))
+    for x in m["flows"]:
+        c.execute("INSERT INTO c4_flow(id,project,name,steps) VALUES(?,?,?,?)", (x["id"], project, x.get("name"), j(x.get("steps") or [])))
+
+
+def mutate_c4_object(c, role, project, op, object_id=None, fields=None, obj=None, parent=None):
+    def mutate(m):
+        objects = m["objects"]
+        result = None
+        if op == "create":
+            if not isinstance(obj, dict): raise ValueError("object must be an object")
+            bad = set(obj) - (C4_OBJECT_FIELDS | {"id"})
+            if bad: raise ValueError(f"object field not editable: {sorted(bad)[0]}")
+            if any(o["id"] == obj.get("id") for o in objects): raise ValueError("object id already exists")
+            _validate_object(obj)
+            objects.append(dict(obj)); target = obj.get("id")
+        elif op in ("update", "move", "delete"):
+            current = next((o for o in objects if o["id"] == object_id), None)
+            if current is None: raise KeyError(f"no C4 object {object_id!r}")
+            target = object_id
+            if op == "delete":
+                removed_links = {x["id"] for x in m["connections"] if object_id in (x["from"], x["to"])}
+                removed_pairs = {(x["from"], x["to"]) for x in m["connections"] if x["id"] in removed_links}
+                linked_refs = c.execute("SELECT count(*) FROM c4_link WHERE project=? AND object_id=?", (project, object_id)).fetchone()[0]
+                objects.remove(current)
+                m["connections"] = [x for x in m["connections"] if x["id"] not in removed_links]
+                old_flows = len(m["flows"])
+                m["flows"] = [f for f in m["flows"] if not any(
+                    s.get("connection") in removed_links or (s.get("from"), s.get("to")) in removed_pairs
+                    for s in f.get("steps", []))]
+                removed_flows = old_flows - len(m["flows"])
+                c.execute("DELETE FROM c4_link WHERE project=? AND object_id=?", (project, object_id))
+                result = {"op": op, "id": object_id, "removed_connections": len(removed_links),
+                          "removed_flows": removed_flows, "removed_item_links": linked_refs}
+            elif op == "move": current["parent"] = parent
+            else:
+                if not isinstance(fields, dict) or not fields: raise ValueError("fields must be a non-empty object")
+                bad = set(fields) - C4_OBJECT_FIELDS
+                if bad: raise ValueError(f"field not editable: {sorted(bad)[0]}")
+                before = {key: current.get(key) for key in fields}
+                for key in ("type", "name"):
+                    if key in fields: _required_text(fields[key], f"object {key}")
+                if "parent" in fields and fields["parent"] is not None and not isinstance(fields["parent"], str):
+                    raise ValueError("object parent must be a string or null")
+                for key, value in fields.items():
+                    if value is None: current.pop(key, None)
+                    else: current[key] = value
+                _validate_object(current)
+                after = {key: current.get(key) for key in fields}
+                result = {"op": op, "id": target}
+                return result, f"c4_object:{target}", before, after
+        else: raise ValueError("op must be create, update, move, or delete")
+        return result or {"op": op, "id": target}, f"c4_object:{target}"
+    return _c4_mutation(c, project, role, f"c4.object.{op}", mutate)
+
+
+def mutate_c4_port(c, role, project, op, port_id=None, object_id=None, fields=None, port=None):
+    def mutate(m):
+        ports = [(o, p) for o in m["objects"] for p in o.get("ports", [])]
+        found = next(((o, p) for o, p in ports if p["id"] == port_id), None)
+        target_id = port_id
+        if op == "create":
+            if not isinstance(port, dict) or not isinstance(object_id, str): raise ValueError("object and port are required")
+            bad = set(port) - (C4_PORT_FIELDS | {"id"})
+            if bad: raise ValueError(f"port field not editable: {sorted(bad)[0]}")
+            owner = next((o for o in m["objects"] if o["id"] == object_id), None)
+            if owner is None: raise KeyError(f"no C4 object {object_id!r}")
+            if any(p["id"] == port.get("id") for _, p in ports): raise ValueError("port id already exists")
+            _validate_port(port)
+            owner.setdefault("ports", []).append(dict(port)); target_id = port.get("id")
+        elif found is None: raise KeyError(f"no C4 port {port_id!r}")
+        elif op == "update":
+            if not isinstance(fields, dict) or not fields: raise ValueError("fields must be a non-empty object")
+            bad = set(fields) - C4_PORT_FIELDS
+            if bad: raise ValueError(f"field not editable: {sorted(bad)[0]}")
+            found[1].update(fields)
+            _validate_port(found[1])
+        elif op == "delete":
+            found[0]["ports"].remove(found[1])
+        else: raise ValueError("op must be create, update, or delete")
+        return {"op": op, "id": target_id}, f"c4_port:{target_id}"
+    return _c4_mutation(c, project, role, f"c4.port.{op}", mutate)
+
+
+def mutate_c4_link(c, role, project, op, link_id=None, fields=None, link=None):
+    def mutate(m):
+        links = m["connections"]
+        found = next((x for x in links if x["id"] == link_id), None)
+        target_id = link_id
+        if op == "create":
+            if not isinstance(link, dict): raise ValueError("link must be an object")
+            target_id = link.get("id")
+            bad = set(link) - (C4_LINK_FIELDS | {"id"})
+            if bad: raise ValueError(f"link field not editable: {sorted(bad)[0]}")
+            if any(x["id"] == target_id for x in links): raise ValueError("link id already exists")
+            _validate_link(link)
+            links.append(dict(link))
+        elif found is None: raise KeyError(f"no C4 link {link_id!r}")
+        elif op == "update":
+            if not isinstance(fields, dict) or not fields: raise ValueError("fields must be a non-empty object")
+            bad = set(fields) - C4_LINK_FIELDS
+            if bad: raise ValueError(f"field not editable: {sorted(bad)[0]}")
+            found.update(fields)
+            _validate_link(found)
+        elif op == "delete": links.remove(found)
+        else: raise ValueError("op must be create, update, or delete")
+        return {"op": op, "id": target_id}, f"c4_connection:{target_id}"
+    return _c4_mutation(c, project, role, f"c4.link.{op}", mutate)
+
+
+def update_c4_object_fields(c, role, project, object_id, fields):
+    if not isinstance(fields, dict) or not fields: raise ValueError("fields must be a non-empty object")
+    if set(fields) - {"name", "description", "technology", "status"}: raise ValueError("field not editable")
+    values = {}
+    for key, value in fields.items():
+        if not isinstance(value, str) or "\n" in value or "\r" in value: raise ValueError(f"{key} must be a single-line string")
+        value = value.strip()
+        if key == "name" and not value: raise ValueError("name is required")
+        if key == "status" and value and value not in ("live", "future", "doing", "maintenance", "deprecated", "removed"): raise ValueError("status invalid")
+        values[key] = value or None
+    result = mutate_c4_object(c, role, project, "update", object_id, values)
+    from strata import c4
+    return next(o for o in c4.read_model(c, project)["objects"] if o["id"] == object_id)
