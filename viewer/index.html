@@ -375,7 +375,7 @@ function render(keepCam,keepOld){
     const col=(o.tags||[]).map(t=>M.tags?.[t]?.color).find(Boolean);
     const dim=tag&&!(o.tags||[]).includes(tag), nk=kids(id).length, deep=nk>0&&!n.ext&&!flat, st=o.status&&o.status!=="live";
     const dl=wrap(o.description,34,2);
-    const tl=TYPE_LABEL[t]||t, sub=[(o.name||"").trim().toLowerCase()!==tl.toLowerCase()&&tl,].filter(Boolean).join(" · ");
+    const tl=TYPE_LABEL[t]||t, sub=[(o.name||"").trim().toLowerCase()!==tl.toLowerCase()&&tl,o.tech&&clip(o.tech,16)].filter(Boolean).join(" · ");
     s+=`<g class="node ${n.ext?"ext":""} ${dim?"dim":""} ${M.open_issues.includes(id)?"issue":""} ${hotNode===id?"hot":""}" data-id="${esc(id)}">
       ${deep?`<rect class="stk" x="${x+8}" y="${y+8}" width="${NW}" height="${NH}" rx="${rx}"/><rect class="stk" x="${x+4}" y="${y+4}" width="${NW}" height="${NH}" rx="${rx}"/>`:""}
       <rect class="box" x="${x}" y="${y}" width="${NW}" height="${NH}" rx="${rx}"/>
