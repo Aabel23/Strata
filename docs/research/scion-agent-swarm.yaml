@@ -1,0 +1,116 @@
+title: Google Scion and managing agent swarms
+summary: What Scion (Google Cloud Platform's experimental agent orchestration testbed) does, how it manages concurrent agents, how it compares with Agent Orchestrator and Claude Code, and which ideas Strata can copy without containers or a daemon.
+code: [strata/service.py, strata/mcp.py]
+
+blocks:
+  - md: |
+      ## 1. Conclusion
+      **Status: research, nothing decided.** Scion is **Google Cloud Platform's** open-source (Apache-2.0) experimental testbed, https://github.com/GoogleCloudPlatform/scion. It is **not an Anthropic product** and not an officially supported Google product.
+
+      - Scion is a "hypervisor for agents": one container per agent (Claude Code, Gemini CLI, Codex, OpenCode), each with its own identity, credentials and workspace. It deliberately has no memory, task manager or chat; you bring GitHub Issues, Linear or Beads.
+      - Conflict handling between concurrent agents is **separate worktrees or clones, then a human or agent merges**. There is no merge queue, task-claim lock or compare-and-set.
+      - Strata already owns the governance half Scion lacks: the item state machine, compare-and-set, audit rows and dependencies. What Strata can borrow is the **observation and isolation layer**.
+      - Recommendation: **copy the ideas, do not install Scion.** It needs a container runtime and a Hub, which breaks "stdlib only, no daemon".
+      - Limits of this research: the Scion messaging and lifecycle pages and the Claude Code agent-teams docs were not read, because the Firecrawl rate limit was hit. Those rows are marked unverified.
+
+  - md: |
+      ## 2. Architecture
+      Sources: [overview](https://googlecloudplatform.github.io/scion/overview/), [concepts](https://googlecloudplatform.github.io/scion/concepts/), [philosophy](https://googlecloudplatform.github.io/scion/philosophy/).
+  - table:
+      head: [Component, Role]
+      rows:
+        - ["`scion` CLI", "Host commands: start, list, attach, message, logs, stop, resume, delete, templates"]
+        - [Hub, "Control plane for identity, auth, state in a database, and dispatch; every mode goes through it, even on a laptop"]
+        - [Runtime Broker, "Provisions workspaces and templates and delegates to a runtime"]
+        - [Runtime, "Docker, Podman, Apple Container, Kubernetes, Cloud Run or Substrate (GKE actors)"]
+        - [Agent, "Isolated container running a harness, with its own identity, credentials and workspace"]
+        - [Harness config, "Adapter so start, stop, attach and resume behave the same across tools"]
+        - [Project, "Namespace, a `.scion` directory, usually one per git repo"]
+        - [Template, "System prompt plus skills per role, for example Security Auditor"]
+        - ["`sciontool`", "In-container helper that reports status to the Hub"]
+  - md: |
+      - **Run modes:** Workstation (Hub, broker and web UI as one local server on SQLite), single-node hosted, HA hosted (Postgres plus object storage).
+      - **Workspace modes:** shared-plain, worktree-per-agent, clone-per-agent, empty-per-agent. Worktree-per-agent gives each agent a branch named after it and needs git 2.48 or newer. Merging is manual.
+      - **Isolation:** per-agent home and environment, `tmpfs` shadow mounts hiding sibling workspaces, read-only or injected credentials.
+      - **Philosophy:** "isolation over constraints". Agents run in `--yolo` mode and the guardrails sit outside them (containers, worktrees, network policy).
+
+  - md: |
+      ## 3. How a swarm is managed
+      1. `scion init` creates the project; `scion start <name> "<task>"` makes the Hub create an agent from a template.
+      2. The Broker builds the workspace, mounts the agent's own home and credentials and starts the container. The harness runs in tmux so a human can attach.
+      3. **Identity:** names are scoped by project (`project--agent`) with a parent chain; any principal in the chain can manage its descendants and children get restricted secrets, so they cannot escalate.
+      4. **Delegation:** an agent can run `scion start` itself; a parent can mark itself `blocked` while it waits on a child.
+      5. **Communication (unverified):** direct and group messages, completion notifications, shared directories, chat plugins and an A2A bridge.
+      6. **Status in three layers:** phase (created, provisioning, cloning, starting, running, stopping, stopped, suspended, error, halted), activity (working, thinking, executing, waiting_for_input, blocked, completed, limits_exceeded, stalled, offline) and free-text detail. Some activities are sticky: routine events cannot overwrite them.
+      7. **Failure recovery:** a non-zero exit gives `error` (restartable); a platform kill gives `halted` with a reason; a heartbeat with no events for 5 minutes gives `stalled`; `suspend` keeps the conversation and relaunches Claude with `--continue`; `limits_exceeded` caps turns, model calls and duration.
+      8. **Concurrency:** separate worktrees or clones and a manual merge. Described by one commenter as "concurrency only" ([HN](https://news.ycombinator.com/item?id=47675213)).
+      9. **Human in the loop:** attach to tmux, send messages, web UI, chat notifications.
+
+  - md: |
+      ## 4. Comparison
+  - table:
+      head: [Aspect, Scion, Agent Orchestrator (earlier Strata study), Claude Code subagents / agent teams, Gas Town]
+      rows:
+        - [Unit, "Container per agent", "Worktree plus process per session", "Subagent in one session; teammate sessions with a shared task list (unverified)", "Worktree hooks plus tmux"]
+        - [Isolation, "Strong: container, credentials, tmpfs", "Worktree only", "Shared process or directory", Worktree]
+        - ["Task model", "None built in", "PR is the unit", "Shared task list (unverified)", "Beads ledger; a Mayor dispatches"]
+        - ["Concurrency control", "Worktree separation only", "Git branch-checkout refusal", "Lead decides", "Merge queue"]
+        - [Status, "Phase, activity, detail, heartbeat", "Launch-fenced hook events", Limited, Watchdogs]
+        - [Infrastructure, "Hub (SQLite or Postgres) plus container runtime", "Go daemon", None, "Go, Dolt, tmux, daemon"]
+        - [Maturity, "Pre-1.0, about 2k stars", Experimental, Experimental, "Experimental, single operator"]
+  - md: |
+      Other sources: [InfoQ on Scion](https://www.infoq.com/news/2026/04/google-agent-testbed-scion/), [Gas Town vs Superset](https://superset.sh/compare/superset-vs-gastown), [Aviator on orchestrators](https://www.aviator.co/blog/the-rise-of-coding-agent-orchestrators/), [Addy Osmani on tiers](https://addyosmani.com/blog/code-agent-orchestra/). LangGraph, CrewAI and AutoGen were not compared: they drive LLM calls from one program, while Scion drives whole agent CLIs.
+
+      **Unique to Scion:** per-agent container isolation with scoped credentials, a harness abstraction across vendors, the same CLI from laptop to Kubernetes, and agents that spawn agents with an ancestry chain. It is not a task manager.
+
+  - md: |
+      ## 5. What Strata can adopt
+      Strata's own earlier study of Agent Orchestrator is `docs/research/agent-orchestration.yaml`; these ideas line up with its `agent_run` registry.
+  - table:
+      head: [Idea, From Scion, Verdict, Trade-off]
+      rows:
+        - ["Worktree per coder, branch `strata/<id>`, main merges", "worktree-per-agent", MVP, "Required before any parallel run; plain `git worktree add`, no dependency. Needs a rule: reviewer verifies in the worktree, main merges."]
+        - ["Status registry (phase, activity, detail, heartbeat) kept apart from item status", "Phase/activity/detail", MVP, "Never let it change `item.status`. Include a `stalled` rule (no events for 5 minutes) and sticky waiting/blocked values."]
+        - ["Agent name scoped by project (`strata-coder-1`)", "Identity scoping", MVP, "Owner is free text and the CLI runs as `main`, so naming alone is not authority."]
+        - ["Scoped credentials or tokens per role", "Per-agent credentials", Later, "The real fix for label versus authority; needs a token table or per-role DB access."]
+        - ["Run limits with a terminal `limits_exceeded` outcome", limits, Later, "Cheap in a wrapper; needs a policy for the claim when the limit is hit."]
+        - ["`error` and `halted` as restartable states", "Crash recovery", Later, "Fits the existing release and rework verbs; no auto-restart."]
+        - ["Parent/child ancestry chain", Ancestry, "Not needed", "Strata has one main agent assigning work."]
+        - ["Agent-to-agent messaging", "message, A2A", "Not needed", "Hand-off already goes through item notes and submit; a channel would bypass the audit."]
+        - ["Containers, Hub, Kubernetes, broker, daemon", "Whole stack", "Do not adopt", "Breaks stdlib-only and adds a large operational surface for one operator."]
+        - ["`--yolo` agents guarded only outside", Philosophy, "Do not adopt as is", "Strata's safety is the allowlisted tools in `agent/agents/`, the opposite trade."]
+
+  - md: |
+      ## 6. Risks
+      - Pre-1.0: APIs and configuration may change between releases, and it moves fast (over 6,500 commits).
+      - Not an official Google product and not covered by the vulnerability rewards program.
+      - Its security model depends on `--yolo` plus containers, with all credentials in the same Hub.
+      - It has no task system, so it would not replace Strata; using it would mean mapping Strata items to agent names by hand.
+      - This reading of messaging and lifecycle detail is incomplete (see the conclusion).
+
+  - md: |
+      ## 7. Questions for you
+  - question:
+      q: Use Scion itself or copy its ideas?
+      options:
+        - {label: "Copy the ideas", note: "no containers or Hub; fits stdlib-only"}
+        - {label: "Install and try Scion", note: "needs a container runtime and the Hub"}
+      recommend: "Copy the ideas"
+  - question:
+      q: Allow parallel coders?
+      options:
+        - {label: "Yes, one worktree each and one merger (main)", note: "start with two coders on disjoint modules"}
+        - {label: "No, stay sequential"}
+      recommend: "Yes, one worktree each and one merger (main)"
+  - question:
+      q: Build the status registry before or after worktrees?
+      options:
+        - {label: "Worktrees first, registry after", note: "worktrees remove the conflict risk"}
+        - {label: "Registry first"}
+      recommend: "Worktrees first, registry after"
+  - question:
+      q: Give roles real authority before any parallel run?
+      options:
+        - {label: "Yes, decide it first", note: "the CLI runs every verb as main, and parallelism makes a wrong claim or approval more likely (open issue #179)"}
+        - {label: "Later"}
+      recommend: "Yes, decide it first"

@@ -1,0 +1,119 @@
+title: Tree-sitter as the way agents read code
+summary: Whether tree-sitter should back Strata's symbol index so agents read code by symbol and outline. Compares ast, tree-sitter, LSP, ctags and regex, checks the dependency cost against the stdlib-only rule, and proposes a minimal path.
+code: [strata/symbols.py]
+
+blocks:
+  - md: |
+      ## 1. Conclusion
+      **Status: research, nothing decided.** Sources were read with Firecrawl. No independent benchmark of token savings was found; Aider publishes a design and a budget, not measurements, so treat any "X% fewer tokens" claim as unverified.
+
+      - Tree-sitter is the best single extractor for many languages: error-tolerant, about 300 grammars, `tags.scm` definition queries. It has no name resolution.
+      - The pattern that works in practice (Aider, Sourcegraph search-based tier) is a **cheap, approximate, multi-language definition index plus a budgeted outline**. Precise cross-file resolution is where projects stall: GitHub archived `stack-graphs` on 2025-09-09.
+      - Strata already has the right shape in `strata/symbols.py`: rebuildable cache, stable `path::Qual.name` ids, hash freshness, `body_hash`. The schema is language-agnostic, so a second extractor needs no migration.
+      - Tree-sitter is a native wheel, so it breaks "Python stdlib + PyYAML only" unless it is an **optional extra** with fallback to `ast` (Python) or regex (other languages).
+      - Recommendation: keep `ast` for Python, add an extractor interface and a regex extractor for JS and SQL first, and treat tree-sitter as a later optional extra.
+
+  - md: |
+      ## 2. Options compared
+  - table:
+      head: [Tool, What it gives, Cost, Fit for Strata]
+      rows:
+        - ["Python `ast` (today)", "Exact defs, signatures, docstrings, line ranges for Python. A syntax error yields zero symbols for the file.", "stdlib, zero", "Very good for Python; blind to JS, HTML, CSS, SQL, C"]
+        - ["tree-sitter", "Syntax tree for about 300 languages; `tags.scm` definition and reference tags; error-tolerant partial trees; incremental parse", "Native wheel plus per-language grammars", "Best one-extractor-for-many-languages; breaks the stdlib rule unless optional"]
+        - ["LSP", "Precise definition, references, hover, call hierarchy", "A server per language, project config, slow start", "Too heavy; do not duplicate Claude Code's own integration"]
+        - ["universal-ctags", "Definition tags for about 100 languages, one fast binary", "External binary, called by subprocess", "Reasonable optional fallback; no references or ranges in the classic format"]
+        - ["regex", "Crude outline per language", "Zero", "Fine for narrow formats (SQL `CREATE ...`); brittle for general code"]
+        - ["stack-graphs", "Precise cross-file resolution built on tree-sitter", "Rust, a DSL rule set per language", "Archived 2025-09-09; not a base to build on"]
+
+  - md: |
+      ## 3. Case studies
+  - table:
+      head: [Who, What they do, Source]
+      rows:
+        - ["Aider repo-map", "tree-sitter definitions and references become a file graph ranked with PageRank; the top lines fit a token budget (1k by default, `--map-tokens`); output is file, then class/def signatures with elisions", "https://aider.chat/2023/10/22/repomap.html"]
+        - ["GitHub code navigation", "Stack graphs on tree-sitter for build-free name resolution; repo archived 2025-09-09", "https://github.com/github/stack-graphs"]
+        - ["Sourcegraph", "Search-based navigation from ctags and tree-sitter (fast, some false hits) plus precise SCIP indexers that need setup", "https://sourcegraph.com/blog/announcing-scip"]
+        - ["wrale/mcp-server-tree-sitter", "Python MCP server: get_symbols, find_usage, get_ast, run_query, analyze_project, parse cache; wide tool surface", "https://github.com/wrale/mcp-server-tree-sitter"]
+        - ["CodeRLM", "Rust server: tree-sitter symbol table with cross-references; verbs structure, search, impl, callers, grep; HN thread says agents ignore it unless told to use it", "https://news.ycombinator.com/item?id=46974515"]
+  - md: |
+      The claim that Claude Code, Cursor, Continue and Zed use tree-sitter was not verified from primary sources.
+
+  - md: |
+      ## 4. Install and dependency cost
+      Figures are from PyPI pages.
+
+      - `tree-sitter` (py-tree-sitter) 0.26.0: Python 3.10 or newer, wheels of 120 to 670 kB for Linux (x86-64, aarch64, musl), macOS and Windows.
+      - `tree-sitter-language-pack` 1.20.0: 371 pre-compiled languages in abi3 wheels of about 2.1 to 2.5 MB. The older `tree-sitter-languages` wheels are 8 to 9 MB and stale. How the pack loads grammars (bundled or downloaded on demand) was not verified; test it before committing.
+      - There is no pure-Python runtime and vendoring needs one binary per platform, so the only compatible design is `try: import tree_sitter` with a fallback.
+      - The Linux wheels need glibc 2.34 or newer: check older distros first.
+
+  - md: |
+      ## 5. Languages that matter
+      Quality notes are judgement, not verified here.
+  - table:
+      head: [Language, Grammar, Note]
+      rows:
+        - [Python, Excellent, "`ast` is already exact; no reason to replace it"]
+        - [JavaScript / TypeScript, Excellent, "Where `ast` gives nothing; the viewer files `page.js`, `swimlane.js` live here"]
+        - [C / C++, Good, "Preprocessor macros can produce ERROR nodes"]
+        - [HTML / CSS, "Good for structure", "Few symbols: ids, classes, selectors"]
+        - [SQL, "Fragmented by dialect", "Regex for `CREATE TABLE/INDEX/VIEW` is safer"]
+        - [Verilog / SystemVerilog, "Community grammar, quality unknown", "Test on real files first"]
+
+  - md: |
+      ## 6. Existing `strata/symbols.py`
+      **Keep:** the cache design (hash and mtime freshness, stable ids, `body_hash` for drift), `show` with its line cap, `inside()` and `norm()` path safety, `resolves()` returning None when it cannot say, `ls`, `find`, escaped LIKE. The schema already works for any language.
+
+      **Missing:** any non-Python language; reference or call edges; a warning when a syntax error leaves a file with zero symbols (`except (SyntaxError, ValueError): rows = []`); module-level constants and nested functions (`_walk` only descends into classes); a ranked, budgeted outline; a `lang` column; duplicate ids silently keep the first.
+
+  - md: |
+      ## 7. Proposed minimal path
+  - table:
+      head: [Step, When, Trade-off]
+      rows:
+        - ["Keep `ast` for Python", MVP, "Exact, free, tested"]
+        - ["Extractor interface `lang -> (file, text) -> rows` plus a `lang` column", MVP, "Small refactor"]
+        - ["Regex extractor for JS (`function`, `class`, `const x =`) and SQL (`CREATE ...`); mark rows `approx`", "MVP, if non-Python is needed now", "Approximate, no dependency; an `approx` miss must not count as drift"]
+        - ["Report parse errors instead of silent empty files", MVP, "One-line status fix"]
+        - ["Optional tree-sitter extractor behind `try: import tree_sitter`, `tags.scm` definition captures only", Later, "Real JS/TS/C; needs an explicit rule exception for an optional extra"]
+        - ["Budgeted outline `sym map --tokens N`, ranked by reference counts", Later, "Aider's value; needs reference edges first"]
+        - ["Reference/call edges from tree-sitter reference tags", Later, "Name-based and approximate"]
+        - ["Wire `sym show` into coder/reviewer agent instructions", MVP, "Agents ignore new tools unless told to use them"]
+        - ["LSP, stack graphs, cross-file name resolution, wide MCP tool surface", "Not needed", "Heavy; stack-graphs stalled"]
+
+  - md: |
+      ## 8. What not to do at MVP
+      - Do not make tree-sitter a required dependency or vendor platform binaries.
+      - Do not replace the `ast` extractor for Python.
+      - Do not build reference graphs, PageRank, call hierarchy or cross-file resolution.
+      - Do not add wrale-style wide tools (`find_similar_code`, `analyze_complexity`, raw `run_query`).
+      - Do not claim token savings in docs until measured on Strata's own repos.
+      - Do not use approximate rows in C4 contract verification as hard failures.
+
+  - md: |
+      ## 9. Questions for you
+  - question:
+      q: Which non-Python languages need symbol reading now?
+      options:
+        - {label: "JS and SQL via regex first", note: "no dependency; add tree-sitter only if regex proves too brittle"}
+        - {label: "Go straight to tree-sitter", note: "better JS/TS/C, but needs the optional-dependency exception first"}
+        - {label: "Python only for now"}
+      recommend: "JS and SQL via regex first"
+  - question:
+      q: Allow tree-sitter as an optional extra (`pip install tree-sitter tree-sitter-language-pack`) with `ast` or regex fallback?
+      options:
+        - {label: "Yes, later, optional only", note: "relaxes the rule to stdlib + PyYAML + optional extra"}
+        - {label: "No, keep strictly stdlib"}
+      recommend: "Yes, later, optional only"
+  - question:
+      q: How strict should symbol drift checks be for approximate rows?
+      options:
+        - {label: "Exact for `ast` rows, advisory for `approx` rows", note: "a regex miss never becomes a drift error"}
+        - {label: "Treat all rows the same"}
+      recommend: "Exact for `ast` rows, advisory for `approx` rows"
+  - question:
+      q: Do you want Verilog or embedded sources covered?
+      options:
+        - {label: "Test the community grammar on real files first"}
+        - {label: "Out of scope for now"}
+      recommend: "Test the community grammar on real files first"
