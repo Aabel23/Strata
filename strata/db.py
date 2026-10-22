@@ -7,8 +7,9 @@ def db_path(path=None):
     return str(path or os.environ.get("STRATA_DB") or DEFAULT_DB)
 
 def connect(path=None):
-    c = sqlite3.connect(db_path(path))
+    c = sqlite3.connect(db_path(path), timeout=30)
     c.row_factory = sqlite3.Row
+    c.execute("PRAGMA busy_timeout=30000")  # concurrent writers (MCP/CLI/server) wait instead of 'database is locked'
     c.execute("PRAGMA journal_mode=WAL")
     c.execute("PRAGMA foreign_keys=ON")
     return c

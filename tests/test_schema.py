@@ -63,3 +63,6 @@ def test_audit_append_only(c):
         with pytest.raises(sqlite3.DatabaseError):
             c.execute(sql)
     assert c.execute("SELECT count(*) FROM audit").fetchone()[0] == 1
+
+def test_connect_busy_timeout(c):
+    assert c.execute("PRAGMA busy_timeout").fetchone()[0] == 30000
