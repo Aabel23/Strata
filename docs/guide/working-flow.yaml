@@ -1,0 +1,165 @@
+title: Your working flow in Strata
+summary: How you, a hands-on developer, use Strata day to day. What to do in the browser, what still needs a command, and how agents fit in as helpers.
+code: [strata.py, strata/service.py, strata/c4_edit.py, viewer/index.html, viewer/app.js]
+
+blocks:
+  - md: |
+      ## The idea
+      Strata keeps one project's knowledge in one place: the **architecture map**, the **tasks**, the **roadmap** and the **documents**. You run the project from the browser at http://127.0.0.1:8740. Agents (Claude Code coder and reviewer roles) are helpers: they can take a task you wrote, but you decide what gets built and what counts as done.
+
+      Today the browser can **edit the architecture map**. Everything else you read in the browser and change with a short command, or ask an agent to change. The last section lists what is still command-only.
+
+  - md: |
+      ## The daily loop
+  - diagram:
+      dir: LR
+      caption: One round of work
+      nodes:
+        - {id: m, text: "1. Map", note: "Architect tab", tone: ui}
+        - {id: t, text: "2. Write the task", note: "item add + spec"}
+        - {id: a, text: "3. Approve", note: "you"}
+        - {id: b, text: "4. Build", note: "you or an agent"}
+        - {id: v, text: "5. Verify", note: "tests, validate"}
+        - {id: d, text: "6. Close and commit", tone: ok}
+      edges: [[m, t], [t, a], [a, b], [b, v], [v, d], [v, b, "fails"], [d, m, "next round"]]
+
+  - md: |
+      ## Where things live
+  - table:
+      head: [What, Where you see it, How you change it]
+      rows:
+        - ["Architecture map (systems, apps, components, links)", "Architecture tab", "The edit toolbar in the browser, or edit the YAML in `docs/c4` and run `c4 import`"]
+        - ["Code behind a component", "Architecture tab, select a component, **Code**", "Read-only: it is generated from the files the component `owns`"]
+        - ["Tasks and issues", "Task tab (issues are tasks with an `issue` chip)", "`item add`, `item edit`, `item approve` (commands)"]
+        - ["Roadmap and gates", "Roadmap tab", "`roadmap ...` commands; you pass gates yourself"]
+        - ["Documents (research, guides, plans)", "Docs tab", "Write a YAML file under `docs/` (see `architect/doc-format`); the viewer picks it up"]
+        - ["History of every write, with who did it", "Log tab", "Nothing to change: it is the audit trail"]
+
+  - md: |
+      ## 1. Map: design in the Architect tab
+      Open **Architecture** (keyboard: `G` then `A`). The toolbar on top is always visible.
+
+      - **Add object:** choose the **layer** first (actor, system, group, app, store, component), then the **parent**. The parent list only offers objects that may hold that layer, for example a component goes under an app, group or component, an app goes under a system. Then name, tech and summary.
+      - **Edit selected / Delete selected:** click a card first. Deleting something that has children or links asks you to confirm, and dropping task links asks again.
+      - **Add link:** click **Add link**, then the *from* object, then the *to* object, then give the link a name.
+      - Each save is checked like `c4 validate`. A change that creates a new error is refused and the message shows inline. Warnings are shown as a count and do not block you.
+      - Everything you save is written to the YAML folder (`docs/c4`) and imported with an audit row. Use `git diff docs/c4` to see exactly what changed, and commit it like any other change.
+
+      The toolbar cannot yet edit contracts, flows or behavior, rename an object's id, or change where a link points. For those, edit the YAML files and run `python3 strata.py c4 import docs/c4 --project strata`.
+
+  - md: |
+      ## 2. Look at the code under a component
+      Select a component and click **Code** (or double-click a component that has no children). A panel opens beside the map:
+
+      - the files the component owns, collapsed, with line and symbol counts;
+      - expand a file to see its classes and methods; click one to read its source (up to 200 lines);
+      - filter by name, show public symbols only, or hide classes or functions; `/` jumps to the filter;
+      - the link in the address bar points at one symbol, so you can share or bookmark it.
+
+      A component shows code only when its `owns` lists files or globs. If the panel says it owns no files, add `owns:` in the map. `python3 strata.py c4 coverage --project strata` lists code files that no component owns yet. Only Python symbols are listed for now.
+
+  - md: |
+      ## 3. Write the task
+      A task is a small unit of work inside **one module** (one folder or file group). Cross-cutting work becomes several tasks linked by dependencies.
+
+      ```bash
+      python3 strata.py item add --project strata --kind task --title "Add X to module Y" --body "Why and what" --priority medium
+      python3 strata.py item add --project strata --kind task --label issue --title "Bug: ..."   # a bug or finding
+      python3 strata.py item dep add 52 51      # task 52 waits for 51
+      ```
+
+      Before a task can be **approved**, its spec needs four things: `goal`, `acceptance` (checkable), `verify` (the command or check that proves it) and `scope.touch` (the files or folder it may change). Put them in a JSON file and attach it: `item edit ID --spec spec.json`.
+
+  - md: |
+      ## 4. Approve
+      You approve. A proposed task becomes approved only when you say so.
+
+      ```bash
+      python3 strata.py item approve 52
+      python3 strata.py item ready --project strata     # what can be started now
+      ```
+
+      The Task tab groups cards by status (proposed, approved, doing, review, done, rejected). Issues sort first and carry an `issue` chip.
+
+  - md: |
+      ## 5. Build: yourself or with an agent
+      **Yourself.** Claim the task under your own name so the record shows who did it, do the work, then hand it in for review:
+
+      ```bash
+      python3 strata.py item claim 52 --as you
+      # ... edit, run tests ...
+      python3 strata.py item submit 52 --as you --note "what changed, tests pass"
+      ```
+
+      **With an agent.** Open Claude Code in the repo and give it the task. It reads the ticket with `python3 strata.py task context 52` (ticket, hard rules, map context and file paths in one bundle), claims, works only inside the task's module, and submits. One agent works at a time unless each has its own worktree.
+
+      The person who did the work cannot approve it: the state machine refuses an approval from the owner. That is why you claim under your own name and approve as `main` (the default).
+
+  - md: |
+      ## 6. Verify and close
+      Review the work against the task's `acceptance` and run its `verify` command. Typical checks:
+
+      ```bash
+      /tmp/claude-1000/v/bin/python -m pytest -q          # the test suite
+      python3 strata.py c4 validate docs/c4               # add --strict to treat warnings as failures
+      git diff                                             # what really changed
+      ```
+
+      Then close the loop:
+
+      ```bash
+      python3 strata.py item approve 52 --note "verified"   # review -> done
+      python3 strata.py item rework 52 --note "fix X"       # send it back instead
+      git add <the task's files> && git commit -m "#52 <task title>"
+      ```
+
+      Commit only the files of that task, one commit per task, with the task number in the message. After a change to the server or database code run `systemctl --user restart strata`; after a change to viewer files, hard-refresh the browser (Ctrl+Shift+R).
+
+  - md: |
+      ## 7. Write down what you learn
+      Research, decisions and guides go in the **Docs** tab as YAML files under `docs/research/`, `docs/architect/`, `docs/plan/` or `docs/guide/`. Write content only (headings, tables, diagrams, questions with a recommendation); Strata does the layout. Check a file with `python3 strata.py doc validate FILE`. Nothing else to register: the viewer rescans when a file changes.
+
+  - md: |
+      ## 8. The roadmap and gates
+      The **Roadmap** tab shows phases as camps on a route and gates as checkpoints. You are the one who passes a gate, after the steps and criteria behind it are met:
+
+      ```bash
+      python3 strata.py roadmap check --project strata --roadmap v1
+      python3 strata.py roadmap gate pass G1 --project strata --roadmap v1 --as user --evidence "demo works"
+      ```
+
+  - md: |
+      ## Shortcuts
+  - table:
+      head: [Keys, Does]
+      rows:
+        - ["`Ctrl K` or `/`", "Search and commands"]
+        - ["`G` then `O` `T` `M` `R` `A` `L`", "Overview, Task, Roadmap, Docs, Architecture, Log"]
+        - ["`J` `K`, `Enter`", "Next or previous row, open it"]
+        - ["`[`", "Collapse or expand the sidebar"]
+        - ["`Esc`", "Close the top layer (in the Code panel it closes the panel first)"]
+
+  - md: |
+      ## Safety net
+      - Every write goes through the service layer and leaves an audit row (Log tab). Audit rows cannot be edited or deleted.
+      - The map lives in git (`docs/c4`), so any edit can be inspected and undone with `git diff` and `git checkout`.
+      - The database is backed up before risky migrations (see `backups/`). Copy it yourself before anything you are unsure about.
+      - The editing route is the **only** write route on the server. It works from `127.0.0.1`. To edit from another device over Tailscale, add `--allow-edit` to the service's `ExecStart` in `~/.config/systemd/user/strata.service`, then run `systemctl --user daemon-reload && systemctl --user restart strata`. With that flag, anyone who can reach the port can edit the map, so keep it to your own network.
+
+  - md: |
+      ## Not in the browser yet
+      - Creating, editing and approving **tasks** (commands or agents only).
+      - Editing **documents** (edit the YAML file).
+      - Passing **roadmap gates** and recording criteria.
+      - Editing map **contracts, flows and behavior**.
+      - Code symbols for languages other than Python.
+
+      The next steps in this direction would be a task form on the Task tab and a gate button on the Roadmap tab, in the same style as the architecture toolbar.
+
+  - question:
+      q: Which should become browser features first?
+      options:
+        - {label: "Create and approve tasks on the Task tab", note: "the step you repeat most"}
+        - {label: "Edit documents in the browser"}
+        - {label: "Gate and criteria buttons on the Roadmap tab"}
+      recommend: "Create and approve tasks on the Task tab"
