@@ -1,7 +1,7 @@
 """HTTP server: C4 viewer, pages and their JSON APIs. All data comes from the DB."""
 import http.server, json, mimetypes, pathlib, re, socket, sqlite3, threading
 from urllib.parse import parse_qs, unquote, urlsplit
-from strata import blocks, c4_edit, c4_layered, db, roadmap, service
+from strata import blocks, c4_edit, c4_layered, db, roadmap, service, symbols
 
 SERVE_EXT = set(".py .js .mjs .ts .tsx .css .html .htm .md .txt .yaml .yml .json .toml .c .h .cpp .hpp .dart .java .kt .go .rs .svg .png .jpg .jpeg .gif .webp".split())
 
@@ -38,6 +38,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
     conn = sqlite3.connect(db.db_path(db_path), check_same_thread=False)  # one long-lived conn: data_version needs it
     conn.row_factory = sqlite3.Row
     lock = threading.RLock()
+    symc = []  # symbol cache conn, opened lazily on first /api/code/ call (derived data)
 
     def rows(sql, args=()):
         with lock: return [dict(r) for r in conn.execute(sql, args)]
@@ -120,6 +121,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 if not q.get("project"): return self.send_error(400, "project required")
                 with lock: out = roadmap.api(conn, q["project"], q.get("roadmap") or None, q.get("only") == "version")
                 return self.json(out) if out is not None else self.send_error(404)
+            if p.startswith("/api/code/"): return self.code(p, q)
             if p == "/api/audit": return self.audit(q)
             if p == "/api/search": return self.search(q)
             if parts[1:2] == ["docs"] and len(parts) > 3:
@@ -247,6 +249,25 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
             self.wfile.write(body)
+
+        def code(self, p, q):
+            need = {"/api/code/files": ("project", "object"), "/api/code/symbols": ("project", "path"), "/api/code/src": ("project", "id")}.get(p)
+            if not need: return self.json({"error": "not found"}, 404)
+            if not all(q.get(k) for k in need): return self.json({"error": "missing " + " and ".join(need)}, 400)
+            try:
+                with lock:
+                    if p == "/api/code/files": return self.json(c4_layered.component_files(conn, q["project"], q["object"]))
+                    r = conn.execute("SELECT coalesce(p.root, m.root) FROM project p LEFT JOIN c4_meta m ON m.project=p.id WHERE p.id=?", (q["project"],)).fetchone()
+                    if not r or not r[0]: raise KeyError("project has no root")
+                    if not symc:
+                        c = sqlite3.connect(symbols.cache_path(db.db_path(db_path)), check_same_thread=False); c.row_factory = sqlite3.Row
+                        c.executescript(symbols.SCHEMA); symc.append(c)  # like symbols.connect, but shared across handler threads under `lock`
+                    sc = symc[0]
+                    if p == "/api/code/symbols": return self.json(symbols.file_outline(sc, q["project"], r[0], q["path"]))
+                    return self.json(symbols.source_of(sc, q["project"], r[0], q["id"]))
+            except ValueError as e: return self.json({"error": str(e)}, 400)
+            except KeyError as e: return self.json({"error": str(e.args[0]) if e.args else "not found"}, 404)
+            except FileNotFoundError as e: return self.json({"error": f"not found: {e.args[0] if e.args else ''}"}, 404)
 
         def json(self, obj, code=200, **hdr):
             body = json.dumps(obj, ensure_ascii=False).encode()
