@@ -109,6 +109,17 @@ Pages refresh themselves: `page.js` polls `/api/page/<p>/<s>/version` every 2 se
 - **`allow_edit`:** `make_server(allow_edit=None)` enables the route only when the bind host is loopback. `strata.py serve --allow-edit` forces it on, `--no-edit` forces it off.
 - **Not editable here:** contracts, flows, behavior, renaming an object id, changing a link's `from`/`to`. Use the files and `c4 import`.
 
+### Code layer (read-only)
+
+The Code level below components is derived data; nothing is stored in the C4 YAML.
+
+- **`c4_layered.component_files(c, project, object_id)`:** expands the object's `owns` globs under the project root and returns `{object, root, files, missing, truncated}` (code files only, capped at `FILE_CAP` = 2000). `KeyError` for an unknown project or object.
+- **`symbols.file_outline(c, project, root, rel)`:** returns `{path, loc, symbols, error}` for one file; Python only, classes and methods. `ValueError` outside root, `FileNotFoundError` if missing.
+- **`symbols.source_of(c, project, root, sid, ctx=0)`:** returns `{id, path, start, end, text, cut}` for a symbol id `path::Qual.name`, capped at 200 lines (`CAP`).
+- **Routes (all GET):** `/api/code/files?project=&object=`, `/api/code/symbols?project=&path=`, `/api/code/src?project=&id=`. Missing params 400, unknown object/symbol/file 404. The server opens the symbol cache `strata.symbols.db` lazily on the first call; it is derived data, refreshed lazily from the files (rebuildable, never authoritative).
+- **Panel:** `viewer/index.html` (Code tab in the info pane, opened by the Code button or double-click on a childless component; deep link `#<object>/code/<path>::<Qual>`). Server text is inserted with `textContent`.
+- **No write route was added.** The server still has exactly one POST route, `POST /api/c4/edit`.
+
 ## 6. Extending
 
 ### Roadmaps by phase

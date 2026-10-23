@@ -177,6 +177,14 @@ The user can also edit the map in the viewer. In the Architect tab the toolbar s
 - Agents should still prefer editing the files and running `c4 import`. After the user has used the toolbar, re-read the folder before changing it; `git diff docs/c4` shows the user's edits.
 - The toolbar cannot edit contracts, flows or behavior, rename an object id, or change a link's from/to. Do those in the files.
 
+### The Code level (derived)
+
+The Architect view has a derived Code level below components. Select a component and click Code, or double-click a component that has no child objects. The panel lists the files the component owns (from its `owns` globs), expands a file lazily into classes and methods, and shows source (capped at 200 lines). It has a filter box, a public-only toggle, kind chips (class, def) and keyboard keys (arrows, Enter, `/` to filter, Escape to close). Deep link: `#<object>/code/<path>::<Qual>`.
+
+- Nothing is stored in the YAML map. The panel is read-only and computed from the files on disk.
+- To make a component show code, set `owns` (files or globs) on it. `C4-OWNS-EMPTY` (an `owns` entry matching no file) and `c4 coverage` (code files owned by no object) find the gaps.
+- Limits: Python symbols only (other files are listed but have no outline); functions nested inside function bodies are not listed; lists are capped at 500 rows in the panel and 2000 files per component.
+
 ## 5. Field reference
 
 | Entity | Required | Optional |

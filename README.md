@@ -33,7 +33,10 @@ python3 strata.py item set ID [--status S --priority X]
 
 Route (GET): `/` shell, `/c4` viewer C4, `/pages`, `/page/<p>/<slug>`, `/api/projects` (kèm số đếm), `/api/items?project=&kind=&status=&id=`,
 `/api/docs?project=`, `/api/audit?project=&limit=`, `/api/search?q=&project=` (FTS, bm25, tối đa 30),
+`/api/code/files?project=&object=`, `/api/code/symbols?project=&path=`, `/api/code/src?project=&id=` (tầng Code, chỉ đọc),
 `/docs/<project>/<path>` (phục vụ cả cây `docs_dir`; chặn `..`, dotfile, `.db`). Giá trị lọc ngoài whitelist trả 400.
+
+Tầng Code (chỉ đọc): trong tab Architect, chọn một component rồi bấm Code (hoặc double-click component không có con) để xem các file nó sở hữu (theo `owns`), mở file thành class và method (chỉ Python), xem source (tối đa 200 dòng). Cần đặt `owns` cho component; `c4 coverage` và `C4-OWNS-EMPTY` tìm chỗ thiếu. Không lưu gì vào YAML.
 
 Server HTTP chỉ đọc, trừ một route duy nhất `POST /api/c4/edit` (trình sửa Architect, xem dưới). Map C4 cũng có thể sửa trong thư mục rồi `c4 import`; mọi ghi khác đi qua CLI/MCP (service có audit).
 
