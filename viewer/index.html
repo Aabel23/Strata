@@ -827,7 +827,7 @@ function hint(t){const h=$("#edhint");h.hidden=!t;h.textContent=t||""}
 function cancelPick(){if(linkPick){linkPick=null;hint("");setMsg("Link cancelled")}}
 function closeDlg(keep){const ov=$("#edov"); if(!ov) return; ov.remove(); if(!keep&&dlgBack&&document.contains(dlgBack)) dlgBack.focus(); if(!keep) dlgBack=null}
 // Modal form. fields: [{k,l,t:"text"|"area"|"select",v,opts}]. onOk(values) resolves true (close), false (handled) or an error string (shown inline).
-function dlg({title,msg,fields=[],ok,okCls="pri",onOk}){
+function dlg({title,msg,fields=[],ok,okCls="pri",onOk,init}){
   if(!$("#edov")) dlgBack=document.activeElement;
   closeDlg(true);
   const ov=document.createElement("div"); ov.id="edov";
@@ -841,7 +841,7 @@ function dlg({title,msg,fields=[],ok,okCls="pri",onOk}){
   document.body.append(ov);
   const form=ov.firstChild, okb=$("#edok");
   form.onsubmit=async e=>{e.preventDefault(); const v={}; fields.forEach(f=>v[f.k]=$("#ef-"+f.k).value.trim());
-    okb.disabled=true; const r=await onOk(v); okb.disabled=false;
+    okb.disabled=true; const r=await onOk(v); okb.disabled=okb.dataset.stop==="1";
     if(r!==true&&okb.isConnected) okb.focus(); // disabling dropped focus; keep Esc and Tab inside the dialog
     if(r===true) closeDlg(); else if(typeof r==="string"){const er=$("#ederr"); if(er) er.textContent=r}};
   $("#edno").onclick=()=>closeDlg();
@@ -850,6 +850,7 @@ function dlg({title,msg,fields=[],ok,okCls="pri",onOk}){
     if(e.key==="Escape"){e.preventDefault();closeDlg()}
     else if(e.key==="Tab"){const f=[...ov.querySelectorAll("input,select,textarea,button:not(:disabled)")],i=f.indexOf(document.activeElement);
       if(e.shiftKey&&i<=0){e.preventDefault();f[f.length-1].focus()}else if(!e.shiftKey&&i===f.length-1){e.preventDefault();f[0].focus()}}};
+  if(init) init();
   (ov.querySelector("input,select,textarea")||okb).focus();
 }
 async function send(op){
@@ -884,18 +885,37 @@ async function swapModel(d,op){
   const cc=pc&&conns().find(x=>x.id===pc);
   if(selected) showObj(byId[selected]); else if(cc) showConn(cc); else deselect();
 }
+// Layer rules mirror C4-PARENT-LEVEL: which layers may hold each layer (null = top level).
+const HOLD={actor:[null],system:[null],group:[null,"group","system"],app:["system","group"],store:["system","group"],component:["app","component","group"]};
+const HOLD_TXT={actor:"An actor sits at the top level",system:"A system sits at the top level",group:"A group goes at the top level or under a group or system",app:"An app goes under a system or group",store:"A store goes under a system or group",component:"A component goes under an app, group or component"};
 function objFields(o){return [
+  {k:"kind",l:"Layer",t:"select",v:o?.type||"component",opts:KINDS.map(k=>[k,TYPE_LABEL[k]])},
+  {k:"parent",l:"Parent",t:"select",v:"",opts:[]},
   {k:"name",l:"Name",v:o?.name||""},
-  {k:"kind",l:"Kind",t:"select",v:o?.type||"component",opts:KINDS.map(k=>[k,TYPE_LABEL[k]])},
-  {k:"parent",l:"Parent",t:"select",v:o?o.parent||"":(selected&&byId[selected]?selected:focus||""),opts:parentOpts(o?.id)},
   {k:"tech",l:"Tech",v:o?.tech||""},
   {k:"summary",l:"Summary",t:"area",v:o?.description||""},
   ...(o?[{k:"status",l:"Status",t:"select",v:o.status||"",opts:statusOpts}]:[])]}
-$("#ed-addo").onclick=()=>dlg({title:"Add object",fields:objFields(),ok:"Add",onOk:v=>{
+// Rebuild the Parent list for the chosen layer; keep the current parent only if still legal, else the selected/focused object, else the first option.
+function wireLayer(o){
+  const kind=$("#ef-kind"), par=$("#ef-parent"), okb=$("#edok"), h=document.createElement("div");
+  h.className="edmsg"; h.style.cssText="margin:-6px 0 10px;font-size:12px"; par.after(h);
+  let cur=o?o.parent||"":(selected&&byId[selected]?selected:focus||"");
+  const fill=()=>{
+    const hold=HOLD[kind.value], opts=[...(hold.includes(null)?[["","(top level)"]]:[]),
+      ...tree().filter(([x])=>(!o||(x.id!==o.id&&!isAnc(o.id,x.id)))&&hold.includes(x.type)).map(([x,d])=>[x.id,"  ".repeat(d)+(x.name||x.id)])];
+    par.innerHTML=opts.map(([v,l])=>`<option value="${esc(v)}">${esc(l)}</option>`).join("");
+    const ok=opts.some(([v])=>v===cur), none=!opts.length;
+    par.value=ok?cur:(opts[0]?.[0]??""); par.disabled=none; okb.dataset.stop=none?"1":"0"; okb.disabled=none;
+    h.style.color=none?"var(--err)":""; h.textContent=none?`No ${hold.filter(Boolean).join(" or ")} exists yet. Add one first, then add this ${kind.value} under it.`:HOLD_TXT[kind.value];
+  };
+  kind.onchange=()=>{fill()}; par.onchange=()=>{cur=par.value};
+  fill();
+}
+$("#ed-addo").onclick=()=>dlg({title:"Add object",fields:objFields(),ok:"Add",init:()=>wireLayer(),onOk:v=>{
   if(!v.name) return "Name is required.";
   const op={op:"add_object",name:v.name,kind:v.kind}; ["parent","tech","summary"].forEach(k=>{if(v[k])op[k]=v[k]}); return commit(op)}});
 $("#ed-eo").onclick=()=>{const o=byId[selected]; if(!o) return;
-  dlg({title:"Edit "+(o.name||o.id),fields:objFields(o),ok:"Save",onOk:v=>{
+  dlg({title:"Edit "+(o.name||o.id),fields:objFields(o),ok:"Save",init:()=>wireLayer(o),onOk:v=>{
     if(!v.name) return "Name is required.";
     return commit({op:"update_object",id:o.id,set:{name:v.name,kind:v.kind,parent:v.parent||null,tech:v.tech||null,summary:v.summary||null,status:v.status||null}})}})};
 $("#ed-do").onclick=()=>{const o=byId[selected]; if(!o) return;
