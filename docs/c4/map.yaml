@@ -1,0 +1,115 @@
+project:
+  id: endo
+  name: Endo
+  root: ../..
+
+objects:
+  - id: user
+    kind: actor
+    name: User / Developer
+    summary: Runs tasks, issues instructions, and reviews agent output
+
+  - id: endo
+    kind: system
+    name: Endo
+    summary: Endoskeleton backbone framework for AI coding agents
+    tech: Python
+
+  - id: cli
+    parent: endo
+    kind: app
+    name: CLI & Session Runner
+    summary: Command-line entrypoint and interactive agent session runner
+    tech: Python CLI
+    status: future
+
+  - id: kernel
+    parent: endo
+    kind: app
+    name: Agent Kernel
+    summary: Core turn loop, prompt assembly, and tool coordination
+    tech: Python
+    status: future
+
+  - id: code_intel
+    parent: endo
+    kind: app
+    name: Code Intelligence Engine
+    summary: Tree-sitter AST extraction, skeletonization, and repo mapping
+    tech: Tree-sitter + Python
+    status: future
+
+  - id: tools
+    parent: endo
+    kind: app
+    name: Tool Suite
+    summary: Surgical codebase inspection primitives (ripgrep, line slicer)
+    tech: Python + ripgrep
+    status: future
+
+  - id: store
+    parent: endo
+    kind: store
+    name: State & Cache Store
+    summary: SQLite session history, AST cache, and audit trails
+    tech: SQLite
+    status: future
+
+  - id: fs
+    kind: system
+    name: Target Codebase
+    summary: Source code files and repository directory
+
+  - id: llm
+    kind: system
+    name: Frontier LLM
+    summary: Model inference APIs (Claude, Gemini, OpenAI)
+
+links:
+  - id: u_cli
+    from: user
+    to: cli
+    name: CLI prompt
+    summary: User submits task or prompt via CLI
+
+  - id: cli_kern
+    from: cli
+    to: kernel
+    name: IPC run
+    summary: Start agent loop with budget and instructions
+
+  - id: kern_cintel
+    from: kernel
+    to: code_intel
+    name: import map
+    summary: Ingest structural skeleton instead of full codebase
+
+  - id: cintel_fs
+    from: code_intel
+    to: fs
+    name: file read
+    summary: Read source files for AST indexing
+
+  - id: kern_llm
+    from: kernel
+    to: llm
+    name: HTTPS inference
+    summary: Send prefix-cached prompt with Repo Map and tools
+
+  - id: kern_tools
+    from: kernel
+    to: tools
+    name: IPC dispatch
+    summary: Dispatch tool calls emitted by LLM
+
+  - id: tools_fs
+    from: tools
+    to: fs
+    name: file search
+    summary: ripgrep across workspace and surgical line extraction
+
+  - id: kern_store
+    from: kernel
+    to: store
+    name: SQL query
+    summary: Persist session messages and cache AST hashes
