@@ -1,7 +1,7 @@
 """HTTP server: C4 viewer, pages and their JSON APIs. All data comes from the DB."""
 import http.server, json, mimetypes, pathlib, re, socket, sqlite3, threading
 from urllib.parse import parse_qs, unquote, urlsplit
-from strata import blocks, c4_layered, db, roadmap, service
+from strata import blocks, c4_edit, c4_layered, db, roadmap, service
 
 SERVE_EXT = set(".py .js .mjs .ts .tsx .css .html .htm .md .txt .yaml .yml .json .toml .c .h .cpp .hpp .dart .java .kt .go .rs .svg .png .jpg .jpeg .gif .webp".split())
 
@@ -21,10 +21,15 @@ SHOW = {"item": "id,project,kind,label,title,status,priority,owner"}
 ITEM_KINDS = ("rule", "task", "issue", "knowledge", "draft", "note", "step", "gate")
 ITEM_STATUS = ("proposed", "approved", "open", "doing", "review", "done", "rejected")
 CLOSED = "('done','rejected')"
+LOOPBACK = ("127.0.0.1", "::1", "localhost")
+EDIT_PATH = "/api/c4/edit"
+MAX_BODY = 65536
 
 
-def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_hosts=(), bound_hosts=None):
-    """allow_hosts: extra Host names (with or without port). bound_hosts: every address strata binds (default just host)."""
+def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_hosts=(), bound_hosts=None, allow_edit=None):
+    """allow_hosts: extra Host names (with or without port). bound_hosts: every address strata binds (default just host).
+    allow_edit: enable POST /api/c4/edit; None = only when host is loopback."""
+    if allow_edit is None: allow_edit = host in LOOPBACK
     if host in ("0.0.0.0", "::") and not allow_hosts:
         raise ValueError(f"binding {host} needs at least one --allow-host NAME")
     bound = [h.lower() for h in (bound_hosts or [host])]
@@ -58,6 +63,40 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             port = self.server.server_address[1]
             ok = {f"[{h}]:{port}" if ":" in h else f"{h}:{port}" for h in bound} | {f"localhost:{port}", f"127.0.0.1:{port}"} | extra | {f"{h}:{port}" for h in extra}
             return (self.headers.get("Host") or "").lower() in ok  # DNS rebinding guard
+
+        def _no(self, *a, **k): self.json({"error": "method not allowed"}, 405, Allow="POST" if urlsplit(self.path).path == EDIT_PATH else "GET")
+        do_PUT = do_DELETE = do_PATCH = _no
+
+        def do_POST(self):
+            if not self.host_ok(): return self.json({"error": "forbidden host"}, 403)
+            if not allow_edit: return self.json({"error": "editing disabled"}, 403)
+            u = urlsplit(self.path)
+            if u.path != EDIT_PATH: return self._no()
+            h = self.headers
+            if h.get("X-Strata-Edit") != "1": return self.json({"error": "X-Strata-Edit header required"}, 403)
+            if h.get("Origin") is not None and h["Origin"].lower() != "http://" + (h.get("Host") or "").lower():
+                return self.json({"error": "bad Origin"}, 403)
+            if not (h.get("Content-Type") or "").lower().startswith("application/json"): return self.json({"error": "Content-Type must be application/json"}, 415)
+            n = h.get("Content-Length")
+            if n is None or not n.isdigit(): return self.json({"error": "Content-Length required"}, 413)
+            if int(n) > MAX_BODY: return self.json({"error": "body too large"}, 413)
+            try: op = json.loads(self.rfile.read(int(n)))
+            except ValueError: op = None
+            if not isinstance(op, dict): return self.json({"error": "JSON object body required"}, 400)
+            if not isinstance(op.get("yes", False), bool): return self.json({"error": "yes must be boolean"}, 400)
+            yes = op.pop("yes", False)
+            proj = parse_qs(u.query).get("project", [""])[-1] or default_project()
+            if not proj: return self.json({"error": "project required"}, 400)
+            try:
+                with lock:
+                    try:
+                        r = c4_edit.apply(conn, proj, op, yes=yes)
+                        model = {**c4_layered.read_model(conn, proj), **c4_layered.viewer_extra(conn, proj)}
+                    except BaseException: conn.rollback(); raise
+                return self.json({"ok": True, "changed": r.get("changed", []), "warnings": r.get("warnings", []), "model": model})
+            except ValueError as e: return self.json({"error": str(e)}, 400)
+            except KeyError as e: return self.json({"error": str(e.args[0]) if e.args else "not found"}, 404)
+            except Exception: return self.json({"error": "internal error"}, 500)
 
         def do_GET(self):
             if not self.host_ok(): return self.send_error(403)
@@ -209,9 +248,10 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             self.end_headers()
             self.wfile.write(body)
 
-        def json(self, obj):
+        def json(self, obj, code=200, **hdr):
             body = json.dumps(obj, ensure_ascii=False).encode()
-            self.send_response(200)
+            self.send_response(code)
+            for k, v in hdr.items(): self.send_header(k, v)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("X-Content-Type-Options", "nosniff")

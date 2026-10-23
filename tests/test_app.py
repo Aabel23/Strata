@@ -275,9 +275,10 @@ def test_api_items_board_fields(env):
 
 
 def test_server_has_no_write_routes():
-    """The viewer is read-only: C4 is edited in the folder and imported with the CLI."""
+    """Rule 1: the only write route is POST /api/c4/edit; PUT/DELETE/PATCH are 405 stubs."""
     src = (ROOT / "strata/server.py").read_text()
-    assert not any(m in src for m in ("do_POST", "do_PUT", "do_DELETE", "do_PATCH"))
+    assert src.count("def do_POST") == 1 and "do_PUT = do_DELETE = do_PATCH = _no" in src
+    assert "def do_PUT" not in src and "def do_DELETE" not in src and "def do_PATCH" not in src
 
 
 def test_board_ui_filters_in_url():
