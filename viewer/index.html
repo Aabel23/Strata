@@ -178,6 +178,27 @@ main.info-hidden #show-info{display:block}
 .embed main{grid-template-columns:minmax(0,1fr) var(--info-width,320px)}
 .shell{grid-template-rows:auto 1fr}.shell #top{display:none}
 @media (max-width:760px){main{grid-template-columns:1fr;grid-template-rows:1fr 42vh}main.info-hidden{grid-template-columns:1fr;grid-template-rows:1fr}#tools{display:none}aside{border-left:0;border-top:1px solid var(--line)}#info-resize{display:none}#show-info{top:auto;bottom:8px}}
+/* task #249: Code panel (third tab in the right column) */
+#pcode{display:flex;flex-direction:column;gap:8px;padding:10px 12px;overflow:hidden;min-height:0}#pcode[hidden]{display:none}
+.chead{display:flex;align-items:flex-start;gap:6px}#cclose{margin-left:auto;border:0;background:none;color:var(--muted);font-size:18px;line-height:1;padding:0 6px}
+.ccrumb{flex:1;min-width:0;display:flex;flex-wrap:wrap;gap:2px 4px;font-size:12px;color:var(--muted)}.ccrumb span{overflow-wrap:anywhere}.ccrumb span:last-child{color:var(--ink);font-weight:600}.ccrumb .sep{color:var(--faint)}
+.cfilt{display:flex;flex-direction:column;gap:6px}#pcode input[type=text]{margin:0}
+.ctog{display:flex;flex-wrap:wrap;gap:6px}.ctog button{font-size:11px;padding:1px 9px;border-radius:10px;background:var(--card2);color:var(--muted)}
+.ctog button[aria-pressed=true]{color:var(--accent);border-color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--card2))}
+#clist{flex:1 1 auto;min-height:90px;overflow:auto;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
+.crow{display:flex;align-items:center;gap:5px;padding:2px 8px 2px calc(8px + var(--d,0)*14px);min-height:24px;cursor:pointer;white-space:nowrap;font-size:12px}
+.crow:hover{background:var(--card)}.crow[aria-selected=true]{background:var(--card2);box-shadow:inset 2px 0 var(--accent)}
+.crow:focus-visible,#cclose:focus-visible,.ctog button:focus-visible,#ccopy:focus-visible,#pcode input:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.crow .chev{width:10px;flex:none;color:var(--faint);font-size:10px}.crow svg{width:14px;height:14px;flex:none;fill:none;stroke-width:1.5}
+.crow .cn{font:12px ui-monospace,"Cascadia Code",Consolas,monospace;min-width:0;overflow:hidden;text-overflow:ellipsis}.crow .cn.f{flex:1;direction:rtl;text-align:left}
+.crow .sig{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--faint);font:11px ui-monospace,"Cascadia Code",Consolas,monospace}
+.crow .meta{flex:none;color:var(--muted);font-size:11px;margin-left:auto}.crow .sig+.meta{margin-left:0}.crow .priv{flex:none;font-size:10px;color:var(--faint);border:1px solid var(--line);border-radius:8px;padding:0 5px}.crow.pv .cn{opacity:.65}
+.crow.note,.crow.more{color:var(--muted);cursor:default;font-style:italic}.crow.more{cursor:pointer;color:var(--accent);font-style:normal}.crow.bad{color:var(--err)}
+.cmsg{padding:12px;color:var(--muted)}.cmsg.bad{color:var(--err)}
+#csrc{flex:0 1 46%;min-height:0;display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--line);padding-top:6px}
+.shead{display:flex;align-items:center;gap:8px;min-width:0}.shead .sid{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:11px ui-monospace,Consolas,monospace;color:var(--muted)}#ccopy{font-size:11px;padding:1px 8px;flex:none}
+#cnote{color:var(--warn);font-size:11px}#cpre{flex:1;min-height:60px;overflow:auto;white-space:pre!important;word-break:normal!important;font-size:11.5px;line-height:1.45;-webkit-user-select:text;user-select:text}#cpre.bad{color:var(--err);white-space:pre-wrap!important}
+#cpre .ln{display:inline-block;text-align:right;margin-right:10px;color:var(--faint);-webkit-user-select:none;user-select:none}
 /* task #240: Architect editor (toolbar, dialog) */
 #edbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:5px 12px;background:var(--bar);border-bottom:1px solid var(--line);min-width:0}
 #edbar button,#edlg button{font-size:12px;padding:3px 10px}
@@ -235,9 +256,16 @@ main.info-hidden #show-info{display:block}
    <div id="info-resize" role="separator" aria-orientation="vertical" aria-label="Resize info panel" tabindex="0"></div>
    <aside>
     <div class="info-head"><button id="hide-info" title="Hide info panel" aria-label="Hide info panel">›</button></div>
-    <div class="ptabs"><a data-p="info" class="on">Details</a><a data-p="flows">Diagram flows</a></div>
+    <div class="ptabs"><a data-p="info" class="on">Details</a><a data-p="flows">Diagram flows</a><a data-p="code" id="ctab" hidden>Code</a></div>
     <div class="pbody" id="pinfo"><p class="empty">Click a card to see details and highlight its connections. Double-click, Enter or “… inside ›” to go inside; click the background to deselect.</p></div>
     <div class="pbody" id="pflows" hidden></div>
+    <div id="pcode" hidden aria-label="Code">
+      <div class="chead"><div class="ccrumb" id="ccrumb"></div><button id="cclose" title="Close (Esc)" aria-label="Close code panel">×</button></div>
+      <div class="cfilt"><input type="text" id="cq" placeholder="Filter symbols  ( / )" aria-label="Filter symbols" autocomplete="off">
+        <div class="ctog"><button type="button" id="cpub" aria-pressed="false">public only</button><button type="button" data-k="class" aria-pressed="true">class</button><button type="button" data-k="def" aria-pressed="true">def</button></div></div>
+      <div id="clist" role="tree" aria-label="Files and symbols"></div>
+      <div id="csrc" hidden><div class="shead"><span class="sid" id="cid"></span><button type="button" id="ccopy">Copy id</button></div><div id="cnote" hidden></div><pre id="cpre" tabindex="0" aria-label="Source"></pre></div>
+    </div>
    </aside>
   </div>
   <button id="show-info" title="Show info panel" aria-label="Show info panel">‹</button>
@@ -293,8 +321,9 @@ function load(m){
   $("#tag").innerHTML='<option value="">Tags: all</option>'+Object.keys(m.tags||{}).map(t=>`<option>${esc(t)}</option>`).join("");
   $("#drop").style.display="none"; document.title=`${m.name||"Model"} · Strata`; $("#mname").textContent=m.name||"Model";
   flow=null; step=0; renderFlows();
-  const h=P.get("focus")||location.hash.slice(1);
+  const hp=hashParts(), h=P.get("focus")||hp.obj;
   if(h&&byId[h]){if(kids(h).length) go(h,1); else {go(byId[h].parent||null,1); selected=h; render(true)}} else go(null,1);
+  if(hp.code&&!codeBooted&&byId[hp.obj]){codeBooted=true;showObj(byId[hp.obj]);openCode(hp.obj,hp.sym)}
 }
 const kids=id=>(M.objects||[]).filter(o=>(o.parent||null)===id);
 const chain=id=>{const r=[];for(let o=byId[id];o;o=byId[o.parent])r.unshift(o.id);return r};
@@ -419,7 +448,7 @@ function render(keepCam,keepOld){
   if(!keepCam) fit(); else applyCam();
   $("#stage").querySelectorAll(".node").forEach(el=>{
     el.onclick=ev=>{if(linkPick) return linkPicked(el.dataset.id); if(ev.target.closest(".zbtn")) return go(el.dataset.id); selected=el.dataset.id;showObj(byId[selected]);paint()};
-    el.ondblclick=()=>{if(linkPick)return;if(kids(el.dataset.id).length)go(el.dataset.id)};
+    el.ondblclick=()=>{if(linkPick)return;const id=el.dataset.id;if(kids(id).length)go(id);else if(byId[id]?.type==="component"){selected=id;showObj(byId[id]);paint();openCode(id)}};
   });
   paint();
   $("#stage").querySelectorAll(".edge").forEach(el=>el.onclick=()=>{if(el.dataset.c){const c=conns().find(x=>x.id===el.dataset.c);if(c)showConn(c)}else showEdge(edges.get(el.dataset.e),el.dataset.e)});
@@ -476,7 +505,7 @@ function go(F,replace){
   const ch=F!==focus; history[ch&&!replace?"pushState":"replaceState"](null,"",location.search+"#"+(F||"")); return nav(F);
 }
 // Back/forward between levels: the hash is the source of truth.
-window.onpopstate=()=>{if(!M)return; const h=location.hash.slice(1); nav(h&&byId[h]&&kids(h).length?h:null)};
+window.onpopstate=()=>{if(!M)return; const h=hashParts().obj; nav(h&&byId[h]&&kids(h).length?h:null)};
 
 /* zoom animation between levels (semantic zoom, see morph) */
 const par=id=>byId[id]?.parent||null;
@@ -602,7 +631,7 @@ $("#fit").onclick=fit; $("#zin").onclick=()=>zoomAt(1.2); $("#zout").onclick=()=
 $("#up").onclick=()=>{if(M&&focus)go(byId[focus].parent||null)};
 
 /* right panel */
-function tabTo(p){document.querySelectorAll(".ptabs a").forEach(a=>a.classList.toggle("on",a.dataset.p===p));$("#pinfo").hidden=p!=="info";$("#pflows").hidden=p!=="flows"}
+function tabTo(p){document.querySelectorAll(".ptabs a").forEach(a=>a.classList.toggle("on",a.dataset.p===p));$("#pinfo").hidden=p!=="info";$("#pflows").hidden=p!=="flows";$("#pcode").hidden=p!=="code"}
 document.querySelectorAll(".ptabs a").forEach(a=>a.onclick=()=>tabTo(a.dataset.p));
 function related(id){
   const l=M.links[id]; if(!l||!l.items.length) return "";
@@ -627,8 +656,11 @@ function showObj(o,keepTab){
   ${inc.length?`<div class="lbl">Called by</div><div class="clist">${inc.map(cRow).join("")}</div>`:""}
   ${out.length?`<div class="lbl">Calls</div><div class="clist">${out.map(cRow).join("")}</div>`:""}
   ${related(o.id)}
+  ${o.type==="component"?'<p><button id="opencode" title="Browse the files and symbols this component owns">Code</button></p>':""}
   ${kids(o.id).length?`<p><button id="zoomto" data-id="${esc(o.id)}">Zoom in · ${kids(o.id).length} →</button></p>`:""}`;
   const zb=$("#zoomto"); if(zb) zb.onclick=()=>go(zb.dataset.id);
+  const cb=$("#opencode"); if(cb) cb.onclick=()=>openCode(o.id);
+  if(C&&C.obj!==o.id) closeCode();
   bindRows();
 }
 // Layered model: the contract behind a link (c.detail = "<file>.<id>"). Anything missing reads "Not specified yet".
@@ -772,6 +804,7 @@ try{const t=localStorage.getItem("strata-theme");if(t)document.documentElement.d
 document.onkeydown=e=>{if(e.key==="Escape"&&linkPick){cancelPick();return}
   if(!M||e.target.tagName==="SELECT"||e.target.tagName==="INPUT")return;
   if(e.altKey&&e.key==="ArrowLeft")return history.back(); if(e.altKey&&e.key==="ArrowRight")return history.forward();
+  if(e.key==="Escape"&&C&&!$("#pcode").hidden){closeCode();return}
   if(e.key==="Escape"){if(!deselect()&&focus)go(par(focus))}
   if(e.key==="Enter"&&selected&&kids(selected).length&&!e.target.closest("button,summary"))go(selected);
   if(flow&&e.key==="ArrowRight")setStep(step+1); if(flow&&e.key==="ArrowLeft")setStep(step-1);
@@ -805,6 +838,179 @@ if(P.get("shell")) document.body.classList.add("shell");
 const toModel=d=>({...d.meta,objects:d.objects,connections:d.connections,flows:d.flows,links:d.links,open_issues:d.open_issues,layered:d.layered,contracts:d.contracts,behavior:d.behavior});
 const fetchModel=()=>fetch("/api/c4"+location.search).then(r=>r.ok?r.json():Promise.reject(r.status)).then(toModel);
 fetchModel().then(load).catch(e=>{$("#drop").textContent=e===404?"No C4 map (layered format) for this project":`Could not load model (${e}).`});
+/* task #249: Code panel. Read-only: GET /api/code/{files,symbols,src}. All server text goes in through textContent. */
+let C=null, codeBooted=false;
+const hashParts=()=>{let h=location.hash.slice(1);try{h=decodeURIComponent(h)}catch{}const m=/^([^/]*)\/code(?:\/(.*))?$/.exec(h);return m?{obj:m[1],code:true,sym:m[2]||""}:{obj:h,code:false,sym:""}};
+const mk=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e};
+async function codeApi(kind,params){
+  const q=new URLSearchParams(params); if(P.get("project")) q.set("project",P.get("project"));
+  try{const r=await fetch("/api/code/"+kind+"?"+q), d=await r.json().catch(()=>({}));
+    return r.ok?{ok:true,d}:{status:r.status,error:d.error||`Server answered ${r.status}`}}
+  catch{return {status:0,error:"Could not reach the server."}}
+}
+function codeHash(){
+  if(!C) return; const h=encodeURIComponent(C.obj+"/code"+(C.sel?"/"+C.sel.id:""));
+  history.replaceState(null,"",location.search+"#"+h);
+  // Mirror into the app shell's URL (same origin) so reloading the shell reopens the symbol; replaceState fires no hashchange.
+  try{if(window.parent!==window)window.parent.history.replaceState(null,"","#/p/"+encodeURIComponent(P.get("project")||"")+"/c4/"+[C.obj,"code",...(C.sel?C.sel.id.split("/"):[])].map(encodeURIComponent).join("/"))}catch{}
+}
+function openCode(id,symId){
+  if(!byId[id]) return;
+  if(C&&C.obj===id&&!symId){tabTo("code");$("#clist").querySelector('[tabindex="0"]')?.focus();return}
+  const me=C={obj:id,files:null,missing:[],truncated:false,msg:null,q:"",pub:false,kinds:{class:true,def:true},sel:null,src:null,closed:new Set(),all:false,fk:null,cur:[]};
+  $("#cq").value=""; $("#cpub").setAttribute("aria-pressed","false"); document.querySelectorAll(".ctog [data-k]").forEach(b=>b.setAttribute("aria-pressed","true"));
+  $("#ctab").hidden=false; setInfoHidden(false);
+  if($("#info-wrap").getBoundingClientRect().width<420&&innerWidth>900) document.documentElement.style.setProperty("--info-width","420px");
+  tabTo("code"); renderCode(); codeHash();
+  codeApi("files",{object:id}).then(async r=>{
+    if(C!==me) return;
+    if(!r.ok) me.msg={bad:1,text:r.status===404&&/root/i.test(r.error)?"This project has no root folder set, so its code cannot be read. Set the project root, then reopen.":r.error};
+    else if(!r.d.root) me.msg={text:"This project has no root folder set, so its code cannot be read. Set the project root, then reopen."};
+    else{
+      me.files=r.d.files.map(f=>({path:f.path,exists:f.exists,open:false,loaded:false,loading:false,loc:null,syms:[],error:null}));
+      me.missing=r.d.missing||[]; me.truncated=!!r.d.truncated;
+      if(!me.files.length&&!me.missing.length) me.msg={text:"This component owns no files yet. Add file paths or globs under owns: in map.yaml, then run c4 import."};
+    }
+    renderCode();
+    if(symId&&me.files){const path=symId.split("::")[0], f=me.files.find(x=>x.path===path);
+      if(!f){me.msg={bad:1,text:"The file of this symbol is not owned by this component: "+path};return renderCode()}
+      f.open=true; await loadFile(f); if(C===me) pickSym(symId,true)}
+  });
+}
+function closeCode(keepHash){
+  if(!C) return; C=null; $("#ctab").hidden=true; if(!$("#pcode").hidden) tabTo("info");
+  if(!keepHash){history.replaceState(null,"",location.search+"#"+(focus||""));
+    try{if(window.parent!==window)window.parent.history.replaceState(null,"","#/p/"+encodeURIComponent(P.get("project")||"")+"/c4"+(focus?"/"+encodeURIComponent(focus):""))}catch{}}
+}
+async function loadFile(f){
+  if(f.loaded||f.loading) return; const me=C; f.loading=true; renderCode();
+  const r=await codeApi("symbols",{path:f.path}); if(C!==me) return;
+  f.loading=false; f.loaded=true;
+  if(r.ok){f.loc=r.d.loc; f.syms=r.d.symbols||[]; f.error=r.d.error}else f.error=r.error;
+  const ids=new Set(f.syms.map(s=>s.id)); f.kids=new Map(); f.byId=new Map(f.syms.map(s=>[s.id,s]));
+  f.syms.forEach(s=>{const k=ids.has(s.parent_id)?s.parent_id:"";(f.kids.get(k)||f.kids.set(k,[]).get(k)).push(s)});
+  renderCode();
+}
+const kindOf=s=>s.kind==="class"?"class":"def";
+const filtOn=()=>!!(C.q||C.pub||!C.kinds.class||!C.kinds.def);
+// Symbols passing the filter, plus their ancestors so the nesting stays readable.
+function symVis(f){
+  const q=C.q.toLowerCase(), vis=new Set();
+  f.syms.forEach(s=>{if((!C.pub||s.visibility==="public")&&C.kinds[kindOf(s)]&&(!q||s.id.split("::")[1].toLowerCase().includes(q)))
+    for(let x=s;x&&!vis.has(x.id);x=f.byId.get(x.parent_id))vis.add(x.id)});
+  return vis;
+}
+function codeRows(){
+  const out=[], act=filtOn();
+  for(const f of C.files||[]){
+    const vis=f.loaded&&f.syms.length?symVis(f):new Set();
+    if(act&&f.loaded&&!f.error&&!vis.size) continue;
+    out.push({t:"file",f,key:"f:"+f.path});
+    if(!f.open||!f.exists) continue;
+    if(f.loading) out.push({t:"note",key:"n:"+f.path,text:"loading…"});
+    else if(f.error) out.push({t:"note",bad:1,key:"n:"+f.path,text:f.error});
+    else if(f.loaded&&!f.syms.length) out.push({t:"note",key:"n:"+f.path,text:"no symbols"});
+    else if(f.loaded){const walk=(pid,d)=>{for(const s of f.kids.get(pid)||[]){
+        if(act&&!vis.has(s.id)) continue; const has=!!f.kids.get(s.id);
+        out.push({t:"sym",f,s,d,has,key:s.id}); if(has&&!C.closed.has(s.id)) walk(s.id,d+1)}}; walk("",1)}
+  }
+  if(!C.all&&out.length>500){const n=out.length-500; out.length=500; out.push({t:"more",key:"more",n})}
+  return out;
+}
+const SVG_CLASS='<rect x="2" y="2" width="12" height="12" rx="2"/><path d="M5 6h6M5 10h6"/>', SVG_DEF='<path d="M6 2.5c-2 0-2 1-2 2.5v1c0 1-.8 2-2 2 1.2 0 2 1 2 2v1c0 1.5 0 2.5 2 2.5M10 2.5c2 0 2 1 2 2.5v1c0 1 .8 2 2 2-1.2 0-2 1-2 2v1c0 1.5 0 2.5-2 2.5"/>';
+function glyph(kind){const s=document.createElementNS("http://www.w3.org/2000/svg","svg");s.setAttribute("viewBox","0 0 16 16");s.setAttribute("aria-hidden","true");
+  s.setAttribute("stroke",kind==="class"?"var(--app)":"var(--accent)");s.innerHTML=kind==="class"?SVG_CLASS:SVG_DEF;return s} // static markup only
+function renderCode(){
+  if(!C) return;
+  const crumb=[...chain(C.obj).map(nm)]; if(C.sel){crumb.push(C.sel.path);const q=C.sel.id.split("::")[1];if(q)crumb.push(q)}
+  $("#ccrumb").replaceChildren(...crumb.flatMap((t,i)=>[...(i?[mk("span","sep","›")]:[]),mk("span","",t)]));
+  const L=$("#clist"), had=L.contains(document.activeElement);
+  if(C.msg||!C.files){L.replaceChildren(mk("div","cmsg"+(C.msg?.bad?" bad":""),C.msg?C.msg.text:"Loading files…"));C.cur=[];renderSrc();return}
+  const rows=C.cur=codeRows(); if(!rows.length&&filtOn()) rows.push({t:"note",key:"n:none",text:"No symbols match the filter."}); if(!rows.some(r=>r.key===C.fk)) C.fk=rows.find(r=>r.t!=="note")?.key;
+  const els=rows.map(r=>{
+    const e=mk("div","crow"+(r.t==="note"?" note":r.t==="more"?" more":"")+(r.bad?" bad":"")+(r.t==="file"&&!r.f.exists?" bad":"")+(r.s?.visibility==="private"?" pv":""));
+    e.dataset.key=r.key; e.tabIndex=r.key===C.fk?0:-1; e.style.setProperty("--d",r.d||0);
+    if(r.t==="note"){e.setAttribute("role","none");e.style.setProperty("--d",1.5);e.textContent=r.text;return e}
+    e.setAttribute("role","treeitem"); e.setAttribute("aria-level",String((r.d||0)+1));
+    if(r.t==="more"){e.textContent=`+${r.n} more`;return e}
+    const chev=mk("span","chev");
+    if(r.t==="file"){const f=r.f; e.setAttribute("aria-expanded",String(f.open)); chev.textContent=f.exists?(f.open?"▾":"▸"):"";
+      const n=f.loaded&&f.syms.length?`${f.syms.length} symbol${f.syms.length>1?"s":""}`:"";
+      const nm_=mk("span","cn f"); nm_.textContent="‎"+f.path; nm_.title=f.path+(f.exists?"":" (not on disk)");
+      e.append(chev,nm_,mk("span","meta",[f.exists?"":"missing",f.loc!=null?f.loc+" lines":"",n].filter(Boolean).join(" · ")));}
+    else{const s=r.s; if(r.has) e.setAttribute("aria-expanded",String(!C.closed.has(s.id))); chev.textContent=r.has?(C.closed.has(s.id)?"▸":"▾"):"";
+      e.setAttribute("aria-selected",String(C.sel?.id===s.id));
+      const sig=mk("span","sig",s.signature||""); sig.title=(s.kind==="async def"?"async ":"")+s.name+(s.signature||"");
+      const g=glyph(kindOf(s)); g.setAttribute("role","img"); g.setAttribute("aria-label",s.kind);
+      e.append(chev,g,mk("span","cn",s.name),sig);
+      if(s.visibility==="private"){const p=mk("span","priv","priv");p.title="private name";e.append(p)}
+      e.append(mk("span","meta",String(s.end-s.start+1)));
+      e.title=`${s.kind} ${s.name} · lines ${s.start}-${s.end}`+(s.doc1?"\n"+s.doc1:"")}
+    return e;
+  });
+  if(C.missing.length){const h=mk("div","crow note","owns entry matches no file");h.style.setProperty("--d",0);els.push(h);
+    C.missing.forEach(m=>{const e=mk("div","crow note bad",m);e.title="owns entry matches no file";els.push(e)})}
+  if(C.truncated){const e=mk("div","crow note","File list truncated: this component owns more files than are shown.");els.push(e)}
+  L.replaceChildren(...els);
+  if(had) L.querySelector('[tabindex="0"]')?.focus();
+  renderSrc();
+}
+function renderSrc(){
+  const box=$("#csrc"); if(!C||!C.sel){box.hidden=true;return} box.hidden=false;
+  const {id}=C.sel, S=C.src, pre=$("#cpre"), note=$("#cnote"); $("#cid").textContent=id; $("#cid").title=id; note.hidden=true; pre.classList.remove("bad");
+  if(!S||S.loading) return pre.replaceChildren(document.createTextNode("loading…"));
+  if(S.error){pre.classList.add("bad");return pre.replaceChildren(document.createTextNode(S.error))}
+  const d=S.d, lines=d.text.replace(/\n$/,"").split("\n"), w=String(d.start+lines.length-1).length;
+  pre.replaceChildren(...lines.flatMap((t,i)=>{const n=mk("span","ln",String(d.start+i));n.style.width=w+"ch";return [n,document.createTextNode(t+"\n")]}));
+  pre.scrollTop=0;
+  if(d.cut){note.hidden=false;note.textContent=`Cut at ${lines.length} lines.`}
+}
+async function pickSym(id,reveal){
+  const me=C; C.sel={path:id.split("::")[0],id}; C.fk=id; C.src={loading:true}; renderCode(); codeHash();
+  if(reveal)$("#clist").querySelector('[aria-selected="true"]')?.scrollIntoView({block:"nearest"});
+  const r=await codeApi("src",{id}); if(C!==me||C.sel?.id!==id) return;
+  C.src=r.ok?{d:r.d}:{error:r.error}; renderSrc();
+}
+function toggleRow(r,open){
+  if(r.t==="file"){if(!r.f.exists)return; r.f.open=open??!r.f.open; if(r.f.open) loadFile(r.f); renderCode()}
+  else if(r.t==="sym"&&r.has){if(open??C.closed.has(r.s.id)) C.closed.delete(r.s.id); else C.closed.add(r.s.id); renderCode()}
+}
+function actRow(r){if(r.t==="file")toggleRow(r);else if(r.t==="sym")pickSym(r.s.id);else if(r.t==="more"){C.all=true;renderCode()}}
+const rowOf=el=>{const k=el.closest?.(".crow")?.dataset.key;return k&&C.cur.find(r=>r.key===k)};
+function focusKey(k){C.fk=k;renderCode();$("#clist").querySelector('[tabindex="0"]')?.focus()}
+$("#clist").onclick=e=>{const r=rowOf(e.target); if(!r||r.t==="note") return; C.fk=r.key; if(r.t==="sym"&&r.has&&e.target.classList.contains("chev")) toggleRow(r); else actRow(r); $("#clist").querySelector('[tabindex="0"]')?.focus()};
+$("#clist").onkeydown=e=>{
+  const r=rowOf(e.target); if(!r) return; const cur=C.cur.filter(x=>x.t!=="note"), i=cur.indexOf(r); let h=true;
+  const parentKey=r.t==="sym"?(r.f.byId.has(r.s.parent_id)?r.s.parent_id:"f:"+r.f.path):null;
+  if(e.key==="ArrowDown") cur[i+1]&&focusKey(cur[i+1].key);
+  else if(e.key==="ArrowUp") cur[i-1]&&focusKey(cur[i-1].key);
+  else if(e.key==="Home") focusKey(cur[0].key); else if(e.key==="End") focusKey(cur[cur.length-1].key);
+  else if(e.key==="ArrowRight"){const ex=r.t==="file"?r.f.open:r.t==="sym"&&r.has&&!C.closed.has(r.s.id);
+    if(r.t==="file"&&!r.f.exists) h=true; else if((r.t==="file"||r.has)&&!ex) toggleRow(r,true); else if(cur[i+1]) focusKey(cur[i+1].key)}
+  else if(e.key==="ArrowLeft"){const ex=r.t==="file"?r.f.open:r.t==="sym"&&r.has&&!C.closed.has(r.s.id);
+    if(ex) toggleRow(r,false); else if(parentKey) focusKey(parentKey)}
+  else if(e.key==="Enter"||e.key===" ") actRow(r); else h=false;
+  if(h) e.preventDefault();
+};
+$("#pcode").addEventListener("keydown",e=>{
+  if(!C) return;
+  if(e.key==="Escape"){e.preventDefault();e.stopPropagation();closeCode();return}
+  if(e.key==="/"&&e.target!==$("#cq")){e.preventDefault();e.stopPropagation();$("#cq").focus();$("#cq").select();return}
+  if(e.key==="ArrowDown"&&e.target===$("#cq")){e.preventDefault();$("#clist").querySelector('[tabindex="0"]')?.focus();return}
+  if(e.key.length===1&&!e.ctrlKey&&!e.metaKey||e.key.startsWith("Arrow")) e.stopPropagation(); // keep map shortcuts (f, +, -, flow steps) out
+});
+$("#cq").oninput=e=>{C.q=e.target.value.trim();renderCode()};
+$("#cpub").onclick=e=>{C.pub=!C.pub;e.target.setAttribute("aria-pressed",String(C.pub));renderCode()};
+document.querySelectorAll(".ctog [data-k]").forEach(b=>b.onclick=()=>{C.kinds[b.dataset.k]=!C.kinds[b.dataset.k];b.setAttribute("aria-pressed",String(C.kinds[b.dataset.k]));renderCode()});
+$("#cclose").onclick=()=>closeCode();
+$("#ctab").onclick=()=>tabTo("code");
+$("#ccopy").onclick=async e=>{
+  const b=e.target, t=C?.sel?.id; if(!t) return; let ok=false;
+  try{await navigator.clipboard.writeText(t);ok=true}catch{
+    const a=document.createElement("textarea");a.value=t;a.style.cssText="position:fixed;opacity:0";document.body.append(a);a.select();
+    try{ok=document.execCommand("copy")}catch{} a.remove()}
+  b.textContent=ok?"Copied":"Copy failed"; setTimeout(()=>b.textContent="Copy id",1500);
+};
 /* task #240: Architect editor. One write route: POST /api/c4/edit; the reply carries the whole new model. */
 let off="", linkPick=null, dlgBack=null;
 const KINDS=["actor","system","app","store","component","group"];
