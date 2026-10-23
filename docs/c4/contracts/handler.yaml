@@ -8,7 +8,29 @@
     - 404 no model
   start: viewer/index.html::load
   end: strata/server.py::make_server
-- id: rv_api
+- id: v_item_write
   transport: HTTP
-  start: viewer/roadmap.js::render phase cards
+  body:
+    signature: 'POST /api/item?project=P {op: add|edit|delete|dep_add|dep_rm, ...}'
+    purpose: Task/issue writes from the UI (all fields editable, hard delete) through the audited service
+    request: 'header X-Strata-Token (per-start random) + Origin/Host check; JSON object body'
+    response: '{ok: true}'
+    errors:
+    - 403 bad Host, Origin or token
+    - 400 invalid op or value
+    - 404 unknown project or item
+  start: viewer/app.js::load
+  end: strata/server.py::make_server
+- id: v_project_write
+  transport: HTTP
+  body:
+    signature: 'POST /api/project {op: add|edit|delete, ...}'
+    purpose: Project add, edit and hard delete (typed id confirm, automatic DB backup first)
+    request: 'header X-Strata-Token + Origin/Host check; delete needs confirm == id'
+    response: '{ok: true}'
+    errors:
+    - 403 bad Host, Origin or token
+    - 400 invalid op, wrong confirm
+    - 404 unknown project
+  start: viewer/app.js::load
   end: strata/server.py::make_server

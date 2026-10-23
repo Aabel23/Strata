@@ -18,8 +18,12 @@ def srv(tmp_path):
     for s in made: s.shutdown(); s.server_close()
 
 
+def tok(hp):
+    with urllib.request.urlopen(f"http://{hp}/api/session") as r: return json.load(r)["token"]
+
+
 def call(hp, method="POST", path="/api/c4/edit?project=p", body=None, **hdr):
-    h = {"X-Strata-Edit": "1", "Content-Type": "application/json"}; h.update(hdr)
+    h = {"X-Strata-Edit": "1", "Content-Type": "application/json", "X-Strata-Token": tok(hp)}; h.update(hdr)
     h = {k: v for k, v in h.items() if v is not None}
     data = body if isinstance(body, bytes) else json.dumps(body).encode() if body is not None else None
     try:

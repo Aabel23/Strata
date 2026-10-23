@@ -361,42 +361,6 @@ a.dep:hover{text-decoration:underline}
 /* ---------- Lộ trình (roadmap) ---------- */
 .lt{display:flex;flex-direction:column;gap:26px;min-width:0}
 .lt p{max-width:none}
-.lt-head h1{font-size:2.1rem;max-width:26ch}
-.lt-lead{max-width:80ch!important;color:var(--muted);font-size:14.5px}
-.lt-meta{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:12px;color:var(--muted)}
-.lt-meta b{color:var(--faint);font-weight:500}
-.lt-banner{margin:0;padding:8px 14px;border:1px solid var(--accent);background:var(--accent-soft);border-radius:var(--r);color:var(--fg);font-size:12.5px}
-.lt-top,.lt-ws{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
-.lt-card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:12px 14px;min-width:0}
-.lt-card>b{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
-.lt-card p{margin:6px 0 0;color:var(--fg)}
-.lt-card h3{font-family:var(--body);font-size:14px;font-weight:600;margin:0 0 6px}
-.lt-card ul{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}
-.lt-prog{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px 18px;display:flex;flex-direction:column;gap:10px}
-.lt-ptop{display:flex;justify-content:space-between;gap:16px;align-items:flex-end;flex-wrap:wrap}
-.lt-ptop h2,.lt-sec>h2{font-size:1.5rem;margin:0}
-.lt-intro{margin:4px 0 0;color:var(--muted);font-size:13.5px;max-width:92ch!important}
-.lt-count{font-family:var(--display);font-size:2.2rem;line-height:1;color:var(--accent);font-variant-numeric:tabular-nums}
-.lt-count small{font-family:var(--body);font-size:12px;color:var(--faint);margin-left:6px}
-.lt-bar{max-width:none;flex:none;width:100%}
-.lt-stats{display:flex;flex-wrap:wrap;gap:6px}
-.lt-guide{margin:0;font-size:12px;color:var(--muted)}
-.lt-nav{display:flex;flex-wrap:wrap;gap:6px}
-.lt-nav button{height:26px;border-radius:999px;padding:0 12px;font-size:12px;color:var(--muted)}
-.lt-nav button:hover{border-color:var(--accent);color:var(--fg)}
-.lt-sec{display:flex;flex-direction:column;gap:12px;scroll-margin-top:12px;min-width:0}
-.lt-st{display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 8px;border-radius:999px;border:1px solid var(--line);font-size:11.5px;font-weight:500;color:var(--muted);white-space:nowrap}
-.lt-st i{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
-.lt-st.st-doing{color:var(--st-doing);border-color:var(--st-doing)}
-.lt-st.st-review{color:var(--st-review);border-color:var(--st-review)}
-.lt-st.st-done{color:var(--st-done);border-color:var(--st-done)}
-.lt-st.st-blocked{color:var(--st-block);border-color:var(--st-block)}
-.lt-facts,.lt-dec{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px}
-.lt-fact{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:12px 14px;min-width:0}
-.lt-fact h3{font-family:var(--body);font-size:15px;font-weight:600;margin:8px 0 4px}
-.lt-fact p{margin:0;color:var(--muted);font-size:13px}
-.lt-flag{display:inline-block;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--line);border-radius:999px;padding:1px 9px;color:var(--muted)}
-.lt-flag.f-done{color:var(--st-done);border-color:var(--st-done)}.lt-flag.f-block{color:var(--st-block);border-color:var(--st-block)}.lt-flag.f-doing{color:var(--st-doing);border-color:var(--st-doing)}
 /* Lộ trình (design/roadmap-astra.html): Astra mountain trail, warm-only palette */
 .lt{display:flex;flex-direction:column;gap:24px;max-width:1140px;margin:0 auto;
   --glow:rgba(240,214,180,.7);--st-miss:#c98a6a;--st-done:var(--gold-3);--accent:var(--gold);--accent-soft:rgba(211,166,124,.14)}
@@ -406,10 +370,6 @@ a.dep:hover{text-decoration:underline}
 }
 :root[data-theme="light"] .lt{--st-done:#6e5210;--st-miss:#a4532c;--accent:#936b0d;--accent-soft:rgba(147,107,13,.1);
   --foil:linear-gradient(90deg,#8a6410,#b8902a);--foil-line:linear-gradient(90deg,transparent,rgba(147,107,13,.42),transparent);--glow:rgba(184,144,42,.45)}
-.lt-head{display:flex;flex-wrap:wrap;gap:8px 24px;justify-content:space-between;align-items:flex-end}
-.lt-head h1{margin:2px 0 0;font:500 44px/1 var(--display);letter-spacing:.005em;color:var(--gold-3);text-wrap:balance}
-.lt-head .meta{font:12px/1.6 var(--mono);color:var(--muted);text-align:right}
-.lt-head .cap{font:600 10.5px/1.3 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
 
 /* chi tiết: không khung, không chip. Hairline foil + khoảng trắng; số và tiêu đề bằng Cormorant */
 .lt .detail{display:grid;grid-template-columns:1fr 1.2fr;gap:56px;align-items:start;padding-top:8px;background:none;border:0;border-radius:0;padding-inline:0;margin:0}
@@ -436,7 +396,6 @@ a.dep:hover{text-decoration:underline}
 .lt .thread i.dn{background:var(--st-done)}.lt .thread i.dn::after{display:none}
 .lt .thread i.zero::after{right:auto;left:-1px;opacity:.5;box-shadow:none}
 @media (prefers-reduced-motion:no-preference){
-  .lt .thread i:not(.dn){background-image:var(--sheen-band,linear-gradient(90deg,transparent 40%,var(--sheen) 50%,transparent 60%)),var(--foil);background-size:300% 100%,100% 100%;background-repeat:no-repeat;animation:thr 2.6s ease-out .3s 1 both}
 }
 @keyframes thr{from{background-position:100% 0,0 0}to{background-position:0 0,0 0}}
 .lt .blocks .note{grid-column:1/-1;font:italic 400 15px var(--display);color:var(--muted)}
@@ -474,8 +433,6 @@ a.dep:hover{text-decoration:underline}
 .lt .off li a:hover{color:var(--accent)}
 
 @media (max-width:760px){
-  .lt-head h1{font-size:34px}
-  .lt-head .meta{text-align:left}
   .lt .detail{grid-template-columns:1fr;gap:36px}
   .lt .crit{grid-template-columns:1fr auto}
   .lt .crit .what{grid-column:1/-1}
@@ -483,49 +440,45 @@ a.dep:hover{text-decoration:underline}
 }
 
 /* Lộ trình map (design/roadmap-astra.html): warm golds only, page tokens; trail/sheen differ per theme */
-:root{--lt-trail:#f0d6b4;--lt-sheen:#fffaf0}
-@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--lt-trail:#8a6410;--lt-sheen:#f3d77a}}
-:root[data-theme="light"]{--lt-trail:#8a6410;--lt-sheen:#f3d77a}
-.lt-mapbox{border-radius:var(--r-lg);background:var(--haze);border:1px solid var(--line);overflow:hidden}
-.lt-mapscroll{overflow-x:auto}
-svg.lt-map{display:block;color:var(--gold)}
-.lt-map .ln,.lt-map .body{vector-effect:non-scaling-stroke}
-.lt-mapscroll{min-height:340px}
-.lt-map .body{fill:var(--bg);stroke:currentColor;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
-.lt-map .ln{fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round}
-.lt-map .star{fill:currentColor}
-.lt-map .trail-todo{fill:none;stroke:currentColor;stroke-width:1.6;stroke-dasharray:1.5 7;stroke-linecap:round;opacity:.9}
-.lt-map .trail-done{fill:none;stroke:var(--lt-trail);stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
-.lt-map .sheen{fill:none;stroke:var(--lt-sheen);stroke-width:2.6;stroke-linecap:round;stroke-dasharray:60 1340;opacity:.85}
-@media (prefers-reduced-motion:no-preference){.lt-map .sheen{animation:lt-sheen 7s linear infinite}}
-@media (prefers-reduced-motion:reduce){.lt-map .sheen{display:none}}
-@keyframes lt-sheen{from{stroke-dashoffset:0}to{stroke-dashoffset:-1400}}
-.lt-map text{font-family:var(--mono);fill:var(--fg);paint-order:stroke;stroke:var(--bg);stroke-width:6px;stroke-linejoin:round}
-.lt-map .sm{font-size:9.5px;fill:var(--muted);letter-spacing:.12em;stroke-width:7px}
-.lt-map .nm{font:600 15px var(--display);letter-spacing:.01em}
-.lt-map .camp{cursor:pointer;outline:none}
-.lt-map .camp .dot{fill:var(--bg);stroke:currentColor;stroke-width:1.4}
-.lt-map .camp.done .dot{fill:var(--gold-3);stroke:var(--gold-3)}
-.lt-map .camp.doing .dot{stroke:var(--st-doing);stroke-width:2.2}
-.lt-map .camp .n{font:600 12px var(--mono);text-anchor:middle;stroke:none;fill:var(--fg)}
-.lt-map .camp.done .n{fill:var(--bg)}
-.lt-map .camp .ring{fill:none;stroke:currentColor;stroke-width:.8;stroke-dasharray:2 3;opacity:0}
-.lt-map .camp.sel .ring{opacity:1}
-.lt-map .camp:hover .dot{stroke-width:2.4}
-.lt-map .camp:focus-visible .ring{opacity:1;stroke:var(--gold-3);stroke-width:2;stroke-dasharray:none}
-.lt-map .cairn{fill:var(--bg);stroke:currentColor;stroke-width:1.4;stroke-linejoin:round}
-.lt-map .cairn.done{fill:var(--gold-3);stroke:var(--gold-3)}
-.lt-map .cairn.open{stroke:var(--st-doing);stroke-width:2.2}
-.lt-map .gid{font-size:10px;font-weight:700;letter-spacing:.08em;fill:var(--muted)}
-.lt-map .gid.open{fill:var(--st-doing)}
-.lt-map .flag line{stroke:var(--lt-trail);stroke-width:1.4}
-.lt-map .flag polygon,.lt-map .flag circle{fill:var(--lt-trail)}
-.lt-map .here{fill:var(--lt-trail);font-size:11px;font-weight:700;letter-spacing:.14em}
-.lt-map .summit{font:italic 500 17px var(--display);fill:var(--gold-3);letter-spacing:.02em}
 /* board: phase label; off-roadmap = warm warning tone */
 .tag.phase{color:var(--gold);border-color:color-mix(in srgb,var(--gold) 50%,var(--line))}
-.tag.offrm{color:var(--st-doing);border-color:var(--st-doing);background:color-mix(in srgb,var(--st-doing) 12%,transparent)}
-.tcard.offrm{border-color:color-mix(in srgb,var(--st-doing) 45%,var(--line));background:color-mix(in srgb,var(--st-doing) 5%,var(--card))}
-.ov-map{margin-bottom:16px}
-.hero:has(+.ov-map){min-height:0;padding-bottom:0;margin-bottom:20px}/* overview: map sits right under stats */
-.lt .blocks li .st{justify-self:end}
+
+
+/* project control: add / delete */
+.slrow{display:flex;align-items:center;justify-content:space-between;padding-right:4px}
+.slrow .ib{width:22px;height:22px}
+#side .pi{position:relative}
+#side .pi a.it{padding-right:30px}
+#side .pdel{position:absolute;right:2px;top:3px;width:22px;height:22px;opacity:0;border-radius:var(--r-sm)}
+#side .pi:hover .pdel,#side .pdel:focus-visible{opacity:1}
+#side .pdel:hover{color:var(--st-block,#c0583c)}
+@media (hover:none){#side .pdel{opacity:.7}}
+.pdlg{width:min(460px,calc(100vw - 32px));padding:20px 22px;border:1px solid var(--line);border-radius:var(--r-pop);background:var(--card);color:var(--fg)}
+.pdlg::backdrop{background:rgba(0,0,0,.5)}
+.pdlg h2{margin:0 0 14px;font-size:1.15rem;overflow-wrap:anywhere}
+.pdlg form{display:flex;flex-direction:column;gap:12px;min-width:0}
+.pfield{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+.pfield textarea{border:1px solid var(--line);border-radius:var(--r);background:var(--bg);color:var(--fg);font:inherit;font-size:13px;padding:6px 10px;min-width:0;resize:vertical}
+.pfield textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.pfield input,.pfield select{height:30px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg);color:var(--fg);font:inherit;font-size:13px;padding:0 10px;min-width:0}
+.pfield input:focus-visible,.pfield select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.pinfo{margin:0;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.perr{margin:0;font-size:12.5px;color:var(--st-block,#c0583c)}
+.pfoot{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
+.pfoot button.primary{background:var(--accent-soft);border-color:var(--accent)}
+.pfoot button.danger{border-color:var(--st-block,#c0583c);color:var(--st-block,#c0583c)}
+.pfoot button:disabled{opacity:.45;cursor:not-allowed}
+
+#side .pedit{right:26px}
+#side .pi:hover .pedit,#side .pedit:focus-visible{opacity:1}
+#side .pedit:hover{color:var(--accent)}
+#side .pi a.it{padding-right:54px}
+.pdlg.pwide{width:min(620px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto}
+.prow{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.prow>.pfield{min-width:0}
+.head .tadd{margin-left:auto;align-self:center}
+.tadd,.dact button{height:28px;padding:0 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg);color:var(--fg);font:inherit;font-size:12.5px;cursor:pointer}
+.tadd.primary{background:var(--accent-soft);border-color:var(--accent)}
+.dact{display:flex;gap:6px;float:right}
+.dact button.danger{border-color:var(--st-block,#c0583c);color:var(--st-block,#c0583c)}
+.tadd:focus-visible,.dact button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}

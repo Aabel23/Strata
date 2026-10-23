@@ -1,7 +1,7 @@
 """HTTP server: C4 viewer, pages and their JSON APIs. All data comes from the DB."""
-import http.server, json, mimetypes, pathlib, re, socket, sqlite3, threading
+import hmac, http.server, json, mimetypes, pathlib, re, secrets, socket, sqlite3, threading
 from urllib.parse import parse_qs, unquote, urlsplit
-from strata import blocks, c4_edit, c4_layered, db, roadmap, service, symbols
+from strata import blocks, c4_edit, c4_layered, db, service, symbols
 
 SERVE_EXT = set(".py .js .mjs .ts .tsx .css .html .htm .md .txt .yaml .yml .json .toml .c .h .cpp .hpp .dart .java .kt .go .rs .svg .png .jpg .jpeg .gif .webp".split())
 
@@ -15,7 +15,7 @@ def servable(root, segs):
     return f if f.suffix.lower() in SERVE_EXT and f.is_file() else None
 
 VIEWER = pathlib.Path(__file__).resolve().parent.parent / "viewer"
-STATIC = {"/": "app.html", "/app.js": "app.js", "/app.css": "app.css", "/c4": "index.html", "/index.html": "index.html", "/page.js": "page.js", "/swimlane.js": "swimlane.js", "/roadmap.js": "roadmap.js", "/page.css": "page.css"}
+STATIC = {"/": "app.html", "/app.js": "app.js", "/app.css": "app.css", "/c4": "index.html", "/index.html": "index.html", "/page.js": "page.js", "/swimlane.js": "swimlane.js", "/page.css": "page.css"}
 TYPES = {".html": "text/html", ".md": "text/plain", ".yaml": "text/plain", ".js": "application/javascript", ".css": "text/css", ".json": "application/json"}
 SHOW = {"item": "id,project,kind,label,title,status,priority,owner"}
 ITEM_KINDS = ("rule", "task", "issue", "knowledge", "draft", "note", "step", "gate")
@@ -23,6 +23,8 @@ ITEM_STATUS = ("proposed", "approved", "open", "doing", "review", "done", "rejec
 CLOSED = "('done','rejected')"
 LOOPBACK = ("127.0.0.1", "::1", "localhost")
 EDIT_PATH = "/api/c4/edit"
+PROJECT_PATH = "/api/project"
+ITEM_PATH = "/api/item"
 MAX_BODY = 65536
 
 
@@ -38,6 +40,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
     conn = sqlite3.connect(db.db_path(db_path), check_same_thread=False)  # one long-lived conn: data_version needs it
     conn.row_factory = sqlite3.Row
     lock = threading.RLock()
+    token = secrets.token_urlsafe(32)  # per start: a restart invalidates old pages; served by GET /api/session
     symc = []  # symbol cache conn, opened lazily on first /api/code/ call (derived data)
 
     def rows(sql, args=()):
@@ -65,15 +68,16 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             ok = {f"[{h}]:{port}" if ":" in h else f"{h}:{port}" for h in bound} | {f"localhost:{port}", f"127.0.0.1:{port}"} | extra | {f"{h}:{port}" for h in extra}
             return (self.headers.get("Host") or "").lower() in ok  # DNS rebinding guard
 
-        def _no(self, *a, **k): self.json({"error": "method not allowed"}, 405, Allow="POST" if urlsplit(self.path).path == EDIT_PATH else "GET")
+        def _no(self, *a, **k): self.json({"error": "method not allowed"}, 405, Allow="POST" if urlsplit(self.path).path in (EDIT_PATH, PROJECT_PATH, ITEM_PATH) else "GET")
         do_PUT = do_DELETE = do_PATCH = _no
 
         def do_POST(self):
             if not self.host_ok(): return self.json({"error": "forbidden host"}, 403)
             if not allow_edit: return self.json({"error": "editing disabled"}, 403)
             u = urlsplit(self.path)
-            if u.path != EDIT_PATH: return self._no()
+            if u.path not in (EDIT_PATH, PROJECT_PATH, ITEM_PATH): return self._no()
             h = self.headers
+            if not hmac.compare_digest((h.get("X-Strata-Token") or "").encode(), token.encode()): return self.json({"error": "bad or missing X-Strata-Token"}, 403)
             if h.get("X-Strata-Edit") != "1": return self.json({"error": "X-Strata-Edit header required"}, 403)
             if h.get("Origin") is not None and h["Origin"].lower() != "http://" + (h.get("Host") or "").lower():
                 return self.json({"error": "bad Origin"}, 403)
@@ -84,6 +88,8 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             try: op = json.loads(self.rfile.read(int(n)))
             except ValueError: op = None
             if not isinstance(op, dict): return self.json({"error": "JSON object body required"}, 400)
+            if u.path == PROJECT_PATH: return self.project_op(op)
+            if u.path == ITEM_PATH: return self.item_op(op, parse_qs(u.query).get("project", [""])[-1])
             if not isinstance(op.get("yes", False), bool): return self.json({"error": "yes must be boolean"}, 400)
             yes = op.pop("yes", False)
             proj = parse_qs(u.query).get("project", [""])[-1] or default_project()
@@ -99,6 +105,63 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             except KeyError as e: return self.json({"error": str(e.args[0]) if e.args else "not found"}, 404)
             except Exception: return self.json({"error": "internal error"}, 500)
 
+        def project_op(self, op):
+            """POST /api/project {op: add|edit|delete, ...}: project create/edit/delete through the service (audited)."""
+            try:
+                with lock:
+                    try:
+                        if op.get("op") == "add":
+                            service.add_project(conn, op.get("id"), op.get("name"), op.get("root"), op.get("docs_dir"), op.get("parent"), op.get("description"))
+                        elif op.get("op") == "edit":
+                            if not isinstance(op.get("id"), str): raise ValueError("id required")
+                            service.edit_project(conn, op["id"], *(op.get(k) for k in ("name", "root", "docs_dir", "parent", "description")))
+                        elif op.get("op") == "delete":
+                            if not isinstance(op.get("id"), str): raise ValueError("id required")
+                            service.delete_project(conn, op["id"], op.get("confirm"))
+                        else: raise ValueError("op must be add, edit or delete")
+                    except BaseException: conn.rollback(); raise
+                return self.json({"ok": True})
+            except ValueError as e: return self.json({"error": str(e)}, 400)
+            except KeyError as e: return self.json({"error": str(e.args[0]) if e.args else "not found"}, 404)
+            except Exception: return self.json({"error": "internal error"}, 500)
+
+        def item_op(self, op, proj):
+            """POST /api/item {op: add|edit|delete|dep_add|dep_rm, ...}: task/issue writes as role main through the service (audited)."""
+            def need(k, t):
+                if not isinstance(op.get(k), t) or isinstance(op.get(k), bool): raise ValueError(f"{k} required")
+                return op[k]
+            def opt(k, t):
+                if op.get(k) is not None and not isinstance(op[k], t): raise ValueError(f"{k} must be {t.__name__}")
+                return op.get(k)
+            try:
+                with lock:
+                    try:
+                        o, out = op.get("op"), {}
+                        if o == "add":
+                            kind = need("kind", str)
+                            if kind != "issue" and kind not in ITEM_KINDS: raise ValueError("bad kind")
+                            if opt("status", str) is not None and op["status"] not in ITEM_STATUS: raise ValueError("bad status")
+                            if not need("title", str).strip(): raise ValueError("title required")
+                            out["id"] = service.add_item(conn, "main", proj or need("project", str), kind, need("title", str),
+                                                         opt("body", str), opt("priority", str), op.get("status"), opt("spec", dict), opt("label", str))
+                        elif o == "edit":
+                            id = need("id", int)
+                            if opt("status", str) is not None and op["status"] not in ITEM_STATUS: raise ValueError("bad status")
+                            if opt("title", str) is not None and not op["title"].strip(): raise ValueError("title required")
+                            f = {k: opt(k, t) for k, t in (("title", str), ("body", str), ("priority", str), ("spec", dict))}
+                            if op.get("status") is None and all(v is None for v in f.values()): raise ValueError("nothing to edit")
+                            if op.get("status") is not None: service.set_item(conn, "main", id, status=op["status"])  # first: transition rules are the likeliest failure
+                            if any(v is not None for v in f.values()): service.edit_item(conn, "main", id, **f)
+                        elif o == "delete": service.delete_item(conn, "main", need("id", int))
+                        elif o in ("dep_add", "dep_rm"): service.dep(conn, "main", need("id", int), need("depends_on", int), o == "dep_add")
+                        else: raise ValueError("op must be add, edit, delete, dep_add or dep_rm")
+                    except BaseException: conn.rollback(); raise
+                return self.json({"ok": True, **out})
+            except ValueError as e: return self.json({"error": str(e)}, 400)
+            except KeyError as e: return self.json({"error": str(e.args[0]) if e.args else "not found"}, 404)
+            except PermissionError as e: return self.json({"error": str(e)}, 403)
+            except Exception: return self.json({"error": "internal error"}, 500)
+
         def do_GET(self):
             if not self.host_ok(): return self.send_error(403)
             u = urlsplit(self.path)
@@ -107,20 +170,19 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             p = u.path
             if p in STATIC: return self.file(VIEWER / STATIC[p])
             if p in ("/api/projects", "/api/docs", "/api/doc", "/api/search"): autoscan()
+            if p == "/api/session": return self.json({"token": token}, **{"Cache-Control": "no-store"})
             if p == "/api/version":  # viewer polls this; any CLI/MCP commit or docs edit changes it
                 autoscan()
                 with lock: dv = conn.execute("PRAGMA data_version").fetchone()[0]; ds = hash(repr(sorted(stamps.items(), key=str)))
                 return self.json({"version": f"{dv}:{ds}"})
             if p == "/api/doc": return self.doc(q)
             if p == "/api/projects": return self.json(self.projects())
+            if p == "/api/project-usage":
+                with lock: return self.json(db.project_usage(conn, q.get("project", "")))
             if p == "/api/items": return self.items(q)
             if p == "/api/docs":
                 return self.json(rows("SELECT project,path,title,feature,kind,status,ord,updated_at,summary,json(code) code FROM doc" + (" WHERE project=?" if q.get("project") else "")
                                       + " ORDER BY project,ord,path", (q["project"],) if q.get("project") else ()))
-            if p == "/api/roadmap":
-                if not q.get("project"): return self.send_error(400, "project required")
-                with lock: out = roadmap.api(conn, q["project"], q.get("roadmap") or None, q.get("only") == "version")
-                return self.json(out) if out is not None else self.send_error(404)
             if p.startswith("/api/code/"): return self.code(p, q)
             if p == "/api/audit": return self.audit(q)
             if p == "/api/search": return self.search(q)
@@ -212,7 +274,6 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             with lock:
                 out = service.list_items(conn, q.get("project") or None, q.get("kind"), q.get("status"), q.get("owner") or None, ready, q.get("label") or None)
                 if "id" in q: out = [r for r in out if r["id"] == int(q["id"])]
-                roadmap.annotate(conn, out)
                 if not ready: out.sort(key=lambda r: r["id"])
                 if "id" in q and out: out[0].update(self.detail(out[0]))
             self.json(out)

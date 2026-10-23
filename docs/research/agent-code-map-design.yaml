@@ -1,0 +1,137 @@
+title: Agent code map (design concept, parked)
+summary: Concept for giving agents whole-codebase context through a budgeted drill-down code map instead of reading files. Records the user's direction, the Opus design review, open questions, and why work is parked until the user's isolated feature exists.
+code: [strata/symbols.py, strata/context.py, strata/mcp.py]
+
+blocks:
+  - md: |
+      ## 1. Status and direction
+      **Status: concept only. Task #260 is rejected for now.** The user will develop an isolated feature on their own and integrate it into Strata later. Nothing in this document is scheduled.
+
+      Direction the user gave, which still stands:
+      - **Agents read the codebase through tree-sitter-style structure** (files, symbols, imports), not by scanning every file.
+      - **The C4 and doc YAML is the human's layer** for design and rendered diagrams. It is not the agents' context source.
+
+      Related, already in the repo: [Tree-sitter as the way agents read code](tree-sitter-agent-code-reading) compares ast, tree-sitter, LSP, ctags and regex. This document is the follow-up design concept and does not repeat that comparison.
+
+  - md: |
+      ## 2. Core idea
+      The saving comes from **levels of detail with a hard size cap per call**, not from the parser. Tree-sitter is one way to fill the index; the drill-down map and the budget are what make agents read less.
+
+      Today `strata/symbols.py` indexes Python with the stdlib `ast` into a rebuildable cache DB (`strata.symbols.db`) with stable ids (`path::Class.method`) and a sha256 per file. That shape already fits; a second extractor needs no migration.
+
+  - table:
+      head: [Level, Content, Size cap, Agent action]
+      rows:
+        - [L0 repo outline, "each C4 container or component, the paths it owns, file count, top 3 public symbols (built from C4 plus the index)", "about 1.5k chars", "orient"]
+        - [L1 module, "per file: public signatures, first docstring line, imports in and out, tests that touch it", "about 3k chars", "choose files"]
+        - [L2 symbol, "signature, docstring, callers and callees (marked approx), test references", "about 1.5k chars", "decide what to open"]
+        - [L3 body, "source with a few context lines; above ~200 lines returns signature plus a slice", capped, "read the code that matters"]
+
+  - md: |
+      Every answer ends with a pointer to the next level. Rule for agents: read the module level (L1) before opening a file in full. It is enforced by the prompt, not by a hook, unless the user decides otherwise (see question 2).
+
+  - md: |
+      ## 3. What to extract
+      - **Worth it:** imports (cheap, near exact, give the module graph); definitions and exports; **tests to code** (test imports plus name references, high value for coder and reviewer); name-based call references labelled `approx`.
+      - **Not worth it:** type-resolved call graphs, data flow, cross-file resolution through re-exports or dynamic dispatch, inheritance beyond the textual base name.
+      - **Honest limits:** tree-sitter is syntax only. `obj.save()` cannot be resolved, so common names get false callers; rank callers by import proximity and cap them. Grammars lag new syntax, and an error-tolerant parse can return partial trees silently, so record a parse-error count per file.
+
+  - md: |
+      ## 4. How it connects
+      - **C4 ownership:** each C4 object declares path globs (a human-maintained field). The index joins files to objects. Objects with no files, and files with no owner, show up as drift warnings, which also keeps the C4 map honest.
+      - **`task context`:** gains a "code" section after the C4 section: L1 of the files under `scope.touch` and their owning objects, plus L2 of symbols named in the spec. It uses the existing budget loop (truncate and warn).
+      - **MCP per role:**
+        - coder: `code_outline`, `code_symbol`, `code_source`, `code_find`, read-only, scoped to the ticket's module by default with an explicit flag to look outside.
+        - reviewer: `code_diff_map`, which takes the changed files of a diff and returns changed symbols, approx callers, the tests touching them, and **changed files outside `scope.touch`** (the most useful single reviewer signal).
+        - main: L0 plus search.
+
+  - md: |
+      ## 5. Dependency under rule 2
+      CLAUDE.md rule 2 allows only the Python standard library and PyYAML.
+
+      **Recommendation:** Python stays on stdlib `ast` and is always exact. Other languages use an **optional pinned package in a separate venv, called as a subprocess** that emits JSON rows (`tree-sitter` plus individual grammar wheels, not the large language pack). Strata core imports nothing from it. If the venv is missing, agents see "unindexed" or a regex fallback for JS and SQL.
+
+  - table:
+      head: [Option, Verdict, Why]
+      rows:
+        - [Optional subprocess in a separate venv, "recommended", "keeps rule 2 literally intact; isolates segfaults; degrades cleanly"]
+        - [Optional in-process import, "no", "breaks the spirit of rule 2 and adds a crash surface inside the server"]
+        - [Vendored grammars, "no", "compiled extensions per platform are a maintenance trap"]
+        - [Mandatory pinned package, "no", "violates rule 2 unless the rule is amended"]
+
+  - md: |
+      ## 6. Refresh, storage, failure modes
+      - **Refresh:** keep the mtime plus size precheck, then sha256 (already present). Discover files with `git ls-files` so `.gitignore` is respected. Refresh lazily for the touched files on each query; full rescan on demand.
+      - **Storage:** stays in the rebuildable `strata.symbols.db`. Add an `edge` table (`project, src_id, dst_name, dst_id NULL, kind, confidence`) and a `parse_ok` flag.
+      - **Stale index:** every answer carries the index age and a stale flag when the file's mtime moved.
+      - **Huge repos:** size cap per file (for example 500 KB) and a file count cap, with a warning.
+      - **Generated or vendored code:** skip by glob (`*_pb2.py`, `dist/`, `node_modules`, `*.min.js`) and a "generated" header sniff.
+      - **Grammar failure:** degrade to file-level rows, never to a missing file.
+
+  - md: |
+      ## 7. Measure before building the rest
+      Take 10 real closed tickets from Strata's history and run each twice: once with the map tools, once with Read and Grep only. Log input tokens, turns, files read in full, and whether the tests passed. The audit log and MCP call sizes already provide most of this.
+
+      **Success bar:** at least 30% fewer input tokens at the same pass rate. If the gain is smaller, stop. No independent benchmark of such savings was found in the prior research, so this number must come from our own runs.
+
+  - md: |
+      ## 8. Minimal first slice (Python only, no tree-sitter)
+      - Import edges and tests-to-code edges in `strata/symbols.py`.
+      - `code_outline` and `code_symbol` over MCP for coder and reviewer.
+      - A code section in `task context`.
+      - `code_diff_map` for the reviewer.
+
+      Acceptance tests:
+      - (a) L1 of `strata/service.py` is at most 3k chars and lists every public def.
+      - (b) `code_symbol service.get_item` lists `context.build` as a caller and lists the test files that reference it.
+      - (c) After editing a file, the next query returns updated line numbers without a full rebuild.
+      - (d) The diff map on a fixture commit names exactly the changed symbols.
+      - (e) A `task context` with `scope.touch` stays inside the budget and warns when it cuts.
+      - (f) A syntax error in one file leaves the other files indexed.
+
+  - md: |
+      ## 9. Alternatives
+      - **ctags (universal-ctags):** an external binary, no Python dependency, outline levels for about 40 languages. A good stand-in for tree-sitter at L0 to L1.
+      - **LSP (pyright, tsserver):** exact references and types, but heavy, stateful and slow to start. Worth it only if approx callers prove misleading in the measurement.
+      - **SCIP indexers:** precise cross-references but a toolchain per language. Overkill for a local single-user tool.
+      - **ast-grep:** good for structural search queries an agent writes, not for a persistent map. A possible later tool.
+
+      For a mostly Python plus plain JS repo: stdlib `ast` for Python, plus ctags or a tree-sitter subprocess for JS.
+
+  - question:
+      q: How should C4 objects own files?
+      options:
+        - {label: "Path globs maintained by the human", note: "explicit; drift warnings show gaps"}
+        - {label: "Inferred from directories", note: "no extra field, less accurate"}
+      recommend: "Path globs maintained by the human"
+
+  - question:
+      q: Enforce "read the module level before opening a file" with a hook?
+      options:
+        - {label: "Prompt only", note: "start here, measure first"}
+        - {label: "Hook", note: "stronger, but can block legitimate reads"}
+      recommend: "Prompt only"
+
+  - question:
+      q: Which languages matter beyond Python and JS?
+      options:
+        - {label: "Only Python and JS", note: "ctags or a small regex extractor is enough"}
+        - {label: "More languages", note: "tree-sitter subprocess becomes worth it"}
+
+  - question:
+      q: May coders see outside their module through the map (read-only)?
+      options:
+        - {label: "Yes, read-only", note: "rule 12 limits edits, not reading"}
+        - {label: "No", note: "strict module isolation"}
+      recommend: "Yes, read-only"
+
+  - question:
+      q: Who runs the 10-ticket measurement, and is 30% the right bar?
+      options:
+        - {label: "Main chat runs it, user keeps the bar", note: "30% fewer input tokens at equal pass rate"}
+        - {label: "Different bar", note: "user sets it"}
+      recommend: "Main chat runs it, user keeps the bar"
+
+  - md: |
+      ## 10. Parked until the isolated feature exists
+      The user plans to build an isolated feature first and integrate it later. When that happens, reopen this document, answer the five questions above, and split the work into one-module tasks (rule 12): `strata/symbols.py`, `strata/context.py`, `strata/mcp.py`, then docs and C4. Task #260 was rejected only to clear the backlog; it can be re-created from this document.

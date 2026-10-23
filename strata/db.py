@@ -1,4 +1,4 @@
-import datetime, html.parser, json, os, pathlib, re, shutil, sqlite3
+import datetime, html.parser, json, os, pathlib, re, shutil, sqlite3, time
 
 DEFAULT_DB = str(pathlib.Path(__file__).resolve().parent.parent / "strata.db")
 SCHEMA = pathlib.Path(__file__).with_name("schema.sql")
@@ -235,17 +235,49 @@ def set_project(c, id, root=None, docs_dir=None, name=None, description=None):
     c.execute(f"UPDATE project SET {', '.join(f'{k}=:{k}' for k in new)} WHERE id=:id", {**new, "id": id})
     audit(c, id, "project.set", id, {k: old[k] for k in new}, new); c.commit()
 
+PROJECT_TABLES = ("item", "page", "doc", "c4_object", "c4_connection", "c4_meta", "c4_flow", "c4_contract", "c4_behavior", "c4_link")
+
+def project_usage(c, id):
+    """Rows a delete would remove, per table (non-empty only)."""
+    out = {t: c.execute(f"SELECT count(*) FROM {t} WHERE project=?", (id,)).fetchone()[0] for t in PROJECT_TABLES}
+    return {t: n for t, n in out.items() if n}
+
+def backup(c):
+    """Timestamped copy of the open DB into backups/ next to it (sqlite backup API); returns the path."""
+    f = c.execute("PRAGMA database_list").fetchone()[2]
+    if not f: raise ValueError("in-memory database cannot be backed up")
+    d = os.path.join(os.path.dirname(os.path.abspath(f)), "backups"); os.makedirs(d, exist_ok=True)
+    dst = os.path.join(d, time.strftime("%Y%m%d-%H%M%S") + f"-{time.time_ns() % 10**6:06d}-" + os.path.basename(f))
+    out = sqlite3.connect(dst)
+    try: c.backup(out)
+    finally: out.close()
+    return dst
+
+def delete_project(c, id):
+    """Remove the project and its rows (items, docs index, C4 model). Files on disk and the audit trail stay."""
+    old = c.execute("SELECT * FROM project WHERE id=?", (id,)).fetchone()
+    if old is None: raise KeyError(f"no project {id}")
+    kids = [r[0] for r in c.execute("SELECT id FROM project WHERE parent=?", (id,))]
+    if kids: raise ValueError(f"project {id} has sub-projects ({', '.join(kids)}); delete or move them first")
+    gone = project_usage(c, id)
+    try:
+        for t in PROJECT_TABLES: c.execute(f"DELETE FROM {t} WHERE project=?", (id,))
+        c.execute("DELETE FROM project WHERE id=?", (id,))
+        audit(c, id, "project.delete", id, {k: old[k] for k in old.keys()}, {"removed": gone}, "main")
+        c.commit()
+    except BaseException: c.rollback(); raise
+
 # issues first, then priority (high, medium, low/none), then id; service.py list/ready should ORDER BY this
 ITEM_ORDER = ("(label IS NOT 'issue'), CASE lower(coalesce(priority,'')) WHEN 'p0' THEN 0 WHEN 'p1' THEN 1 WHEN 'high' THEN 1 "
               "WHEN 'p2' THEN 2 WHEN 'medium' THEN 2 WHEN 'p3' THEN 3 WHEN 'low' THEN 3 ELSE 9 END, id")
 
-def add_item(c, project, kind, title, body=None, priority=None, status="open", role="cli", spec=None, phase=None, roadmap=None, label=None):
+def add_item(c, project, kind, title, body=None, priority=None, status="open", role="cli", spec=None, label=None):
     if kind == "issue": kind, label = "task", label or "issue"  # alias kept for old callers
     if not c.execute("SELECT 1 FROM project WHERE id=?", (project,)).fetchone(): raise KeyError(f"no project {project}")
     t = now()
-    cur = c.execute("INSERT INTO item(project,kind,title,body,status,priority,spec,created_by,created_at,updated_at,phase,roadmap,label) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (project, kind, title, body, status, priority, None if spec is None else json.dumps(spec, ensure_ascii=False), role, t, t, phase, roadmap, label))
-    audit(c, project, "item.add", f"item:{cur.lastrowid}", None, {"kind": kind, "title": title, "status": status, **({"label": label} if label else {}), **({"phase": phase} if phase is not None else {})}, role)
+    cur = c.execute("INSERT INTO item(project,kind,title,body,status,priority,spec,created_by,created_at,updated_at,label) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    (project, kind, title, body, status, priority, None if spec is None else json.dumps(spec, ensure_ascii=False), role, t, t, label))
+    audit(c, project, "item.add", f"item:{cur.lastrowid}", None, {"kind": kind, "title": title, "status": status, **({"label": label} if label else {})}, role)
     c.commit(); return cur.lastrowid
 
 def set_item(c, id, status=None, priority=None, role="cli"):

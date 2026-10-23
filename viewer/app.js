@@ -1,8 +1,8 @@
 "use strict";
-// App shell. Read-only. All text goes through textContent (el() from page.js); never assigns markup.
+// App shell. Read-only except writes through POST /api/project and POST /api/item (token-guarded). All text goes through textContent (el() from page.js); never assigns markup.
 // el, get, enc and renderPage come from page.js (STRATA_SHELL makes it skip its own routing).
 const $=id=>document.getElementById(id);
-const TABS=[["overview","Overview","o"],["task","Task","t"],["roadmap","Roadmap","m"],["docs","Docs","r"],["c4","Architecture","a"],["audit","Log","l"]];
+const TABS=[["task","Task","t"],["docs","Docs","r"],["c4","Architecture","a"],["audit","Log","l"]];
 const TAB_LABEL=Object.fromEntries(TABS.map(t=>[t[0],t[1]]));
 const ST_ITEM=["proposed","approved","open","doing","review","done","rejected"];
 const ST_DOC=["current","draft","outdated","missing"], KIND_DOC=["research","architect","review","plan","other"];
@@ -49,10 +49,10 @@ const PRI={low:'<rect x="2" y="10" width="3" height="4" rx="1" fill="currentColo
   urgent:'<rect x="1" y="1" width="14" height="14" rx="3" fill="currentColor" stroke="none" style="color:var(--st-block)"/><path d="M8 4.5v4.5M8 11.2v.3" stroke-width="1.8" style="stroke:var(--bg)"/>',
   none:'<path d="M2 8h2.5M6.75 8h2.5M11.5 8H14" stroke-width="1.5" opacity=".5"/>'};
 const priIcon=p=>{const e=svg(S("0 0 16 16",PRI[p]||PRI.none,'class="pri"')), t=document.createElementNS("http://www.w3.org/2000/svg","title");t.textContent=p||"no priority";e.append(t);return e};
-const IC={overview:'<path d="M2.5 13.5h11M4 11V7M8 11V3.5M12 11V6"/>',task:'<circle cx="8" cy="8" r="5.5"/><path d="M5.6 8.1l1.6 1.6 3.2-3.4"/>',
+const IC={edit:'<path d="M3 13l.6-2.8 7-7a1.4 1.4 0 0 1 2 2l-7 7z"/>',plus:'<path d="M8 3.5v9M3.5 8h9"/>',trash:'<path d="M3.5 4.5h9M6.5 4.5V3h3v1.5M5 4.5l.5 8h5l.5-8"/>',overview:'<path d="M2.5 13.5h11M4 11V7M8 11V3.5M12 11V6"/>',task:'<circle cx="8" cy="8" r="5.5"/><path d="M5.6 8.1l1.6 1.6 3.2-3.4"/>',
   docs:'<path d="M4 2.5h5.5L12 5v8.5H4z"/><path d="M6 8h4M6 10.5h4"/>',
   c4:'<rect x="2.5" y="2.5" width="4" height="4" rx="1"/><rect x="9.5" y="9.5" width="4" height="4" rx="1"/><path d="M6.5 4.5h3a2 2 0 0 1 2 2v3"/>',
-  roadmap:'<path d="M3.5 14V2.5M3.5 3h8.5l-1.7 2.8L12 8.5H3.5"/>',audit:'<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',folder:'<path d="M2.5 4.5h4l1.5 1.5h5.5v6.5h-11z"/>',proj:'<path d="M2 12.5l3.5-6 2.5 3.5 2-2.5 4 5z"/>',
+  audit:'<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',folder:'<path d="M2.5 4.5h4l1.5 1.5h5.5v6.5h-11z"/>',proj:'<path d="M2 12.5l3.5-6 2.5 3.5 2-2.5 4 5z"/>',
   chev:'<path d="M6 4l4 4-4 4"/>',prev:'<path d="M10 4L6 8l4 4"/>',reload:'<path d="M13 8a5 5 0 1 1-1.5-3.5M13 3v2.5h-2.5"/>',
   ext:'<path d="M9 3h4v4M13 3L7.5 8.5M11 9.5V13H3V5h3.5"/>',copy:'<rect x="5.5" y="5.5" width="7.5" height="7.5" rx="1.5"/><path d="M10.5 5.5V3H3v7.5h2.5"/>',
   sun:'<circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1"/>'};
@@ -65,27 +65,115 @@ function empty(title,hint,code){
 }
 
 /* ---------- routing ---------- */
-const hashFor=(p,tab,id)=>"#/p/"+enc(p)+"/"+(tab||"overview")+(id!=null&&id!==""?"/"+String(id).split("/").map(enc).join("/"):"");
+const hashFor=(p,tab,id)=>"#/p/"+enc(p)+"/"+(tab||"task")+(id!=null&&id!==""?"/"+String(id).split("/").map(enc).join("/"):"");
 function link(text,href,cls){const a=el("a",cls||"",text);a.href=href;return a}
 const hq=()=>{const i=location.hash.indexOf("?");return new URLSearchParams(i<0?"":location.hash.slice(i+1))};
 function route(){
   const i=location.hash.indexOf("?"), raw=i<0?location.hash:location.hash.slice(0,i);
   const h=raw.startsWith("#/")?raw.slice(2).split("/").map(decodeURIComponent):[];
-  if(h[0]==="p"&&byId[h[1]]) return {p:h[1],tab:h[2]==="issue"?"task":TAB_LABEL[h[2]]?h[2]:"overview",id:h.slice(3).join("/")};
-  return {p:(PROJ.find(x=>!x.parent)||PROJ[0]||{}).id,tab:"overview",id:""};
+  if(h[0]==="p"&&byId[h[1]]) return {p:h[1],tab:h[2]==="issue"?"task":TAB_LABEL[h[2]]?h[2]:"task",id:h.slice(3).join("/")};
+  return {p:(PROJ.find(x=>!x.parent)||PROJ[0]||{}).id,tab:"task",id:""};
 }
 const total=o=>Object.values(o||{}).reduce((a,b)=>a+b,0);
 function counts(p){return {task:total(p.tasks),docs:p.docs}}
 let CUR={};
+
+/* ---------- writes: project add/edit/delete (POST /api/project) and task add/edit/delete (POST /api/item), all via service + audit. ---------- */
+let TOK=null;
+// every write: JSON + X-Strata-Edit + per-start token; one refetch/retry on 403 (server restart changes the token)
+async function api(url,body){
+  const send=async()=>{
+    if(!TOK)TOK=(await get("/api/session")).token;
+    return fetch(url,{method:"POST",headers:{"Content-Type":"application/json","X-Strata-Edit":"1","X-Strata-Token":TOK},body:JSON.stringify(body)});
+  };
+  let r=await send();
+  if(r.status===403){TOK=null;r=await send()}
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(d.error||("HTTP "+r.status));
+  return d;
+}
+const projectPost=body=>api("/api/project",body);
+function dialog(title,body,actions){
+  const d=el("dialog","pdlg edge");d.setAttribute("aria-labelledby","pdt");
+  const f=el("form");f.method="dialog";const h=el("h2","",title);h.id="pdt";
+  const err=el("p","perr");err.setAttribute("role","alert");err.hidden=true;
+  const foot=el("div","pfoot");f.append(h,...body,err,foot);d.append(f);
+  const fail=m=>{err.textContent=m;err.hidden=!m};
+  const cancel=el("button","","Cancel");cancel.type="button";cancel.onclick=()=>d.close();
+  foot.append(cancel,...actions(d,fail));
+  d.addEventListener("close",()=>d.remove());
+  document.body.append(d);d.showModal();
+  return d;
+}
+function field(label,id,attrs,node){
+  const w=el("label","pfield");w.htmlFor=id;w.append(el("span","",label));
+  const i=node||el("input");i.id=id;Object.entries(attrs||{}).forEach(([k,v])=>i.setAttribute(k,v));w.append(i);return w;
+}
+function addProject(){
+  const name=field("Name","pn",{autocomplete:"off",required:""}), pid=field("ID","pi",{autocomplete:"off",required:"",pattern:"[a-z0-9][a-z0-9_-]{0,39}",placeholder:"lowercase, digits, - or _"});
+  const root=field("Code folder (optional)","pr",{autocomplete:"off",placeholder:"/home/you/project/app"});
+  const docs=field("Docs folder (optional)","pdocs",{autocomplete:"off",placeholder:"defaults to nothing; relative paths start at the code folder"});
+  const sel=el("select");sel.append(new Option("none",""));PROJ.forEach(p=>sel.append(new Option(p.name+" ("+p.id+")",p.id)));
+  const par=field("Inside project (optional)","pp",null,sel);
+  const desc=field("Description (optional)","pd",{autocomplete:"off"});
+  const ni=name.lastChild, ii=pid.lastChild;let touched=false;
+  ii.addEventListener("input",()=>{touched=true});
+  ni.addEventListener("input",()=>{if(!touched)ii.value=ni.value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/đ/g,"d").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,40)});
+  const d=dialog("Add project",[name,pid,root,docs,par,desc],(d,fail)=>{
+    const ok=el("button","primary","Add project");ok.type="submit";
+    d.firstChild.onsubmit=async e=>{e.preventDefault();ok.disabled=true;fail("");
+      try{await projectPost({op:"add",id:ii.value,name:ni.value,root:root.lastChild.value,docs_dir:docs.lastChild.value,parent:sel.value,description:desc.lastChild.value});
+        d.close();location.hash=hashFor(ii.value.trim(),"task");await render()}
+      catch(x){fail(x.message);ok.disabled=false}};
+    return [ok]});
+  ni.focus();return d;
+}
+function editProject(p){
+  const name=field("Name","pn",{autocomplete:"off",required:""}), root=field("Code folder","pr",{autocomplete:"off"}), docs=field("Docs folder","pdocs",{autocomplete:"off"});
+  const sel=el("select");sel.append(new Option("none",""));
+  PROJ.filter(x=>x.id!==p.id&&!isUnder(x,p.id)).forEach(x=>sel.append(new Option(x.name+" ("+x.id+")",x.id)));
+  const par=field("Inside project","pp",null,sel), desc=field("Description","pd",{autocomplete:"off"});
+  name.lastChild.value=p.name||"";root.lastChild.value=p.root||"";docs.lastChild.value=p.docs_dir||"";sel.value=p.parent||"";desc.lastChild.value=p.description||"";
+  const info=el("p","pinfo","ID "+p.id+" cannot change. Empty fields are cleared.");
+  return dialog("Edit “"+p.name+"”",[info,name,root,docs,par,desc],(d,fail)=>{
+    const ok=el("button","primary","Save");ok.type="submit";
+    d.firstChild.onsubmit=async e=>{e.preventDefault();ok.disabled=true;fail("");
+      try{await projectPost({op:"edit",id:p.id,name:name.lastChild.value,root:root.lastChild.value,docs_dir:docs.lastChild.value,parent:sel.value,description:desc.lastChild.value});d.close();await render(true)}
+      catch(x){fail(x.message);ok.disabled=false}};
+    return [ok]});
+}
+const isUnder=(x,id)=>{for(let q=x;q;q=byId[q.parent])if(q.parent===id)return true;return false};
+async function deleteProject(p){
+  const kids=PROJ.filter(x=>x.parent===p.id);
+  let use={};try{use=await get("/api/project-usage?project="+enc(p.id))}catch{}
+  const LABEL={item:"tasks and issues",doc:"indexed docs",page:"pages",c4_object:"map objects",c4_connection:"map links",c4_flow:"flows",c4_contract:"contracts",c4_behavior:"behaviors",c4_link:"task-to-map links"};
+  const lines=Object.entries(use).filter(([k])=>LABEL[k]).map(([k,n])=>n+" "+LABEL[k]);
+  const info=el("p","pinfo");
+  info.textContent=kids.length?"This project contains "+kids.map(k=>k.name).join(", ")+". Delete or move those first."
+    :"Removes "+(lines.join(", ")||"nothing but the project entry")+" from Strata. Your files on disk and the Log are not touched.";
+  const conf=field("Type "+p.id+" to confirm","pc",{autocomplete:"off"});
+  return dialog("Delete “"+p.name+"”",kids.length?[info]:[info,conf],(d,fail)=>{
+    if(kids.length)return [];
+    const ok=el("button","danger","Delete project");ok.type="submit";ok.disabled=true;
+    conf.lastChild.addEventListener("input",()=>{ok.disabled=conf.lastChild.value!==p.id});
+    d.firstChild.onsubmit=async e=>{e.preventDefault();ok.disabled=true;fail("");
+      try{await projectPost({op:"delete",id:p.id,confirm:conf.lastChild.value});d.close();
+        if(CUR.p===p.id)location.hash="#/";await render()}
+      catch(x){fail(x.message);ok.disabled=false}};
+    return [ok]});
+}
 
 /* ---------- sidebar + breadcrumb ---------- */
 function side(r){
   // flat list of real projects; groups (anything that is some project's parent) stay reachable via breadcrumb/palette
   const leaf=PROJ.filter(p=>!PROJ.some(x=>x.parent===p.id));
   $("tree").replaceChildren(...leaf.map(p=>{
-    const a=link("",hashFor(p.id,"overview"),"it"+(p.id===r.p?" on":""));
+    const a=link("",hashFor(p.id,"task"),"it"+(p.id===r.p?" on":""));
     if(p.id===r.p)a.setAttribute("aria-current","page");
-    a.append(icon("proj"),el("span","l",p.name));return a}));
+    a.append(icon("proj"),el("span","l",p.name));
+    const x=el("button","pdel ib");x.type="button";x.append(icon("trash"));x.title=x.ariaLabel="Delete project "+p.name;x.onclick=()=>deleteProject(p);
+    const e=el("button","pdel pedit ib");e.type="button";e.append(icon("edit"));e.title=e.ariaLabel="Edit project "+p.name;e.onclick=()=>editProject(p);
+    const w=el("div","pi");w.append(a,e,x);return w}));
   const c=r.p?counts(byId[r.p]):{};
   $("tablabel").hidden=!r.p;
   $("tabs").replaceChildren(...(r.p?TABS.map(([k,l])=>{
@@ -96,8 +184,8 @@ function side(r){
 function crumbs(r){
   const chain=[];for(let p=byId[r.p];p;p=byId[p.parent])chain.unshift(p);
   const parts=[], sep=()=>el("span","sep","›");
-  chain.forEach((p,i)=>{if(i)parts.push(sep());parts.push(link(p.name,hashFor(p.id,"overview")))});
-  if(r.p){parts.push(sep(),r.tab==="overview"&&!r.id?el("b","",TAB_LABEL.overview):link(TAB_LABEL[r.tab],hashFor(r.p,r.tab)));
+  chain.forEach((p,i)=>{if(i)parts.push(sep());parts.push(link(p.name,hashFor(p.id,"task")))});
+  if(r.p){parts.push(sep(),r.id?link(TAB_LABEL[r.tab],hashFor(r.p,r.tab)):el("b","",TAB_LABEL[r.tab]));
     if(r.id)parts.push(sep(),el("b","",r.id.split("/").pop()))}
   $("crumbs").replaceChildren(...parts);
 }
@@ -110,13 +198,13 @@ async function render(keep){
   const r=route();CUR=r;side(r);crumbs(r);
   const box=el("div");
   try{
-    if(!r.p) box.append(empty("No projects yet","Create with:","strata.py project add ID --name ..."));
+    if(!r.p){box.append(empty("No projects yet","Create one from the + beside Projects, or with:","strata.py project add ID --name ..."))}
     else await VIEW[r.tab](box,r.p,r.id);
   }catch(e){box.append(el("p","err",e.message))}
   if(my!==token)return;
   document.title=(r.p?byId[r.p].name+" · "+TAB_LABEL[r.tab]+" · ":"")+"Strata";
   const rd=box.querySelector(":scope>.reader");
-  if(!rd&&!box.className)box.className="page"+(r.tab==="task"||r.tab==="roadmap"?" wide":"");
+  if(!rd&&!box.className)box.className="page"+(r.tab==="task"?" wide":"");
   const sc=$("content").scrollTop;
   $("content").replaceChildren(rd||box);
   $("content").scrollTop=keep===true?sc:0;
@@ -161,61 +249,8 @@ function card(title,tab,p,rows,emptyText,n){
   c.append(h,ul);return c;
 }
 
-const PHASES=["Explore","Design","Build","Harden","Release"];
-const PHASE_DESC=["Ideas and discussion; nothing committed yet.","Diagram and research.","Tasks being written and tested.","Tests, review, security, polish.","Shipped and in use."];
-
 const VIEW={
-  async overview(box,p){
-    const [items,docs]=await Promise.all([get("/api/items?kind=task&project="+enc(p)),
-      get("/api/docs?project="+enc(p))]);
-    const tasks=items.filter(x=>x.label!=="issue"), issues=items.filter(x=>x.label==="issue");
-    const pr=byId[p], done=pr.tasks.done||0, doing=pr.tasks.doing||0, all=total(pr.tasks), pct=all?Math.round(100*done/all):0;
-    const hero=el("div","hero");// full-bleed hero art behind the content column: traced mountains anchored right + fitted waves edge to edge
-    const bg=el("div","herobg");bg.setAttribute("aria-hidden","true");const mt=el("div","mtn"), wv=el("div","waves");bg.append(wv,mt);box.append(bg);
-    heroArt("mountains").then(x=>mt.append(x.cloneNode(true))).catch(()=>{});
-    heroArt("mountains-waves").then(x=>wv.append(x.cloneNode(true))).catch(()=>{});
-    hero.append(el("h1","foil",pr.name));
-    if(pr.description)hero.append(el("p","",pr.description));
-    const props=el("div","props");
-    [["Status",pr.status||"—"],["Task",all],["Open issues",pr.issues_open],["Docs",pr.docs],["Updated",rel(pr.last_update)||"never"]]
-      .forEach(([k,v])=>{const s=el("span","",k+" ");s.append(el("b","",v));props.append(s)});
-    const prog=el("div","prog"), bar=el("div","bar"), a=el("i","b-done"), b=el("i","b-doing");
-    a.style.width=(all?100*done/all:0)+"%";b.style.width=(all?100*doing/all:0)+"%";bar.append(a,b);
-    prog.append(bar,el("span","pct",pct+"%"));
-    const stats=el("div","props");[["Scope",all],["In progress",doing],["Done",done]].forEach(([k,v])=>{const s=el("span","",k+" ");s.append(el("b","",v));stats.append(s)});
-    hero.append(props,prog,stats);box.append(hero);
-    // pr.phase will come from `project set --phase` later; preview: #...?phase=N, default 3
-    const hp=+new URLSearchParams(location.hash.split("?")[1]||"").get("phase");
-    const cur=[pr.phase,hp].find(n=>Number.isInteger(n)&&n>=1&&n<=5)||3;
-    const mp=ltMapBox(PHASES.map((label,i)=>({n:i+1,label,state:i+1<cur?"done":i+1===cur?"doing":"todo",gate:null,cur})),{},null,null,null);
-    mp.classList.add("ov-map");box.append(mp);
-    const subs=PROJ.filter(x=>x.parent===p);
-    if(subs.length){const g=el("div","grid");subs.forEach(s=>{
-      const c=link("",hashFor(s.id,"overview"),"card edge pcard");c.append(orn("topo",contours(hash(s.id))),el("b","",s.name),
-        el("span","",total(s.tasks)+" task · "+s.issues_open+" open issues · "+s.docs+" docs"));g.append(c)});box.append(g)}
-    const open=issues.filter(x=>x.status!=="done"&&x.status!=="rejected");
-    const recent=[...docs.filter(x=>x.status!=="missing").map(x=>[x.status,x.title,hashFor(p,"docs",x.path),x.updated_at])]
-      .sort((a,b)=>(b[3]||"").localeCompare(a[3]||"")).slice(0,6);
-    const tone=x=>["done","approved","accepted"].includes(x)?"done":["doing","review","open"].includes(x)?"doing":"todo";
-    const st=x=>el("span","st "+tone(x),LBL[x]||x||"");
-    const crit=(t,h,meta,s)=>{const r=el("div","crit");const w=el("span","what");w.append(link(t,h));r.append(w,el("span","who",meta||""),st(s));return r};
-    const lt=el("div","lt"), det=el("div","detail"), L=el("section"), R=el("section");
-    L.append(el("span","lab","Phase "+cur+" · "+PHASES[cur-1]),el("h3","",PHASES[cur-1]));
-    const sr=el("div","state");sr.append(el("span","st doing","In progress"));
-    L.append(sr,el("p","goal",PHASE_DESC[cur-1]),el("hr","rule"),el("span","lab","Tasks"));
-    const act=["doing","review","approved"].flatMap(k=>tasks.filter(x=>x.status===k)).slice(0,8);
-    if(act.length){const ul=el("ul","blocks");act.forEach(x=>{const li=el("li");li.append(link("#"+x.id+" "+x.title,hashFor(p,"task",x.id)),st(x.status));ul.append(li)});L.append(ul)}
-    else L.append(el("p","empty","No active tasks"));
-    const gd=el("div","gate");gd.append(el("span","lab","Open issues"),el("div","line",open.length?open.length+" open issues":"No open issues"));
-    if(open.length){const ul=el("ul","gmiss");open.slice(0,8).forEach(x=>{const li=el("li"),sp=el("span");
-      sp.append(link("#"+x.id+" "+x.title,hashFor(p,"task",x.id))," ",el("span","who","· "+(x.priority||"")));li.append(sp);ul.append(li)});gd.append(ul)}
-    R.append(gd);
-    [["Recently updated",recent.map(x=>crit(x[1],x[2],rel(x[3]),x[0]||"open"))]].forEach(([k,rows])=>{
-      if(!rows.length)return;const grp=el("div","grp");grp.append(el("span","lab",k),...rows);R.append(el("hr","rule"),grp)});
-    det.append(L,R);lt.append(det);box.append(lt);
-  },
   task:(box,p,id)=>boardView(box,p,id),
-  roadmap:(box,p,id)=>roadmapView(box,p,id),
   async docs(box,p,id){
     const docs=await get("/api/docs?project="+enc(p));
     docs.forEach(x=>{try{x.code=JSON.parse(x.code||"[]")||[]}catch{x.code=[]}});
@@ -317,7 +352,7 @@ function docView(f,p,path){
     hd.append(el("h1","",d.title||path));if(d.summary)hd.append(el("p","lede",d.summary));art.append(hd);
     if(d.errors.length){const e=el("div","docerr");e.append(el("b","","Doc has structural errors"));const ul=el("ul");d.errors.forEach(x=>ul.append(el("li","",x)));e.append(ul);art.append(e)}
     d.blocks.forEach(b=>{const s=el("section");
-      try{s.append(b.type==="c4"?c4(b,p):b.type==="query"?query(b):b.type==="diagram"||b.type==="statemachine"||b.type==="roadmap"?({diagram,statemachine,roadmap})[b.type](b,linkFor):R[b.type]?R[b.type](b):el("p","err","Unknown block type: "+b.type))}
+      try{s.append(b.type==="c4"?c4(b,p):b.type==="query"?query(b):b.type==="diagram"||b.type==="statemachine"?({diagram,statemachine})[b.type](b,linkFor):R[b.type]?R[b.type](b):el("p","err","Unknown block type: "+b.type))}
       catch(e){s.append(el("p","err",e.message))}
       art.append(s)});
     f.replaceChildren(art);
@@ -361,12 +396,11 @@ function claimAge(x){return x.status==="doing"&&x.claimed_at?rel(x.claimed_at):"
 const stale=x=>x.status==="doing"&&x.claimed_at&&Date.now()-Date.parse(x.claimed_at)>DAY;
 function boardHref(p,id,qs){const s=qs.toString();return hashFor(p,"task",id)+(s?"?"+s:"")}
 function itemCard(x,p,qs,sel,blockedBy){
-  const a=link("",boardHref(p,x.id,qs),"tcard"+(String(x.id)===sel?" sel":"")+(x.off_roadmap?" offrm":""));
+  const a=link("",boardHref(p,x.id,qs),"tcard"+(String(x.id)===sel?" sel":""));
   const m=el("span","mono","#"+x.id+(x.kind!=="task"?" "+x.kind:"")+(x.owner?" · "+x.owner:"")+(claimAge(x)?" · "+claimAge(x):""));
   const row=el("span","trow");
   if(x.label)row.append(tag(x.label,"lbl-"+x.label));
   if(x.priority)row.append(tag(PRI_TAG[String(x.priority).toLowerCase()]||x.priority,"pri-"+String(x.priority).toLowerCase()));
-  if(x.phase!=null)row.append(tag("P"+x.phase,x.off_roadmap?"offrm":"phase",x.off_roadmap?"Phase "+x.phase+", outside the roadmap's current phase":"Phase "+x.phase+" of the roadmap"));
   if(acN(x))row.append(tag("AC "+acN(x)));
   if(blockedBy&&blockedBy.length)row.append(tag("blocked by "+blockedBy.map(i=>"#"+i).join(" "),"block"));
   else if(x.spec&&x.spec.blocked)row.append(tag("blocked","block"));
@@ -393,7 +427,7 @@ async function boardView(box,p,id){
   all.sort((a,b)=>(b.label==="issue")-(a.label==="issue")); // stable: issues first, API order otherwise
   const needle=f.q.toLowerCase();
   const vis=all.filter(x=>(!f.kind||x.kind===f.kind)&&(!f.status||x.status===f.status)&&(!f.owner||x.owner===f.owner)&&(!needle||(x.title+" #"+x.id).toLowerCase().includes(needle)));
-  box.append(head("Board",vis.length));
+  const hd=head("Board",vis.length), nb=el("button","primary tadd","+ Task");nb.type="button";nb.onclick=()=>taskForm(p,null);hd.append(nb);box.append(hd);
   const bar=el("div","tbar2");
   const search=el("input");search.type="search";search.id="tq";search.placeholder="Search titles…";search.value=f.q;search.setAttribute("aria-label","Search titles");
   search.onchange=()=>go({q:search.value.trim()});
@@ -419,11 +453,65 @@ async function boardView(box,p,id){
   if(!d||d.project!==p)return pane.append(el("p","err","Not found #"+id));
   detailPane(pane,d,p,qs);
 }
+/* ---------- task write forms: add / edit / delete ---------- */
+const PRIS=["p0","p1","p2","p3"], KINDS_ADD=["task","issue","step","gate","rule","knowledge","draft","note"];
+const lines=v=>v.split("\n").map(x=>x.trim()).filter(Boolean);
+const ta=(label,id,rows,val,ph)=>{const t=el("textarea");t.rows=rows;t.value=val||"";return field(label,id,ph?{placeholder:ph,autocomplete:"off"}:null,t)};
+const selField=(label,id,opts,cur)=>{const s=el("select");opts.forEach(o=>s.append(new Option(o||"none",o)));if(cur&&!opts.includes(cur))s.append(new Option(cur,cur));s.value=cur||"";return field(label,id,null,s)};
+const val=f=>f.lastChild.value;
+// d == null: add; else edit. After a write the board reloads; add selects the new task.
+function taskForm(p,d){
+  const sp=(d&&d.spec)||{}, sc=sp.scope||{}, need0=d?d.deps.needs.map(x=>x.id):[];
+  const title=field("Title","tt",{autocomplete:"off",required:""}), kind=selField("Kind","tk",KINDS_ADD,d?d.kind:"task");
+  title.lastChild.value=d?d.title:"";
+  const st=selField("Status","ts",ST_ITEM,d?d.status:"proposed"), pr=selField("Priority","tp",["",...PRIS],d&&d.priority||"");
+  const body=ta("Description","tb",4,d&&d.body), goal=ta("Goal","tg",2,sp.goal);
+  const ac=ta("Acceptance (one per line)","ta",4,(sp.acceptance||[]).map(a=>typeof a==="string"?a:JSON.stringify(a)).join("\n"));
+  const ver=field("Verify command","tv",{autocomplete:"off"});ver.lastChild.value=sp.verify||"";
+  const touch=ta("Scope: may touch (one per line)","tto",2,(sc.touch||[]).join("\n")), forb=ta("Scope: must not touch (one per line)","tf",2,(sc.forbid||[]).join("\n"));
+  const deps=field("Needs (task ids, comma separated)","tdp",{autocomplete:"off",placeholder:"e.g. 12, 15"});deps.lastChild.value=need0.join(", ");
+  const row=(...f)=>{const r=el("div","prow");r.append(...f);return r};
+  const spec=()=>{const o={...sp,goal:val(goal).trim(),acceptance:lines(val(ac)),verify:val(ver).trim(),scope:{...sc,touch:lines(val(touch)),forbid:lines(val(forb))}};return o};
+  const hasSpec=()=>val(goal).trim()||val(ac).trim()||val(ver).trim()||val(touch).trim()||val(forb).trim();
+  return dialog(d?"Edit #"+d.id:"Add task",[title,row(...(d?[]:[kind]),st,pr),body,goal,ac,ver,row(touch,forb),deps],(dlg,fail)=>{
+    dlg.classList.add("pwide");
+    const ok=el("button","primary",d?"Save":"Add");ok.type="submit";
+    dlg.firstChild.onsubmit=async e=>{e.preventDefault();ok.disabled=true;fail("");
+      try{
+        const ids=val(deps).split(/[\s,]+/).filter(Boolean);
+        if(ids.some(x=>!/^\d+$/.test(x)))throw new Error("Needs: use task numbers like 12, 15");
+        const want=ids.map(Number);let id;
+        if(d){
+          const b={op:"edit",id:d.id,title:val(title),body:val(body),priority:val(pr),spec:spec()};
+          if(val(st)!==d.status)b.status=val(st);
+          if(!b.priority)delete b.priority; // shortcut: an existing priority cannot be cleared from the form
+          await api("/api/item?project="+enc(p),b);id=d.id;
+        }else{
+          const k=val(kind), b={op:"add",kind:k==="issue"?"issue":k,title:val(title),body:val(body),status:val(st)};
+          if(val(pr))b.priority=val(pr);if(hasSpec())b.spec=spec();
+          id=(await api("/api/item?project="+enc(p),b)).id;
+        }
+        for(const n of want)if(!need0.includes(n))await api("/api/item?project="+enc(p),{op:"dep_add",id,depends_on:n});
+        for(const n of need0)if(!want.includes(n))await api("/api/item?project="+enc(p),{op:"dep_rm",id,depends_on:n});
+        dlg.close();if(!d)location.hash=hashFor(p,"task",id);await render(true);
+      }catch(x){fail(x.message);ok.disabled=false}};
+    return [ok]});
+}
+function deleteTask(p,d){
+  const info=el("p","pinfo","Permanently deletes #"+d.id+" “"+d.title+"” and its dependency links. This cannot be undone.");
+  return dialog("Delete #"+d.id,[info],(dlg,fail)=>{
+    const ok=el("button","danger","Delete task");ok.type="submit";
+    dlg.firstChild.onsubmit=async e=>{e.preventDefault();ok.disabled=true;fail("");
+      try{await api("/api/item?project="+enc(p),{op:"delete",id:d.id});dlg.close();location.hash=hashFor(p,"task");await render()}
+      catch(x){fail(x.message);ok.disabled=false}};
+    return [ok]});
+}
 function dlink(x,p,qs){const a=link("#"+x.id+" "+x.title,boardHref(p,x.id,qs),"dep");a.append(" ",pill(x.status));return a}
 function section(c,title,node){if(!node)return;const s=el("div","dsec");s.append(el("h4","",title),node);c.append(s)}
 function detailPane(c,d,p,qs){
   const sp=d.spec||{}, ac=sp.acceptance||[];
-  const top=el("div");top.append(el("span","mono","#"+d.id+" "+d.kind+" · "+d.status+(d.owner?" · owner "+d.owner:"")+(d.claimed_at?" · claim "+ago(d.claimed_at).slice(5):"")),el("h2","",d.title));
+  const acts=el("div","dact"),eb=el("button","","Edit"),db=el("button","danger","Delete");eb.type=db.type="button";eb.onclick=()=>taskForm(p,d);db.onclick=()=>deleteTask(p,d);acts.append(eb,db);
+  const top=el("div");top.append(acts,el("span","mono","#"+d.id+" "+d.kind+" · "+d.status+(d.owner?" · owner "+d.owner:"")+(d.claimed_at?" · claim "+ago(d.claimed_at).slice(5):"")),el("h2","",d.title));
   const pr=el("div","props");pr.append(pill(d.status));
   if(d.priority){const s=el("span");s.append(priIcon(d.priority)," "+d.priority);s.style.display="inline-flex";s.style.gap="4px";pr.append(s)}
   if(d.label)pr.append(tag(d.label,"lbl-"+d.label));
@@ -455,303 +543,7 @@ function detailPane(c,d,p,qs){
   if(d.body){const b=el("div","dbody");b.append(md(d.body));section(c,"Description",b)}
 }
 
-/* ---------- Roadmap (read-only): Astra mountain trail + detail from /api/roadmap. Data only reaches DOM through textContent. ---------- */
-const LT_ST={approved:"Not started",doing:"In progress",review:"Awaiting check",done:"Passed",blocked:"Blocked"};
 const LBL={done:"done",doing:"in progress",todo:"upcoming"};
-const LT_WHO={machine:"machine",reviewer:"reviewer",user:"user"};
-const ltPct=(n,m)=>m?Math.round(100*n/m):0;
-
-function ltFormat(parent,text){
-  const re=/\(([^)]*[-.\/][^)]*)\)|`([^`]+)`/g;let i=0,m;const s=String(text==null?"":text);
-  while((m=re.exec(s))){
-    if(m.index>i)parent.append(s.slice(i,m.index));
-    if(m[1]!=null){parent.append("(");parent.append(el("code","",m[1]));parent.append(")")}
-    else if(m[2]!=null){parent.append(el("code","",m[2]))}
-    i=re.lastIndex;
-  }
-  if(i<s.length)parent.append(s.slice(i));
-}
-
-function ltCamps(d){
-  const phs=[];
-  if(d.phases&&d.phases.length){
-    d.phases.forEach(ph=>phs.push({n:ph.n,title:ph.title,anchor:String(ph.n)}));
-  }else if(d.plan&&d.plan.sections){
-    d.plan.sections.forEach(s=>(s.phases||[]).forEach(ph=>phs.push({n:ph.n,title:ph.title,anchor:ph.anchor||String(ph.n)})));
-  }
-  const gs=(d.gates||[]).filter(g=>(g.phases||[]).length), passed=n=>gs.some(g=>g.phases.includes(n)&&g.status==="done");
-  const cur=d.current_phase!=null?d.current_phase:(phs.find(ph=>!passed(ph.n))||{}).n;
-  return phs.map(ph=>{
-    const g=gs.find(g=>Math.max(...g.phases)===ph.n), gOpen=g&&g.phases.includes(cur);
-    return {
-      n:ph.n,anchor:ph.anchor||String(ph.n),label:String(ph.title||"Phase "+ph.n).replace(/^Phase\s*\d+\s*[·:.-]\s*/i,""),
-      state:passed(ph.n)?"done":ph.n===cur?"doing":"todo",
-      gate:g&&{key:g.key,state:g.status==="done"?"done":gOpen?"open":"todo"},
-      cur
-    };
-  });
-}
-
-function ltMapBox(camps,d,root,sel,pick){
-  const cur=camps[0].cur, box=el("div","lt-mapbox"), sc=el("div","lt-mapscroll");
-  let curPct=0;
-  if(d.progress&&d.progress.phases){
-    const pp=d.progress.phases.find(x=>x.phase===cur);
-    if(pp&&pp.total>0)curPct=ltPct(pp.done,pp.total);
-  }
-  if(!curPct){
-    const curDef=(d.phases||[]).find(x=>x.n===cur);
-    if(curDef&&curDef.blocks&&curDef.blocks.length){
-      const tot=curDef.blocks.reduce((acc,b)=>acc+(b.total||0),0), dn=curDef.blocks.reduce((acc,b)=>acc+(b.done||0),0);
-      if(tot>0)curPct=Math.round(100*dn/tot);
-    }
-  }
-  if(!curPct&&d.steps){
-    const curSteps=d.steps.filter(st=>st.phase===cur);
-    if(curSteps.length>0)curPct=Math.round(100*curSteps.filter(st=>st.status==="done"||st.state==="done").length/curSteps.length);
-  }
-  const opt={cur,sel,pct:d.progress||d.phases||d.steps?curPct:null,summit:"Summit · release",label:"Roadmap map: each camp is a phase, click for details",onPick:pick};
-  let w=0, raf=0;const ro=new ResizeObserver(()=>{if(!box.isConnected)return ro.disconnect();cancelAnimationFrame(raf);raf=requestAnimationFrame(()=>{
-    const nw=box.clientWidth;if(!nw||nw===w)return;w=nw;const f=sc.contains(document.activeElement)&&document.activeElement.getAttribute("aria-label");
-    sc.replaceChildren(astraMap(camps,{...opt,width:nw}));if(f){const c=[...sc.querySelectorAll(".camp")].find(x=>x.getAttribute("aria-label")===f);if(c)c.focus({preventScroll:true})}})});
-  ro.observe(box);box.append(sc);return box;
-}
-
-function renderDetail(detail,off,s,d,p,camps){
-  if(s==null&&camps.length)s=camps[0].n;
-  const def=(d.phases||[]).find(x=>x.n===s);
-  const planPh=d.plan&&d.plan.sections?d.plan.sections.flatMap(sec=>sec.phases||[]).find(x=>x.n===s):null;
-  const camp=camps.find(c=>c.n===s)||{};
-  const name=(def&&def.title)||(planPh&&planPh.title)||("Phase "+s);
-  const state=camp.state||"todo";
-  const goal=(def&&def.goal)||(planPh&&(planPh.intro||planPh.goal))||"";
-  const stepKeys=planPh&&planPh.steps?planPh.steps:[];
-  const phaseSteps=(d.steps||[]).filter(st=>st.phase===s);
-  if(stepKeys.length){
-    phaseSteps.sort((a,b)=>{
-      const ia=stepKeys.indexOf(a.key), ib=stepKeys.indexOf(b.key);
-      if(ia>=0&&ib>=0)return ia-ib;
-      return (a.key||"").localeCompare(b.key||"");
-    });
-  }
-  const blocks=(def&&def.blocks)?def.blocks:[];
-
-  let pct=0;
-  if(state==="done"){
-    pct=100;
-  }else if(d.progress&&d.progress.phases){
-    const pp=d.progress.phases.find(x=>x.phase===s);
-    if(pp&&pp.total>0)pct=ltPct(pp.done,pp.total);
-  }
-  if(!pct&&blocks.length){
-    const tot=blocks.reduce((acc,b)=>acc+(b.total||0),0), dn=blocks.reduce((acc,b)=>acc+(b.done||0),0);
-    if(tot>0)pct=Math.round(100*dn/tot);
-  }
-  if(!pct&&phaseSteps.length){
-    const dn=phaseSteps.filter(st=>st.status==="done"||st.state==="done").length;
-    pct=Math.round(100*dn/phaseSteps.length);
-  }
-
-  const left=el("section");
-  left.append(el("span","lab","Camp "+s+" · phase "+s));
-  left.append(el("h3","",name));
-
-  const stateRow=el("div","state");
-  stateRow.append(el("span","st "+state,LBL[state]||state));
-  if(state==="doing")stateRow.append(el("span","pct",pct+"%"));
-  left.append(stateRow);
-
-  if(goal)left.append(el("p","goal",goal));
-
-  if(blocks.length){
-    left.append(el("hr","rule"));
-    left.append(el("span","lab","Blocks to do"));
-    const ul=el("ul","blocks");
-    blocks.forEach(b=>{
-      const li=el("li");
-      const isDone=b.done!=null&&b.total!=null&&b.total>0&&b.done>=b.total;
-      const bPct=isDone?100:(b.total>0?Math.round(100*b.done/b.total):0);
-      const cntText=b.total>0?(isDone?"done":`${b.done}/${b.total}`):(b.done?"done":"no tasks");
-      const objEl=b.object?link(b.object,hashFor(p,"c4",b.object)):el("span","",b.object||"");
-      const cntEl=el("span","cnt",cntText);
-      const thread=el("span","thread");thread.setAttribute("aria-hidden","true");
-      const thI=el("i",isDone?"dn":bPct===0?"zero":"");thI.style.width=bPct+"%";thread.append(thI);
-      li.append(objEl,cntEl,thread);
-      if(b.note||b.pulled_from!=null){
-        li.append(el("span","note",b.note||("Pulled from phase "+b.pulled_from)));
-      }
-      ul.append(li);
-    });
-    left.append(ul);
-  }
-
-  if(phaseSteps.length){
-    left.append(el("hr","rule"));
-    const det=el("details");det.open=true;
-    det.append(el("summary","lab","Phase steps · "+phaseSteps.length));
-    const ul=el("ul","steps");
-    phaseSteps.forEach(st=>{
-      const li=el("li");
-      li.append(el("span","id",st.key||String(st.id)));
-      li.append(link(st.title,hashFor(p,"task",st.id)));
-      const stState=st.state||st.status;
-      li.append(el("span","st "+stState,LBL[stState]||LT_ST[stState]||stState));
-      ul.append(li);
-    });
-    det.append(ul);left.append(det);
-  }
-
-  const right=el("section");
-  const gateKey=(camp.gate&&camp.gate.key)||(def&&def.gate&&def.gate.key)||("G"+s);
-  const gateObj=(d.gates||[]).find(g=>g.key===gateKey);
-  const gs=camp.gate?camp.gate.state:(gateObj&&gateObj.status==="done"?"done":state==="doing"?"open":"todo");
-  const gTone=gs==="done"?"done":gs==="open"?"doing":"todo";
-  const gTxt=gs==="done"?"passed":gs==="open"?"not passed":"upcoming";
-  const gateNote=(planPh&&planPh.gate&&(planPh.gate.body||planPh.gate.label))||(gateObj&&gateObj.body)||(gs==="done"?"Passed.":"Not reached.");
-  const gateMissing=(def&&def.gate&&def.gate.missing)||(gateObj&&(gateObj.missing||gateObj.blockers))||[];
-  const hasCriteriaSystem=(d.phases||[]).some(ph=>ph.criteria&&ph.criteria.length);
-  const allCrit=(def&&def.criteria)?def.criteria:[];
-  const isOk=c=>c.result&&["pass","waived"].includes(c.result.result);
-  const missCrit=allCrit.filter(c=>!isOk(c));
-
-  if(gateKey){
-    const gateDiv=el("div","gate");
-    const stDiv=el("div","state");
-    stDiv.append(el("span","lab","Gate "+gateKey),el("span","st "+gTone,gTxt));
-    gateDiv.append(stDiv);
-
-    if(gs==="open"&&allCrit.length>0){
-      const line=el("div","line");
-      line.append("",el("em","num",String(missCrit.length))," of ",el("span","num",String(allCrit.length))," criteria remaining");
-      gateDiv.append(line);
-      const gmiss=el("ul","gmiss");
-      missCrit.forEach(c=>{
-        const li=el("li");
-        const sp=el("span");
-        sp.append(c.text.replace(/\s*\(.*\)$/,""));
-        sp.append(" ",el("span","who","· "+(LT_WHO[c.confirm_by]||c.confirm_by)));
-        li.append(sp);
-        gmiss.append(li);
-      });
-      gateDiv.append(gmiss,el("span","then","Then the user passes it."));
-    }else if(gs==="open"&&gateMissing.length>0){
-      const line=el("div","line");
-      line.append("",el("em","num",String(gateMissing.length))," conditions not yet met");
-      gateDiv.append(line);
-      const gmiss=el("ul","gmiss");
-      gateMissing.forEach(m=>{
-        const li=el("li");li.append(el("span","",m));gmiss.append(li);
-      });
-      gateDiv.append(gmiss,el("span","then","Then the user passes it."));
-    }else{
-      gateDiv.append(el("div","line",gateNote));
-    }
-    right.append(gateDiv);
-  }
-
-  if(hasCriteriaSystem){
-    right.append(el("hr","rule"));
-    right.append(el("span","lab","Professional evaluation criteria"));
-    if(allCrit.length>0){
-      const cats=[...new Set(allCrit.map(c=>c.category||"chung"))];
-      cats.forEach(cat=>{
-        const grp=el("div","grp");
-        grp.append(el("span","lab",cat));
-        allCrit.filter(c=>(c.category||"chung")===cat).forEach(c=>{
-          const ok=isOk(c);
-          const row=el("div","crit"+(ok?"":" miss-row"));
-          const what=el("span","what");
-          ltFormat(what,c.text+(c.level==="optional"?" (optional)":""));
-          const who=el("span","who",LT_WHO[c.confirm_by]||c.confirm_by||"");
-          const stRes=ok?(c.result.result==="waived"?"waived":"passed"):(c.result&&c.result.value?c.result.value+" · not yet":"not yet");
-          const st=el("span","st "+(ok?"done":"miss"),stRes);
-          row.append(what,who,st);
-          grp.append(row);
-        });
-        right.append(grp);
-      });
-    }else{
-      right.append(el("p","empty","This phase's criteria are not set yet. They will be written when the previous phase passes its gate."));
-    }
-  }
-
-  detail.replaceChildren(left,right);
-
-  const offItems=d.off_roadmap||[];
-  if(offItems.length>0){
-    off.style.display="";
-    const ul=el("ul");
-    offItems.forEach(o=>{
-      const li=el("li");
-      li.append(el("span","id","#"+o.id)," ");
-      li.append(link(o.title,hashFor(p,"task",o.id)));
-      ul.append(li);
-    });
-    off.replaceChildren(el("span","lab","Off roadmap"),ul);
-  }else{
-    off.style.display="none";
-    off.replaceChildren();
-  }
-}
-
-function roadmapDoc(d,p,sel,pick){
-  const root=el("div","lt wrap");
-  const camps=ltCamps(d);
-  const gates=d.gates||[];
-  const cur=camps.length?camps[0].cur:null;
-  const s=sel!=null&&camps.some(c=>c.n===sel)?sel:cur;
-
-  const hd=el("header","lt-head");
-  const leftHd=el("div");
-  const eyebrow=(d.plan&&d.plan.header&&d.plan.header.eyebrow)||"Project roadmap";
-  leftHd.append(el("div","cap",eyebrow));
-  const h1=el("h1","foil",(d.plan&&d.plan.header&&d.plan.header.title)||d.title||"Roadmap");
-  leftHd.append(h1);
-  const metaText=camps.length+" phase · "+gates.length+" gates · the summit is the release";
-  const meta=el("div","meta",metaText);
-  hd.append(leftHd,meta);
-  root.append(hd);
-
-  if(camps.length){
-    root.append(ltMapBox(camps,d,root,s,pick));
-  }
-
-  const detail=el("div","detail");
-  const off=el("div","off");
-  root.append(detail,off);
-  renderDetail(detail,off,s,d,p,camps);
-
-  return root;
-}
-async function roadmapView(box,p,id){
-  box.className="page wide";
-  const list=await get("/api/roadmap?project="+enc(p));
-  if(!list.length){box.append(head("Roadmap",0),empty("No roadmap yet","Load with:","strata.py roadmap import PLAN.json --project "+p+" --roadmap ID"));return}
-  // default: newest roadmap of the phase model (has phases), else newest; the list API carries no phases flag, so ask each
-  let def=null;
-  if(!list.some(x=>x.roadmap===id)&&list.length>1){
-    const full=await Promise.all(list.map(x=>get("/api/roadmap?project="+enc(p)+"&roadmap="+enc(x.roadmap)).then(d=>({x,ph:(d.phases||[]).length>0}),()=>({x,ph:false}))));
-    const newest=a=>a.sort((a,b)=>String(b.x.updated_at).localeCompare(String(a.x.updated_at)))[0];
-    def=(newest(full.filter(f=>f.ph))||newest(full)).x}
-  const cur=list.find(x=>x.roadmap===id)||def||list[0], url="/api/roadmap?project="+enc(p)+"&roadmap="+enc(cur.roadmap), host=el("div");
-  if(list.length>1){const r=el("div","tchips");r.append(el("span","lbl","Roadmap"));list.forEach(x=>{const a=link(x.title,hashFor(p,"roadmap",x.roadmap),x===cur?"on":"");r.append(a)});box.append(r)}
-  box.append(host);
-  let ver=null, data=null, sel=+hq().get("ph")||null;
-  if(hq().get("ph")==="0")sel=0;
-  // camp pick: switch phase; hash remembers (?ph=N)
-  const pick=n=>{sel=n;const q=hq();q.set("ph",n);history.replaceState(null,"",location.hash.split("?")[0]+"?"+q);draw();
-    const cp=host.querySelector(".lt-map .camp.sel");if(cp)cp.focus({preventScroll:true})};
-  const draw=()=>{const camps=ltCamps(data), s=sel!=null&&camps.some(c=>c.n===sel)?sel:camps.length?camps[0].cur:null;
-    host.replaceChildren(roadmapDoc(data,p,s,pick))};
-  const load=async()=>{const d=await get(url);if(d.version===ver)return;ver=d.version;data=d;const sc=$("content").scrollTop;draw();$("content").scrollTop=sc};
-  await load();
-  const tick=async()=>{
-    if(!host.isConnected){clearInterval(t);document.removeEventListener("visibilitychange",tick);return}
-    if(document.hidden)return;
-    try{const v=await get(url+"&only=version");if(v.version!==ver)await load()}catch{}
-  };
-  const t=setInterval(tick,3000);document.addEventListener("visibilitychange",tick);
-}
 
 /* ---------- command palette ---------- */
 const SRC={item:["Task","task"],doc:["Docs","docs"]};
@@ -761,8 +553,9 @@ function closePal(){$("pal").hidden=true}
 function navHits(){
   const out=[];
   if(CUR.p)TABS.forEach(([k,l,g])=>out.push({grp:"Navigation",title:l,sub:byId[CUR.p].name,ic:k,kbd:"G "+g.toUpperCase(),run:()=>{location.hash=hashFor(CUR.p,k)}}));
-  PROJ.filter(p=>p.id!==CUR.p).forEach(p=>out.push({grp:"Projects",title:p.name,sub:p.id,ic:"proj",run:()=>{location.hash=hashFor(p.id,"overview")}}));
-  out.push({grp:"Commands",title:"Toggle light / dark",ic:"sun",run:toggleTheme},{grp:"Commands",title:"Keyboard shortcuts",ic:"overview",kbd:"?",run:openKeys});
+  PROJ.filter(p=>p.id!==CUR.p).forEach(p=>out.push({grp:"Projects",title:p.name,sub:p.id,ic:"proj",run:()=>{location.hash=hashFor(p.id,"task")}}));
+  out.push({grp:"Commands",title:"Add project…",ic:"plus",run:addProject});
+  out.push({grp:"Commands",title:"Toggle light / dark",ic:"sun",run:toggleTheme},{grp:"Commands",title:"Keyboard shortcuts",ic:"help",kbd:"?",run:openKeys});
   return out;
 }
 function searchHits(r){
@@ -865,6 +658,7 @@ resize.addEventListener("keydown",e=>{
 $("moon").append(svg(O.moon));
 $("band").append(svg(contours(7,480,120,6)));
 themeIcon();
+$("padd").append(icon("plus"));$("padd").onclick=addProject;
 $("theme").onclick=toggleTheme;
 $("help").onclick=openKeys;
 $("searchbtn").onclick=openPal;
@@ -872,11 +666,11 @@ $("menu").onclick=()=>{document.body.classList.toggle("menu");document.body.clas
 $("scrim").onclick=()=>document.body.classList.remove("menu");
 addEventListener("hashchange",()=>render());
 render();
-/* live: redraw the current tab when /api/version moves (CLI/MCP write, docs edit). C4, roadmap and doc readers poll on their own. */
+/* live: redraw the current tab when /api/version moves (CLI/MCP write, docs edit). C4 and doc readers poll on their own. */
 {let ver=null;const live=async()=>{
   if(document.hidden)return;
   try{const v=(await get("/api/version")).version;if(ver!==null&&v!==ver){
     const a=document.activeElement,busy=a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)||document.querySelector("dialog[open]");
-    if(busy||CUR.tab==="c4"||CUR.tab==="roadmap"||(CUR.tab==="docs"&&CUR.id))return;  // retry next tick, ver stays old
+    if(busy||CUR.tab==="c4"||(CUR.tab==="docs"&&CUR.id))return;  // retry next tick, ver stays old
     await render(true)}ver=v}catch{}};
  setInterval(live,2000);document.addEventListener("visibilitychange",live)}

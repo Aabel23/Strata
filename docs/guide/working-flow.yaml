@@ -5,9 +5,9 @@ code: [strata.py, strata/service.py, strata/c4_edit.py, viewer/index.html, viewe
 blocks:
   - md: |
       ## The idea
-      Strata keeps one project's knowledge in one place: the **architecture map**, the **tasks**, the **roadmap** and the **documents**. You run the project from the browser at http://127.0.0.1:8740. Agents (Claude Code coder and reviewer roles) are helpers: they can take a task you wrote, but you decide what gets built and what counts as done.
+      Strata keeps one project's knowledge in one place: the **architecture map**, the **tasks** and the **documents**. You run the project from the browser at http://127.0.0.1:8740. Agents (Claude Code coder and reviewer roles) are helpers: they can take a task you wrote, but you decide what gets built and what counts as done.
 
-      Today the browser can **edit the architecture map**. Everything else you read in the browser and change with a short command, or ask an agent to change. The last section lists what is still command-only.
+      Today the browser can **edit the architecture map, tasks and projects**. Documents and map contracts are still files. The last section lists what is command-only.
 
   - md: |
       ## The daily loop
@@ -30,8 +30,7 @@ blocks:
       rows:
         - ["Architecture map (systems, apps, components, links)", "Architecture tab", "The edit toolbar in the browser, or edit the YAML in `docs/c4` and run `c4 import`"]
         - ["Code behind a component", "Architecture tab, select a component, **Code**", "Read-only: it is generated from the files the component `owns`"]
-        - ["Tasks and issues", "Task tab (issues are tasks with an `issue` chip)", "`item add`, `item edit`, `item approve` (commands)"]
-        - ["Roadmap and gates", "Roadmap tab", "`roadmap ...` commands; you pass gates yourself"]
+        - ["Tasks and issues", "Task tab (issues are tasks with an `issue` chip)", "Edit and delete in the browser (title, body, status, priority, dependencies, spec), or `item add`, `item edit`, `item approve` (commands)"]
         - ["Documents (research, guides, plans)", "Docs tab", "Write a YAML file under `docs/` (see `architect/doc-format`); the viewer picks it up"]
         - ["History of every write, with who did it", "Log tab", "Nothing to change: it is the audit trail"]
 
@@ -120,21 +119,12 @@ blocks:
       Research, decisions and guides go in the **Docs** tab as YAML files under `docs/research/`, `docs/architect/`, `docs/plan/` or `docs/guide/`. Write content only (headings, tables, diagrams, questions with a recommendation); Strata does the layout. Check a file with `python3 strata.py doc validate FILE`. Nothing else to register: the viewer rescans when a file changes.
 
   - md: |
-      ## 8. The roadmap and gates
-      The **Roadmap** tab shows phases as camps on a route and gates as checkpoints. You are the one who passes a gate, after the steps and criteria behind it are met:
-
-      ```bash
-      python3 strata.py roadmap check --project strata --roadmap v1
-      python3 strata.py roadmap gate pass G1 --project strata --roadmap v1 --as user --evidence "demo works"
-      ```
-
-  - md: |
       ## Shortcuts
   - table:
       head: [Keys, Does]
       rows:
         - ["`Ctrl K` or `/`", "Search and commands"]
-        - ["`G` then `O` `T` `M` `R` `A` `L`", "Overview, Task, Roadmap, Docs, Architecture, Log"]
+        - ["`G` then `O` `T` `R` `A` `L`", "Overview, Task, Docs, Architecture, Log"]
         - ["`J` `K`, `Enter`", "Next or previous row, open it"]
         - ["`[`", "Collapse or expand the sidebar"]
         - ["`Esc`", "Close the top layer (in the Code panel it closes the panel first)"]
@@ -144,22 +134,11 @@ blocks:
       - Every write goes through the service layer and leaves an audit row (Log tab). Audit rows cannot be edited or deleted.
       - The map lives in git (`docs/c4`), so any edit can be inspected and undone with `git diff` and `git checkout`.
       - The database is backed up before risky migrations (see `backups/`). Copy it yourself before anything you are unsure about.
-      - The editing route is the **only** write route on the server. It works from `127.0.0.1`. To edit from another device over Tailscale, add `--allow-edit` to the service's `ExecStart` in `~/.config/systemd/user/strata.service`, then run `systemctl --user daemon-reload && systemctl --user restart strata`. With that flag, anyone who can reach the port can edit the map, so keep it to your own network.
+      - The server has three write routes (map edit, task, project). Each needs a random token that is created when the server starts and sent by the page, plus the usual Origin and Host checks, so reload the page after a restart. They work from `127.0.0.1`.
+      - Deleting a task is permanent (it leaves an audit row). Deleting a project removes its rows from the database (not your files); you must type the project id to confirm, and Strata copies the database into `backups/` first. To edit from another device over Tailscale, add `--allow-edit` to the service's `ExecStart` in `~/.config/systemd/user/strata.service`, then run `systemctl --user daemon-reload && systemctl --user restart strata`. With that flag, anyone who can reach the port can edit the map, so keep it to your own network.
 
   - md: |
       ## Not in the browser yet
-      - Creating, editing and approving **tasks** (commands or agents only).
-      - Editing **documents** (edit the YAML file).
-      - Passing **roadmap gates** and recording criteria.
+            - Editing **documents** (edit the YAML file).
       - Editing map **contracts, flows and behavior**.
       - Code symbols for languages other than Python.
-
-      The next steps in this direction would be a task form on the Task tab and a gate button on the Roadmap tab, in the same style as the architecture toolbar.
-
-  - question:
-      q: Which should become browser features first?
-      options:
-        - {label: "Create and approve tasks on the Task tab", note: "the step you repeat most"}
-        - {label: "Edit documents in the browser"}
-        - {label: "Gate and criteria buttons on the Roadmap tab"}
-      recommend: "Create and approve tasks on the Task tab"

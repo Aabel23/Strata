@@ -1,0 +1,27 @@
+id: ui_edit_task_project
+name: Edit a task or project from the UI
+steps:
+- link: v_item_write
+  text: Save a ticket edit with the per-start token header
+- at: handler
+  text: Check Host, token, Origin, content type and size; reject with 403 otherwise
+- link: h_item_ops
+  text: Call edit_item, add_item, delete_item or a dependency function
+- link: h_item_ops
+  reverse: true
+  text: Row changed and audit row written, or error rolled back
+- link: v_item_write
+  reverse: true
+  text: Return ok or the error message
+- link: v_project_write
+  text: Delete a project with its typed id as confirm
+- at: handler
+  text: Same guards as the item route
+- link: h_project_ops
+  text: Call delete_project; it backs up the DB, then hard deletes
+- link: h_project_ops
+  reverse: true
+  text: Backup written, rows deleted, audit row written
+- link: v_project_write
+  reverse: true
+  text: Return ok or the error message

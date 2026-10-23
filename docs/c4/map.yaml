@@ -162,7 +162,7 @@ objects:
   parent: server
   kind: component
   name: Handler
-  summary: BaseHTTPRequestHandler.do_GET
+  summary: BaseHTTPRequestHandler; do_GET and guarded do_POST routes
   owns:
   - strata/server.py
 - id: hk_cli
@@ -311,36 +311,15 @@ objects:
   status: future
   owns:
   - strata/mcp.py
-- id: plan_yaml
-  parent: repo
-  kind: store
-  name: Roadmap YAML (docs/plan)
-  summary: 'DESIGN: <docs_dir>/plan/*.yaml, one file per major version; a phase has goal, level, blocks, criteria; the agent drafts, the CLI imports'
-  owns:
-  - docs/plan
 - id: repo
   kind: system
   name: Project repo
   summary: Code and documents of the managed projects
-- id: roadmapmod
-  parent: cli
-  kind: component
-  name: roadmap
-  summary: 'Long-term phase roadmap: import, check, gate; templates and blocks are a new design'
-  owns:
-  - strata/roadmap.py
-- id: rview
-  parent: viewer
-  kind: component
-  name: Roadmap tab
-  summary: Roadmap page in the app shell
-  owns:
-  - viewer/roadmap.js
 - id: server
   parent: strata
   kind: app
   name: Server
-  summary: GET only; blocks unknown Host and traversal
+  summary: Serves GET; three guarded write routes (c4 edit, item, project) need a per-start token plus Origin/Host checks; blocks unknown Host and traversal
   owns:
   - strata/server.py
 - id: service
@@ -590,55 +569,6 @@ links:
   name: Read/write
   status: future
   summary: Service reads and writes the database.
-- id: a_rm_tpl
-  from: agent
-  to: roadmapmod
-  name: Create roadmap template
-  summary: Agent creates a roadmap skeleton from the template.
-  status: future
-- id: rm_tpl_w
-  from: roadmapmod
-  to: plan_yaml
-  name: Write skeleton
-  summary: Roadmap module writes the 5-phase skeleton into the plan folder.
-  status: future
-- id: a_plan_edit
-  from: agent
-  to: plan_yaml
-  name: Edit YAML per project
-  status: future
-  summary: Agent edits the roadmap YAML for each project.
-- id: a_rm_import
-  from: agent
-  to: roadmapmod
-  name: Import roadmap
-  summary: Agent loads a roadmap file through the CLI.
-- id: rm_imp_load
-  from: roadmapmod
-  to: plan_yaml
-  name: Read roadmap
-  summary: Roadmap module reads the roadmap YAML.
-  status: future
-- id: rm_val_c4
-  from: roadmapmod
-  to: c4mod
-  name: Check map objects
-  status: future
-  detail: c4mod.rm_val_c4
-  summary: Roadmap checks that each block points to a real map object.
-- id: rm_blk_db
-  from: roadmapmod
-  to: sqlite
-  name: Store phases and blocks
-  summary: Roadmap stores phases, blocks and their map links in the database.
-  status: future
-- id: rm_blk_task
-  from: roadmapmod
-  to: service
-  name: Create tasks
-  status: future
-  detail: service.rm_blk_task
-  summary: Roadmap creates one task per block through the service.
 - id: a_cli_set
   from: agent
   to: argp
@@ -651,72 +581,6 @@ links:
   name: Add item
   summary: Agent adds an issue or task from the CLI.
   status: future
-- id: u_confirm
-  from: agent
-  to: user
-  name: Give criteria to the user to confirm
-  status: future
-  summary: Agent hands acceptance criteria to the user to confirm.
-- id: a_cli_confirm
-  from: agent
-  to: argp
-  name: Confirm criterion
-  summary: Agent records a criterion result from the CLI.
-  status: future
-- id: cs_confirm
-  from: argp
-  to: roadmapmod
-  name: Confirm criterion
-  status: future
-  detail: roadmapmod.cs_confirm
-  summary: CLI forwards the criterion result to the roadmap module.
-- id: rm_conf_db
-  from: roadmapmod
-  to: sqlite
-  name: Store criterion
-  summary: Roadmap stores the criterion result and an audit entry.
-  status: future
-- id: a_cli_gate
-  from: agent
-  to: argp
-  name: Pass gate
-  summary: Agent passes a roadmap gate from the CLI.
-- id: cs_gate
-  from: argp
-  to: roadmapmod
-  name: Pass gate
-  detail: roadmapmod.cs_gate
-  summary: CLI forwards the gate request to the roadmap module.
-- id: rm_chk_db
-  from: roadmapmod
-  to: sqlite
-  name: Read progress
-  summary: Roadmap reads step, criterion and item state per block.
-- id: rm_gate_db
-  from: roadmapmod
-  to: sqlite
-  name: Store gate
-  summary: Roadmap records the gate and moves to the next phase.
-- id: u_roadmap
-  from: user
-  to: rview
-  name: Open roadmap
-  summary: User opens the Roadmap tab.
-  status: future
-- id: rv_api
-  from: rview
-  to: handler
-  name: Load roadmap
-  status: future
-  detail: handler.rv_api
-  summary: Roadmap tab fetches phases from the server.
-- id: g_rm
-  from: handler
-  to: roadmapmod
-  name: Read roadmap
-  status: future
-  detail: roadmapmod.g_rm
-  summary: Server asks the roadmap module for roadmap data.
 - id: a_hk_cli
   from: agent
   to: hk_cli
@@ -1017,3 +881,27 @@ links:
   name: Create link between selected output and input ports
   status: future
   summary: User links a selected output port to an input port.
+- id: v_item_write
+  from: viewer
+  to: server
+  name: Write task
+  detail: handler.v_item_write
+  summary: UI add, edit, delete task and dependencies; token guarded.
+- id: v_project_write
+  from: viewer
+  to: server
+  name: Write project
+  detail: handler.v_project_write
+  summary: UI add, edit, delete project; delete needs typed id.
+- id: h_item_ops
+  from: handler
+  to: service
+  name: Edit task
+  detail: service.gs_item_ops
+  summary: Item write route calls the audited item service functions.
+- id: h_project_ops
+  from: handler
+  to: service
+  name: Edit project
+  detail: service.gs_project_ops
+  summary: Project write route calls the project service functions; delete backs up first.

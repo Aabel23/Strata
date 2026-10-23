@@ -45,12 +45,6 @@
   transport: in-process
   start: strata.py::main
   end: strata/service.py::set_decision_status
-- id: rm_blk_task
-  transport: in-process
-  start: strata/roadmap.py::import_plan
-  end: strata/service.py::add_item
-  body:
-    signature: add_item(c, role, project, kind, title, body=None, priority=None, status='open', spec=None, phase=None)
 - id: mc_svc_claim
   transport: in-process
   body:
@@ -58,3 +52,19 @@
     purpose: todo to doing, audited compare-and-swap
   start: strata/mcp.py::call
   end: strata/service.py::transition
+- id: gs_item_ops
+  transport: in-process
+  body:
+    signature: add_item / edit_item / delete_item / dep_add / dep_rm
+    purpose: UI task writes; delete_item hard-deletes the item and its deps; every function writes an audit row
+  start: strata/server.py::make_server
+  end: strata/service.py::edit_item
+- id: gs_project_ops
+  transport: in-process
+  body:
+    signature: add_project / edit_project(c, id, ...) / delete_project(c, id, confirm)
+    purpose: Project writes; delete_project requires confirm == id and backs up the DB first; audited
+    errors:
+    - ValueError when confirm does not match
+  start: strata/server.py::make_server
+  end: strata/service.py::delete_project

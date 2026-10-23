@@ -18,16 +18,60 @@ def _role(c, role, op, project=None, target=None, info=None):
     if role not in ROLES: _deny(c, role, op, project, target, info, f"unknown role {role!r}")
 
 
-def _phase(c, project, phase):
-    """(phase, roadmap) to store: an explicit phase goes with the running roadmap; no phase on an issue = the running phase."""
-    from strata import roadmap
-    act = roadmap.active(c, project)
-    if phase is None: return act[::-1] if act else (None, None)
-    if not isinstance(phase, int) or isinstance(phase, bool) or phase < 0: raise ValueError("phase must be an integer >= 0")
-    return phase, act and act[0]
+PROJECT_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 
 
-def add_item(c, role, project, kind, title, body=None, priority=None, status=None, spec=None, phase=None, label=None):
+def add_project(c, id, name, root=None, docs_dir=None, parent=None, description=None):
+    """User/CLI project create: id is a lowercase slug, root/docs_dir must be existing folders, parent an existing project."""
+    id, name = (id or "").strip(), (name or "").strip()
+    if not PROJECT_ID.match(id): raise ValueError("id: 1-40 chars, lowercase letters, digits, - or _, starting with a letter or digit")
+    if not name: raise ValueError("name is required")
+    if c.execute("SELECT 1 FROM project WHERE id=?", (id,)).fetchone(): raise ValueError(f"project {id} already exists")
+    root, docs_dir, description = (x.strip() or None if isinstance(x, str) else None for x in (root, docs_dir, description))
+    root, docs_dir = _paths(c, root, docs_dir, parent)
+    db.add_project(c, id, name, root, docs_dir, parent or None, description)
+
+
+def _paths(c, root, docs_dir, parent):
+    """Shared add/edit validation; returns normalised (root, docs_dir)."""
+    if parent and not c.execute("SELECT 1 FROM project WHERE id=?", (parent,)).fetchone(): raise ValueError(f"parent {parent} does not exist")
+    if root and not pathlib.Path(root).expanduser().is_absolute(): raise ValueError("root must be an absolute path")
+    if root and not pathlib.Path(root).expanduser().is_dir(): raise ValueError(f"root {root} is not a folder")
+    if docs_dir and root and not pathlib.Path(docs_dir).is_absolute(): docs_dir = str(pathlib.Path(root) / docs_dir)
+    if docs_dir and not pathlib.Path(docs_dir).expanduser().is_absolute(): raise ValueError("docs dir must be absolute, or relative to root")
+    return root and str(pathlib.Path(root).expanduser()), docs_dir and str(pathlib.Path(docs_dir).expanduser())
+
+
+def edit_project(c, id, name=None, root=None, docs_dir=None, parent=None, description=None):
+    """Edit a project. None = keep; "" clears root/docs_dir/parent/description. Same checks as add_project, plus no parent cycle."""
+    old = c.execute("SELECT * FROM project WHERE id=?", (id,)).fetchone()
+    if old is None: raise KeyError(f"no project {id}")
+    new = {k: (v.strip() or None) for k, v in (("name", name), ("root", root), ("docs_dir", docs_dir), ("parent", parent), ("description", description)) if isinstance(v, str)}
+    if "name" in new and not new["name"]: raise ValueError("name is required")
+    if not new: raise ValueError("nothing to edit")
+    if new.get("parent"):
+        x = new["parent"]
+        while x:  # walk up from the new parent; reaching id means a cycle (or self)
+            if x == id: raise ValueError("parent would create a cycle")
+            r = c.execute("SELECT parent FROM project WHERE id=?", (x,)).fetchone()
+            x = r and r["parent"]
+    d = new.get("docs_dir")
+    if d and not pathlib.Path(d).is_absolute() and not new.get("root") and old["root"]: d = str(pathlib.Path(old["root"]) / d)  # relative to the current root
+    r, d = _paths(c, new.get("root"), d, new.get("parent"))
+    for k, v in (("root", r), ("docs_dir", d)):
+        if k in new: new[k] = v
+    c.execute(f"UPDATE project SET {','.join(f'{k}=:{k}' for k in new)} WHERE id=:id", {**new, "id": id})
+    db.audit(c, id, "project.edit", id, {k: old[k] for k in new}, new, "main"); c.commit()
+
+
+def delete_project(c, id, confirm):
+    """Delete only when `confirm` repeats the project id (the viewer asks the user to type it)."""
+    if confirm != id: raise ValueError("confirmation does not match the project id")
+    if c.execute("SELECT 1 FROM project WHERE id=?", (id,)).fetchone(): db.backup(c)  # no backup, no delete
+    db.delete_project(c, id)
+
+
+def add_item(c, role, project, kind, title, body=None, priority=None, status=None, spec=None, label=None):
     if kind == "issue": kind, label = "task", "issue"  # alias: an issue is a task labelled issue
     if status is None: status = "approved" if label == "issue" else "open"
     info = {"kind": kind, "title": title, **({"label": label} if label else {})}
@@ -35,9 +79,7 @@ def add_item(c, role, project, kind, title, body=None, priority=None, status=Non
     if role != "main" and (kind, label) != ("task", "issue"): _deny(c, role, "item.add", project, None, info, f"{role} may only add issues")
     if role != "main": status = "proposed"
     if spec is not None and not isinstance(spec, dict): raise ValueError("spec must be a JSON object")
-    if phase is not None or label == "issue": phase, rid = _phase(c, project, phase)
-    else: rid = None
-    return db.add_item(c, project, kind, title, body, priority, status, role, spec, phase, rid, label)
+    return db.add_item(c, project, kind, title, body, priority, status, role, spec, label=label)
 
 
 # (from, to) -> (roles allowed, note required). Owner/dep/version rules live in transition().
@@ -108,19 +150,33 @@ def set_item(c, role, id, status=None, priority=None):
         c.rollback(); raise
 
 
-def edit_item(c, role, id, title=None, body=None, spec=None, priority=None, phase=None):
+def edit_item(c, role, id, title=None, body=None, spec=None, priority=None):
     r = c.execute("SELECT project,version FROM item WHERE id=?", (id,)).fetchone()
     if role != "main": _deny(c, role, "item.edit", r and r["project"], f"item:{id}", {"id": id}, f"{role} may not edit items")
     if not r: raise KeyError(f"no item {id}")
     if spec is not None and not isinstance(spec, dict): raise ValueError("spec must be a JSON object")
-    if phase is not None: phase, rid = _phase(c, r["project"], phase)
-    new = {k: v for k, v in (("title", title), ("body", body), ("priority", priority), ("phase", phase), ("roadmap", phase is not None and rid or None),
+    new = {k: v for k, v in (("title", title), ("body", body), ("priority", priority),
                              ("spec", None if spec is None else json.dumps(spec, ensure_ascii=False))) if v is not None}
     if not new: raise ValueError("nothing to edit")
     sets = ",".join(f"{k}=?" for k in new)
     if not c.execute(f"UPDATE item SET {sets},updated_at=?,version=version+1 WHERE id=? AND version=?", (*new.values(), db.now(), id, r["version"])).rowcount:
         raise RuntimeError("item changed concurrently, reload and retry")
     db.audit(c, r["project"], "item.edit", f"item:{id}", None, {"fields": sorted(new)}, role); c.commit()
+
+
+def delete_item(c, role, id):
+    """Hard delete: the row, its deps in both directions and its C4 links. The audit row keeps what was removed."""
+    r = c.execute("SELECT * FROM item WHERE id=?", (id,)).fetchone()
+    if role != "main": _deny(c, role, "item.delete", r and r["project"], f"item:{id}", {"id": id}, f"{role} may not delete items")
+    if not r: raise KeyError(f"no item {id}")
+    try:
+        deps = [[x[0], x[1]] for x in c.execute("SELECT item_id,depends_on FROM item_dep WHERE item_id=? OR depends_on=?", (id, id))]
+        links = c.execute("DELETE FROM c4_link WHERE project=? AND ref_kind='item' AND ref_id=?", (r["project"], id)).rowcount
+        c.execute("DELETE FROM item_dep WHERE item_id=? OR depends_on=?", (id, id))  # explicit; FK cascade also covers it
+        c.execute("DELETE FROM item WHERE id=?", (id,))
+        db.audit(c, r["project"], "item.delete", f"item:{id}", {k: r[k] for k in r.keys()}, {"deps": deps, "c4_links": links}, role)
+        c.commit()
+    except BaseException: c.rollback(); raise
 
 
 def dep(c, role, id, depends_on, add=True):

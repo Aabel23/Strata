@@ -138,17 +138,6 @@ def test_app_js_never_injects_html():
     assert not any(w in js for w in ("innerHTML", "insertAdjacentHTML", "document.write", "eval(", "outerHTML"))
 
 
-def test_roadmap_astra_frontend():
-    app_js = (ROOT / "viewer/app.js").read_text()
-    app_css = (ROOT / "viewer/app.css").read_text()
-    roadmap_js = (ROOT / "viewer/roadmap.js").read_text()
-    assert "renderDetail" in app_js and "ltFormat" in app_js
-    assert "camps[0].cur" in app_js and "ph=" in app_js
-    assert "lt-mapbox" in app_css and ".lt .detail" in app_css and ".lt .thread" in app_css
-    assert "--st-miss:#c98a6a" in app_css or "--st-miss: #c98a6a" in app_css
-    assert "[330," in roadmap_js and "top-24" in roadmap_js
-
-
 def test_docs_autoscan_md(env):
     b, p, d = env
     (d / "guide.md").write_text("Intro\n\n# Hướng dẫn đặc biệt\n\n| a | b |\n|---|---|\n| 1 | 2 |\n")
@@ -197,7 +186,7 @@ blocks:
     assert any("lane 'z'" in m for m in errs) and any("step 5" in m for m in errs)
 
 
-def test_statemachine_roadmap_validate():
+def test_statemachine_validate():
     from strata.blocks import load_doc
     sm = """title: t
 blocks:
@@ -206,22 +195,12 @@ blocks:
       initial: a
       final: b
       transitions: [[a, a, loop], [a, b]]
-  - roadmap:
-      periods: [Q1, Q2]
-      lanes: [L]
-      items: [{lane: L, text: x, from: Q1, to: Q2, status: done}]
-      milestones: [{at: Q2, text: v1}]
 """
     assert load_doc(sm)[1] == []
     bad = load_doc(sm.replace("final: b", "final: [z]").replace("tone: ok", "tone: red").replace("[a, b]]", "[a, q]]").replace("dir", "dir")
                    .replace("states: [a,", "dir: UP\n      states: [a, a,"))[1]
     for m in ("unknown state 'z'", "tone must be", "unknown state 'q'", "dir must be", "duplicate id 'a'"):
         assert any(m in x for x in bad), (m, bad)
-    bad = load_doc(sm.replace("lane: L", "lane: M").replace("to: Q2", "to: Q0").replace("done", "x").replace("at: Q2", "at: Q9"))[1]
-    for m in ("lane 'M'", "to 'Q0'", "status must be", "at 'Q9'"):
-        assert any(m in x for x in bad), (m, bad)
-    assert any("before" in x for x in load_doc(sm.replace("from: Q1", "from: Q2").replace("to: Q2", "to: Q1"))[1])
-    assert any("periods" in x for x in load_doc(sm.replace("periods: [Q1, Q2]", "periods: []"))[1])
 
 
 def test_mermaid_blocks_validate():
@@ -275,9 +254,9 @@ def test_api_items_board_fields(env):
 
 
 def test_server_has_no_write_routes():
-    """Rule 1: the only write route is POST /api/c4/edit; PUT/DELETE/PATCH are 405 stubs."""
+    """Rule 1: writes are POST /api/c4/edit, /api/project and /api/item only; PUT/DELETE/PATCH are 405 stubs."""
     src = (ROOT / "strata/server.py").read_text()
-    assert src.count("def do_POST") == 1 and "do_PUT = do_DELETE = do_PATCH = _no" in src
+    assert src.count("def do_POST") == 1 and src.count("_PATH = ") == 3 and "do_PUT = do_DELETE = do_PATCH = _no" in src
     assert "def do_PUT" not in src and "def do_DELETE" not in src and "def do_PATCH" not in src
 
 

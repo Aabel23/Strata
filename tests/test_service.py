@@ -145,3 +145,49 @@ def test_set_item_atomic(c, monkeypatch):
     monkeypatch.setattr(db, "set_item", boom)
     with pytest.raises(RuntimeError): service.set_item(c, "main", t, "doing", "high")
     assert snap() == before
+
+
+def test_delete_item(c):
+    a, b, d = (service.add_item(c, "main", "p", "task", x) for x in "abd")
+    service.dep(c, "main", a, b); service.dep(c, "main", d, a)
+    c.execute("INSERT INTO c4_link VALUES('p','obj','item',?)", (a,)); c.commit()
+    with pytest.raises(PermissionError): service.delete_item(c, "coder", a)
+    with pytest.raises(KeyError): service.delete_item(c, "main", 999)
+    service.delete_item(c, "main", a)
+    assert not c.execute("SELECT 1 FROM item WHERE id=?", (a,)).fetchone()
+    assert not c.execute("SELECT 1 FROM item_dep").fetchone() and not c.execute("SELECT 1 FROM c4_link").fetchone()
+    assert c.execute("SELECT count(*) FROM item").fetchone()[0] == 2
+    r = c.execute("SELECT after FROM audit WHERE tool='item.delete'").fetchone()
+    assert r and '"c4_links": 1' in r[0]
+
+
+def test_edit_item_all_fields(c):
+    t = service.add_item(c, "main", "p", "task", "T")
+    service.edit_item(c, "main", t, title="N", body="B", priority="high", spec={"goal": "g"})
+    r = c.execute("SELECT title,body,priority,spec FROM item WHERE id=?", (t,)).fetchone()
+    assert tuple(r)[:3] == ("N", "B", "high") and "goal" in r[3]
+
+
+def test_edit_project(c, tmp_path):
+    service.add_project(c, "q", "Q", parent="p")
+    service.edit_project(c, "q", name="Q2", root=str(tmp_path), docs_dir="docs", description="d")
+    r = c.execute("SELECT * FROM project WHERE id='q'").fetchone()
+    assert (r["name"], r["root"], r["docs_dir"], r["description"]) == ("Q2", str(tmp_path), str(tmp_path / "docs"), "d")
+    assert c.execute("SELECT 1 FROM audit WHERE tool='project.edit'").fetchone()
+    for bad in ({"parent": "q"}, {"parent": "nope"}, {"root": "rel"}, {"root": str(tmp_path / "x")}, {"name": " "}, {}):
+        with pytest.raises(ValueError): service.edit_project(c, "q", **bad)
+    with pytest.raises(ValueError): service.edit_project(c, "p", parent="q")  # cycle
+    with pytest.raises(KeyError): service.edit_project(c, "zz", name="x")
+    service.edit_project(c, "q", parent="")
+    assert c.execute("SELECT parent FROM project WHERE id='q'").fetchone()[0] is None
+
+
+def test_delete_project_backup(c, tmp_path):
+    service.add_item(c, "main", "p", "task", "T")
+    with pytest.raises(ValueError): service.delete_project(c, "p", "x")
+    assert not (tmp_path / "backups").exists()
+    service.delete_project(c, "p", "p")
+    b = list((tmp_path / "backups").iterdir()); assert len(b) == 1
+    import sqlite3
+    assert sqlite3.connect(b[0]).execute("SELECT count(*) FROM item").fetchone()[0] == 1  # backup predates the delete
+    assert not c.execute("SELECT 1 FROM project WHERE id='p'").fetchone()
