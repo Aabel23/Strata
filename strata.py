@@ -2,7 +2,7 @@
 """Strata: project knowledge in SQLite, with a C4 viewer and block pages.
 
   strata.py init [--db]
-  strata.py serve [--db] [--project P] [--port] [--host A,B] [--allow-host NAME]... viewer on http://127.0.0.1:PORT
+  strata.py serve [--db] [--project P] [--port] [--host A,B] [--allow-host NAME]... [--allow-edit|--no-edit] viewer on http://127.0.0.1:PORT
   strata.py page put|validate FILE | list [--project]
   strata.py project add ID --name N [--root --docs-dir --parent --description] | list
   strata.py doc validate FILE                     check a doc YAML (no DB)
@@ -206,7 +206,7 @@ def main(argv=None):
         for x in args: p.add_argument(*x[0], **x[1])
         return p
     add("init")
-    add("serve", (["--project"], {}), (["--port"], {"type": int, "default": 8740}), (["--host"], {"default": "127.0.0.1"}), (["--allow-host"], {"action": "append", "default": []}))
+    add("serve", (["--project"], {}), (["--port"], {"type": int, "default": 8740}), (["--host"], {"default": "127.0.0.1"}), (["--allow-host"], {"action": "append", "default": []}), (["--allow-edit"], {"dest": "allow_edit", "action": "store_const", "const": True, "default": None}), (["--no-edit"], {"dest": "allow_edit", "action": "store_const", "const": False, "default": None}))
     pg = sub.add_parser("page"); ps = pg.add_subparsers(dest="action", required=True)
     for n in ("put", "validate"):
         p = ps.add_parser(n); p.add_argument("file"); p.add_argument("--db")
@@ -274,7 +274,7 @@ def main(argv=None):
     if a.cmd == "page": return cmd_page(a)
     from strata import server
     hosts = a.host.split(",")  # vd "127.0.0.1,100.107.55.40": nghe nhiều địa chỉ
-    mk = lambda h: server.make_server(a.db, a.project, a.port, h, a.allow_host, hosts)
+    mk = lambda h: server.make_server(a.db, a.project, a.port, h, a.allow_host, hosts, allow_edit=a.allow_edit)
     try:
         srv = mk(hosts[0])
         others = [mk(h) for h in hosts[1:]]
