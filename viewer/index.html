@@ -182,9 +182,7 @@ main.info-hidden #show-info{display:block}
 #edbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:5px 12px;background:var(--bar);border-bottom:1px solid var(--line);min-width:0}
 #edbar button,#edlg button{font-size:12px;padding:3px 10px}
 #edbar button:disabled{opacity:.4;cursor:default}#edbar button:disabled:hover{border-color:var(--line)}
-#edbar .seg{display:flex}#edbar .seg button:first-child{border-radius:6px 0 0 6px}#edbar .seg button:last-child{border-radius:0 6px 6px 0;margin-left:-1px}
-#edbar button[aria-pressed=true]{background:var(--accent);color:var(--bg);border-color:var(--accent)}
-#ed-acts{display:flex;flex-wrap:wrap;gap:6px}#ed-acts[hidden]{display:none}
+#ed-acts{display:flex;flex-wrap:wrap;gap:6px}
 #ed-msg{margin-left:auto;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--muted)}#ed-msg.err{color:var(--err)}
 #edhint{position:absolute;left:50%;top:12px;transform:translateX(-50%);z-index:3;max-width:calc(100% - 24px);background:var(--accent);color:var(--bg);border-radius:6px;padding:5px 12px;font-size:12px;font-weight:600;text-align:center}
 #edhint[hidden]{display:none}
@@ -199,8 +197,7 @@ main.info-hidden #show-info{display:block}
 </head>
 <body>
 <div id="edbar" role="toolbar" aria-label="Architect editor">
-  <div class="seg" role="group" aria-label="Mode"><button id="ed-sel" aria-pressed="true">Select</button><button id="ed-edit" aria-pressed="false" title="Turn on editing">Edit</button></div>
-  <div id="ed-acts" hidden>
+  <div id="ed-acts">
     <button id="ed-addo">Add object</button><button id="ed-eo">Edit selected</button><button id="ed-do">Delete selected</button>
     <button id="ed-addl">Add link</button><button id="ed-el">Edit link</button><button id="ed-dl">Delete link</button>
   </div>
@@ -809,20 +806,18 @@ const toModel=d=>({...d.meta,objects:d.objects,connections:d.connections,flows:d
 const fetchModel=()=>fetch("/api/c4"+location.search).then(r=>r.ok?r.json():Promise.reject(r.status)).then(toModel);
 fetchModel().then(load).catch(e=>{$("#drop").textContent=e===404?"No C4 map (layered format) for this project":`Could not load model (${e}).`});
 /* task #240: Architect editor. One write route: POST /api/c4/edit; the reply carries the whole new model. */
-let edit=false, linkPick=null, dlgBack=null;
+let off="", linkPick=null, dlgBack=null;
 const KINDS=["actor","system","app","store","component","group"];
 const tree=(p=null,d=0)=>kids(p).flatMap(o=>[[o,d],...tree(o.id,d+1)]);
 const parentOpts=skip=>[["","(top level)"],...tree().filter(([o])=>!skip||(o.id!==skip&&!isAnc(skip,o.id))).map(([o,d])=>[o.id,"  ".repeat(d)+(o.name||o.id)])];
 const statusOpts=[["","(default)"],...Object.entries(SDOT).map(([k,v])=>[k,v[1]])];
 function setMsg(t,err,title){const m=$("#ed-msg");m.textContent=t;m.title=title||t;m.classList.toggle("err",!!err)}
 function updateEd(){
-  const sel=selected&&byId[selected], c=pickConn&&conns().find(x=>x.id===pickConn);
-  $("#ed-acts").hidden=!edit; $("#ed-sel").setAttribute("aria-pressed",String(!edit)); $("#ed-edit").setAttribute("aria-pressed",String(edit));
-  $("#ed-eo").disabled=$("#ed-do").disabled=!sel; $("#ed-el").disabled=$("#ed-dl").disabled=!c;
-  $("#ed-eo").title=$("#ed-do").title=sel?"":"Click a card first"; $("#ed-el").title=$("#ed-dl").title=c?"":"Click a single connection first";
+  const sel=selected&&byId[selected], c=pickConn&&conns().find(x=>x.id===pickConn), no=(ok,why)=>off||(ok?"":why);
+  for(const [id,ok,why] of [["addo",1],["addl",1],["eo",sel,"Select an object first (click a card)"],["do",sel,"Select an object first (click a card)"],["el",c,"Select a link first (click a single connection)"],["dl",c,"Select a link first (click a single connection)"]]){
+    const b=$("#ed-"+id), t=no(ok,why); b.disabled=!!t; b.title=t||b.textContent}
 }
-function setEdit(on){edit=on; if(!on) cancelPick(); updateEd()}
-$("#ed-sel").onclick=()=>setEdit(false); $("#ed-edit").onclick=()=>setEdit(true);
+function setOff(why){off=why; if(why) cancelPick(); updateEd()}
 function hint(t){const h=$("#edhint");h.hidden=!t;h.textContent=t||""}
 function cancelPick(){if(linkPick){linkPick=null;hint("");setMsg("Link cancelled")}}
 function closeDlg(keep){const ov=$("#edov"); if(!ov) return; ov.remove(); if(!keep&&dlgBack&&document.contains(dlgBack)) dlgBack.focus(); if(!keep) dlgBack=null}
@@ -866,7 +861,7 @@ async function commit(op,yes){
   if(r.ok){const w=r.d.warnings||[];
     setMsg(`Saved${w.length?` · ${w.length} new warning${w.length>1?"s":""}`:""}`,false,w.length?w.map(x=>x.message||String(x)).join("\n"):"Saved");
     await swapModel(r.d.model,op); return true}
-  if(r.status===403){closeDlg(); setEdit(false); setMsg("Editing is turned off on this server.",true); return false}
+  if(r.status===403){closeDlg(); setOff("Editing is turned off on this server."); setMsg("Editing is turned off on this server.",true); return false}
   if(r.status===400&&!yes&&/task links/i.test(r.error)){
     dlg({title:"Drop task links?",msg:r.error,ok:"Apply and drop links",okCls:"dng",onOk:()=>commit(op,true)}); return false}
   if(r.status===400&&op.op==="delete_object"&&!op.cascade&&/cascade/i.test(r.error)){
@@ -886,8 +881,8 @@ async function swapModel(d,op){
   if(selected) showObj(byId[selected]); else if(cc) showConn(cc); else deselect();
 }
 // Layer rules mirror C4-PARENT-LEVEL: which layers may hold each layer (null = top level).
-const HOLD={actor:[null],system:[null],group:[null,"group","system"],app:["system","group"],store:["system","group"],component:["app","component","group"]};
-const HOLD_TXT={actor:"An actor sits at the top level",system:"A system sits at the top level",group:"A group goes at the top level or under a group or system",app:"An app goes under a system or group",store:"A store goes under a system or group",component:"A component goes under an app, group or component"};
+const HOLD={actor:[null],system:[null],group:[null,"group","system"],app:["system"],store:["system","group"],component:["app","component","group"]};
+const HOLD_TXT={actor:"An actor sits at the top level",system:"A system sits at the top level",group:"A group goes at the top level or under a group or system",app:"An app goes under a system",store:"A store goes under a system or group",component:"A component goes under an app, group or component"};
 function objFields(o){return [
   {k:"kind",l:"Layer",t:"select",v:o?.type||"component",opts:KINDS.map(k=>[k,TYPE_LABEL[k]])},
   {k:"parent",l:"Parent",t:"select",v:"",opts:[]},
