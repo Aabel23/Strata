@@ -1,4 +1,4 @@
-"""Page/doc blocks: 12 types (8 + diagram, swimlane, statemachine, roadmap). validate() returns (errors, warnings); page_text() feeds FTS."""
+"""Page/doc blocks: 11 types (8 + diagram, swimlane, statemachine). validate() returns (errors, warnings); page_text() feeds FTS."""
 import re
 
 STATUS = ("done", "plan")
@@ -161,33 +161,9 @@ def _statemachine(b, e):
         a = x if _list(x) else [x.get("from"), x.get("to"), x.get("label")] if _dict(x) else []
         _ends(a, ids, "transitions", i, e)
 
-def _roadmap(b, e):
-    ps = b.get("periods")
-    if not _list(ps) or not ps: return e("missing 'periods' (non-empty list)")
-    ps = [str(p) for p in ps]
-    ls = b.get("lanes")
-    if ls is not None and not _list(ls): e("'lanes' must be a list")
-    ls = [str(x) for x in ls] if _list(ls) else []
-    its = b.get("items")
-    if not _list(its) or not its: return e("missing 'items'")
-    for i, it in enumerate(its):
-        w = lambda m: e(f"items[{i}]: {m}")
-        if not _dict(it): w("must be {lane?, text, from, to?, status?}"); continue
-        if not _isstr(it.get("text")): w("missing 'text'")
-        if ls and str(it.get("lane")) not in ls: w(f"lane '{it.get('lane')}' is not in lanes")
-        f, t = str(it.get("from")), it.get("to")
-        if f not in ps: w(f"from '{it.get('from')}' is not in periods")
-        if t is not None and str(t) not in ps: w(f"to '{t}' is not in periods")
-        elif t is not None and f in ps and ps.index(str(t)) < ps.index(f): w("'to' is before 'from'")
-        if "status" in it and it["status"] not in ("done", "doing", "plan", "blocked"): w("status must be done|doing|plan|blocked")
-        if "link" in it and not isinstance(it["link"], str): w("'link' must be text")
-    for i, m in enumerate(b.get("milestones") or []):
-        if not _dict(m) or not _isstr(m.get("text")): e(f"milestones[{i}]: need {{at, text}}")
-        elif str(m.get("at")) not in ps: e(f"milestones[{i}]: at '{m.get('at')}' is not in periods")
-
 CHECKS = {"md": _md, "layers": _layers, "mermaid": _mermaid, "table": _table, "legend": _legend,
           "question": _question, "c4": _c4, "query": _query, "diagram": _diagram, "swimlane": _swimlane,
-          "statemachine": _statemachine, "roadmap": _roadmap}
+          "statemachine": _statemachine}
 
 # A doc block may be written short: `- md: "text"`, `- mermaid: "code"`, `- table: {head, rows}`.
 SHORT = {"md": "text", "mermaid": "code"}

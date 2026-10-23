@@ -11,7 +11,7 @@
 <div id="shell">
   <aside id="side" aria-label="Navigation">
     <a id="brand" href="#/"><span id="moon" aria-hidden="true"></span><span class="foil">Strata</span><span id="band" aria-hidden="true"></span></a>
-    <div class="slabel">Projects</div>
+    <div class="slabel slrow"><span>Projects</span><button id="padd" class="ib" aria-label="Add project" title="Add project"></button></div>
     <div id="tree"></div>
     <div class="slabel" id="tablabel">Sections</div>
     <nav id="tabs"></nav>
@@ -40,7 +40,7 @@
     <h2>Keyboard shortcuts</h2>
     <dl>
       <dt><kbd>Ctrl K</kbd> <kbd>/</kbd></dt><dd>Search, commands</dd>
-      <dt><kbd>G</kbd> then <kbd>O T M R A L</kbd></dt><dd>Overview, Task, Roadmap, Docs, Architecture, Log</dd>
+      <dt><kbd>G</kbd> then <kbd>T R A L</kbd></dt><dd>Task, Docs, Architecture, Log</dd>
       <dt><kbd>J</kbd> <kbd>K</kbd></dt><dd>Next / previous row</dd>
       <dt><kbd>Enter</kbd></dt><dd>Open selected row</dd>
       <dt><kbd>F</kbd></dt><dd>Go to filter</dd>
@@ -54,7 +54,6 @@
 <script>var STRATA_SHELL=1</script>
 <script src="/vendor/mermaid.min.js"></script>
 <script src="/swimlane.js"></script>
-<script src="/roadmap.js"></script>
 <script src="/page.js"></script>
 <script src="/app.js"></script>
 </body>

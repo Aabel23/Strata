@@ -44,8 +44,6 @@ Hiện có: `internproj`; `project1_app` (cha internproj, root `/home/abel/proje
 | Tìm kiếm (CLI) | `$S search Q [--project P --src item\|page\|doc --limit N]` |
 | MCP server | `$S mcp --role main\|coder\|reviewer` (stdio) |
 | Gắn item vào object C4 | `$S c4 link --project P --object OBJ --item N` (gỡ: `unlink`; xem: `c4 links --project P --object OBJ`) |
-| Roadmap import | `$S roadmap import PLAN.json [--progress P.json] [--gates "G0=0;G1=1,2"] --project P --roadmap ID` (gates: khoá `"gates"` trong plan, không có thì `--gates`, không có nữa thì 0 gate; gate bỏ khỏi plan mà chưa done → rejected) |
-| Roadmap check/gate/reaccept | `$S roadmap check --project P --roadmap ID [--json]`; user: `$S roadmap gate pass G0 --project P --roadmap ID --as user [--evidence E]`; `$S roadmap reaccept STEP --project P --roadmap ID --as user` |
 | Gói ngữ cảnh task | `$S task context ID [--budget 12000]` (ticket, luật cứng, c4, đường dẫn; quá ngân sách thì cắt, cảnh báo stderr) |
 | Đọc map | `$S c4 context --project P [--object OBJ] [--max-tokens 2000]` |
 | Đọc flow | `$S c4 flow --project P` (liệt kê) / `$S c4 flow --project P --id FLOW` |

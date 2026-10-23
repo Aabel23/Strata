@@ -40,7 +40,7 @@ blocks:
         - [rejected, proposed, "main mở lại"]
   - md: |
       ## Dữ liệu
-      - Cột mới `claimed_at`, `spec` (JSON: goal, acceptance, verify, scope{touch,forbid}, open_questions; bước roadmap thêm roadmap, phase, step_key, proof); cột `scope` cũ gộp vào `spec`.
+      - Cột mới `claimed_at`, `spec` (JSON: goal, acceptance, verify, scope{touch,forbid}, open_questions); cột `scope` cũ gộp vào `spec`.
       - Bảng `item_dep(item_id, depends_on)`, kiểm vòng trong cùng transaction.
       - Mọi chuyển trạng thái: `UPDATE … WHERE status=? AND version=?`. Lịch sử và số vòng làm lại lấy từ `audit`.
       - Migration: sao lưu DB, dựng lại bảng `item` (CHECK có thêm `review`, kind thêm `step`/`gate`), dựng lại trigger FTS, `integrity_check`.

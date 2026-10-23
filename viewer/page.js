@@ -83,7 +83,7 @@ function openZoom(svg){
   if(!svg)return;closeZoom();
   const copy=svg.cloneNode(true), vb=svg.viewBox&&svg.viewBox.baseVal;
   copy.removeAttribute("style");if(vb&&vb.width){copy.setAttribute("width",Math.round(vb.width));copy.removeAttribute("height")}
-  const x=el("button","dg-zx","Đóng");x.type="button";x.onclick=closeZoom;
+  const x=el("button","dg-zx","Close");x.type="button";x.onclick=closeZoom;
   const body=el("div","dg-zbody");body.append(copy);
   zoomEl=el("div","dg-zoom");zoomEl.setAttribute("role","dialog");zoomEl.setAttribute("aria-modal","true");
   zoomEl.append(x,body);zoomEl.onclick=e=>{if(e.target===zoomEl||e.target===body)closeZoom()};
@@ -113,14 +113,14 @@ function sidePanel(d){
 }
 const detailsOf=(b,items)=>{
   const groups=items.map(n=>[(n.text||n.id).split("\n")[0],n.details]).filter(g=>g[1]&&g[1].length);
-  return groups.length?{title:b.details_title||"Bên trong các khối",groups}:null;
+  return groups.length?{title:b.details_title||"Inside the blocks",groups}:null;
 };
 function mmFigure(src,caption,defs,details){
   const fig=el("figure","dg"+(details?" dg-split":"")), canvas=el("div","dg-canvas"), bar=el("div","dg-tools");
-  const zoom=el("button","","Phóng to"), code=el("button","","Mã nguồn");zoom.type=code.type="button";
+  const zoom=el("button","","Zoom"), code=el("button","","Source");zoom.type=code.type="button";
   zoom.onclick=()=>openZoom(canvas.querySelector("svg"));
   const showSrc=()=>canvas.replaceChildren(el("pre","fallback",src));
-  code.onclick=()=>{try{navigator.clipboard.writeText(src).then(()=>{code.textContent="Đã chép";setTimeout(()=>{code.textContent="Mã nguồn"},1600)},showSrc)}catch{showSrc()}};
+  code.onclick=()=>{try{navigator.clipboard.writeText(src).then(()=>{code.textContent="Copied";setTimeout(()=>{code.textContent="Source"},1600)},showSrc)}catch{showSrc()}};
   bar.append(zoom,code);
   if(details){const main=el("div","dg-main");main.append(canvas,bar);fig.append(main,sidePanel(details))}else fig.append(canvas,bar);
   if(caption)fig.append(el("figcaption","",caption));
@@ -180,7 +180,7 @@ function query(b){
   box.append(el("code","",b.src+" "+JSON.stringify(b.where||{})));
   const ul=el("ul");box.append(ul);
   get("/api/query?"+qs).then(rows=>{
-    if(!rows.length) ul.append(el("li","","(không có dòng nào)"));
+    if(!rows.length) ul.append(el("li","","(no rows)"));
     rows.forEach(r=>ul.append(el("li","","#"+r.id+" "+r.title+" ["+r.status+"]")));
   }).catch(e=>ul.append(el("li","err",e.message)));
   return box;
@@ -191,7 +191,7 @@ function c4(b,project){
   b.ids.forEach(id=>{
     const q="/c4?project="+enc(p)+"&focus="+enc(id);
     const f=el("iframe","c4frame");f.src=q+"&embed=1";f.loading="lazy";f.title=id;
-    const a=el("a","","Mở viewer đầy đủ: "+id);a.href=q;a.target="_blank";a.rel="noopener";
+    const a=el("a","","Open full viewer: "+id);a.href=q;a.target="_blank";a.rel="noopener";
     const para=el("p");para.append(a);box.append(f,para);
   });
   return box;
@@ -208,12 +208,11 @@ const R={
   swimlane:b=>swimlane(b),
   diagram:b=>diagram(b,l=>/^https?:\/\//.test(l)?l:null),
   statemachine:b=>statemachine(b,l=>/^https?:\/\//.test(l)?l:null),
-  roadmap:b=>roadmap(b,l=>/^https?:\/\//.test(l)?l:null),
   table,
   legend:b=>{const d=el("div","legend");b.items.forEach(i=>{const c=el("span","chip "+(i.status==="plan"?"plan":"done"));c.append(el("i"),i.label);d.append(c)});return d},
   question:b=>{const d=el("div","question");d.append(el("p","q",b.q));
     b.options.forEach(o=>{const x=el("div","opt"+(o.label===b.recommend?" rec":""));
-      x.append(el("b","",o.label));if(o.note)x.append(el("span","",o.note));if(o.label===b.recommend)x.append(el("em","","Đề xuất"));d.append(x)});
+      x.append(el("b","",o.label));if(o.note)x.append(el("span","",o.note));if(o.label===b.recommend)x.append(el("em","","Recommended"));d.append(x)});
     return d},
 };
 
@@ -236,7 +235,7 @@ function renderList(){
     const t=el("table"), h=el("tr");["project","slug","kind","title","updated"].forEach(x=>h.append(el("th","",x)));t.append(h);
     ps.forEach(p=>{const tr=el("tr"),a=el("a","",p.slug);a.href="/page/"+enc(p.project)+"/"+enc(p.slug);
       const c=el("td");c.append(a);tr.append(el("td","",p.project),c,el("td","",p.kind),el("td","",p.title),el("td","",p.updated_at));t.append(tr)});
-    $app.replaceChildren(el("h1","","Pages"+(project?" · "+project:"")),ps.length?t:el("p","","Chưa có page nào."));
+    $app.replaceChildren(el("h1","","Pages"+(project?" · "+project:"")),ps.length?t:el("p","","No pages yet."));
   }).catch(e=>$app.replaceChildren(el("p","err",e.message)));
 }
 

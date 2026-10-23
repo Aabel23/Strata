@@ -3,7 +3,7 @@
    rows and edge routing are all decided here.
      swimlane:
        lanes: {Zone: [Lane, Lane], Zone2: [Lane]}   # or a plain list [Lane, Lane]
-       phases: [Tạo lời mời, Chấp nhận]             # optional; colour comes from the order
+       phases: [Create invite, Accept]             # optional; colour comes from the order
        steps:
          - {lane: Lane, text: "…"}                   # text may be a list -> bullets
          - {lane: Lane, text: "…", phase: 2, after: [1], data: [1], label: "…"}
@@ -118,7 +118,7 @@ const swimlane=(()=>{
     const add=(cls,style,label)=>{const s=document.createElement("span"), i=document.createElement("i");i.className=cls;if(style)i.style.background=style;s.append(i,label);box.append(s)};
     d.phases.forEach((p,k)=>{const ns=d.steps.filter(s=>s.phase===k).map(s=>s.n);
       add("",phColor(k),ns.length?`${p} (${ns[0]}${ns.length>1?"–"+ns[ns.length-1]:""})`:p)});
-    if(d.edges.some(e=>e.kind==="data"))add("data","","Phụ thuộc dữ liệu");
+    if(d.edges.some(e=>e.kind==="data"))add("data","","Data dependency");
     return box;
   }
 

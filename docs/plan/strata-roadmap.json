@@ -1,6 +1,0 @@
-{"version": 1, "header": {"eyebrow": "Strata", "title": "Lộ trình Strata sau đợt tự động 19/10", "lead": "Việc còn lại để dùng Strata thật trong mọi phiên."},
- "sections": [{"id": "chi-tiet", "phases": [
-  {"anchor": "phase-0", "title": "Đưa vào dùng", "steps": [
-   {"id": "0.1", "title": "Chạy thử một vòng bước roadmap qua CLI", "body": "Bước đầu tiên của strata đi todo→doing→review→done.", "proof": "audit có đủ 3 chuyển trạng thái"},
-   {"id": "0.2", "title": "User duyệt .mcp.json và cài định nghĩa vai", "body": "Xem issue #61.", "proof": "claude mcp list hiện strata Connected"},
-   {"id": "0.3", "title": "Subagent coder chạy thật qua strata-coder", "body": "Tiêu chí 1 và 4 của #17.", "proof": "audit có dòng actor coder từ MCP"}]}]}]}
