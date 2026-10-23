@@ -17,11 +17,12 @@ j = lambda v: json.dumps(v, ensure_ascii=False) if v is not None else None
 
 
 def dump(path, data):
-    """Atomic write (temp file + os.replace); skips an unchanged file. True when written."""
+    """Atomic write (temp file + os.replace); skips a file whose parsed data is unchanged (formatting ignored). True when written."""
     text = yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
     try:
-        if path.read_text(encoding="utf-8") == text: return False
-    except OSError: pass
+        old = path.read_text(encoding="utf-8")
+        if old == text or yaml.load(old, _Loader) == yaml.load(text, _Loader): return False
+    except (OSError, yaml.YAMLError): pass
     tmp = path.with_name(f".{path.name}.tmp")
     tmp.write_text(text, encoding="utf-8"); os.replace(tmp, path)
     return True

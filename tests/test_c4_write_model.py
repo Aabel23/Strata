@@ -31,3 +31,20 @@ def test_removal_touches_only_removed_file(tmp_path):
     m["contracts"] = []; m["behavior"] = {}
     assert all(c.split("/")[0] in ("contracts", "behavior") for c in L.write_model(m, d))
     assert L.load(d)[0] == m
+
+
+def _hashes(d): return {str(p.relative_to(d)): p.read_bytes() for p in d.rglob("*") if p.is_file()}
+
+
+def test_only_changed_data_rewritten(tmp_path):
+    src = tmp_path / "src"; shutil.copytree(REPO, src)
+    m, _ = L.load(src)
+    assert L.write_model(m, src) == []  # unchanged model: nothing rewritten
+    before = _hashes(src)
+    m["objects"].append({"id": "zz_new", "parent": m["objects"][0]["id"], "kind": "module", "name": "New"})
+    assert L.write_model(m, src) == ["map.yaml"]
+    after = _hashes(src)
+    assert {k for k in after if after[k] != before[k]} == {"map.yaml"}
+    m["contracts"][0]["transport"] = "changed-transport"
+    stem = m["contracts"][0]["id"].partition(".")[0]
+    assert L.write_model(m, src) == [f"contracts/{stem}.yaml"]
