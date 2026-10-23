@@ -455,7 +455,7 @@ async function boardView(box,p,id){
 }
 /* ---------- task write forms: add / edit / delete ---------- */
 const PRIS=["p0","p1","p2","p3"], KINDS_ADD=["task","issue","step","gate","rule","knowledge","draft","note"];
-const lines=v=>v.split("\n").map(x=>x.trim()).filter(Boolean);
+const splitLines=v=>v.split("\n").map(x=>x.trim()).filter(Boolean);
 const ta=(label,id,rows,val,ph)=>{const t=el("textarea");t.rows=rows;t.value=val||"";return field(label,id,ph?{placeholder:ph,autocomplete:"off"}:null,t)};
 const selField=(label,id,opts,cur)=>{const s=el("select");opts.forEach(o=>s.append(new Option(o||"none",o)));if(cur&&!opts.includes(cur))s.append(new Option(cur,cur));s.value=cur||"";return field(label,id,null,s)};
 const val=f=>f.lastChild.value;
@@ -471,7 +471,7 @@ function taskForm(p,d){
   const touch=ta("Scope: may touch (one per line)","tto",2,(sc.touch||[]).join("\n")), forb=ta("Scope: must not touch (one per line)","tf",2,(sc.forbid||[]).join("\n"));
   const deps=field("Needs (task ids, comma separated)","tdp",{autocomplete:"off",placeholder:"e.g. 12, 15"});deps.lastChild.value=need0.join(", ");
   const row=(...f)=>{const r=el("div","prow");r.append(...f);return r};
-  const spec=()=>{const o={...sp,goal:val(goal).trim(),acceptance:lines(val(ac)),verify:val(ver).trim(),scope:{...sc,touch:lines(val(touch)),forbid:lines(val(forb))}};return o};
+  const spec=()=>{const o={...sp,goal:val(goal).trim(),acceptance:splitLines(val(ac)),verify:val(ver).trim(),scope:{...sc,touch:splitLines(val(touch)),forbid:splitLines(val(forb))}};return o};
   const hasSpec=()=>val(goal).trim()||val(ac).trim()||val(ver).trim()||val(touch).trim()||val(forb).trim();
   return dialog(d?"Edit #"+d.id:"Add task",[title,row(...(d?[]:[kind]),st,pr),body,goal,ac,ver,row(touch,forb),deps],(dlg,fail)=>{
     dlg.classList.add("pwide");
