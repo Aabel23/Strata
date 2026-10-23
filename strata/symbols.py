@@ -135,3 +135,41 @@ def resolves(c, project, root, sym):
     st = f.stat(); row = c.execute("SELECT mtime, size FROM file WHERE project=? AND path=?", (project, path)).fetchone()
     if not row or (row["mtime"], row["size"]) != (st.st_mtime, st.st_size): return None
     return c.execute("SELECT 1 FROM symbol WHERE project=? AND id=?", (project, sym)).fetchone() is not None
+
+
+def file_outline(c, project, root, rel):
+    """Data for one file: {path, loc, symbols[], error}. Raises ValueError (outside root) / FileNotFoundError; parse problems go in `error`."""
+    path = norm(rel); f = path and inside(root, path)
+    if not f: raise ValueError("path outside root")
+    if not f.is_file(): raise FileNotFoundError(path)
+    data = f.read_bytes(); out = {"path": path, "loc": len(data.decode("utf-8", "replace").splitlines()), "symbols": [], "error": None}
+    if f.suffix != ".py": return out
+    try: ast.parse(data.decode("utf-8"))
+    except UnicodeDecodeError: out["error"] = "not UTF-8"; return out
+    except (SyntaxError, ValueError): out["error"] = "syntax error"; return out
+    refresh(c, project, root, path)
+    out["symbols"] = [{"id": r["id"], "kind": r["kind"], "name": r["name"], "parent_id": r["parent_id"], "signature": r["signature"], "start": r["start_line"],
+                       "end": r["end_line"], "visibility": r["visibility"], "doc1": r["doc1"]}
+                      for r in c.execute("SELECT * FROM symbol WHERE project=? AND file=? ORDER BY start_line, id", (project, path))]
+    return out
+
+
+def source_of(c, project, root, sid, ctx=0):
+    """Like show() but data: {id, path, start, end, text, cut}. ValueError bad id / outside root, FileNotFoundError, KeyError unknown symbol."""
+    path, _, qual = sid.partition("::")
+    if not qual: raise ValueError("expected path::Qual.name")
+    path = norm(path); f = path and inside(root, path)
+    if not f: raise ValueError("path outside root")
+    sid = f"{path}::{qual}"
+    if not f.is_file(): raise FileNotFoundError(path)
+    if not refresh(c, project, root, path): raise ValueError(f"{path}: not a Python file")
+    r = c.execute("SELECT * FROM symbol WHERE project=? AND id=?", (project, sid)).fetchone()
+    if not r:
+        cand = c.execute("SELECT id FROM symbol WHERE project=? AND name=?", (project, qual.rsplit(".", 1)[-1])).fetchall()
+        raise KeyError(f"no {sid}" + "".join(f"; candidate: {x[0]}" for x in cand))
+    try: src = f.read_text(encoding="utf-8").split("\n")
+    except UnicodeDecodeError: raise ValueError(f"{path}: not UTF-8")
+    a, b = max(1, r["start_line"] - ctx), min(len(src), r["end_line"] + ctx)
+    cut = b - a + 1 > CAP
+    if cut: b = a + CAP - 1
+    return {"id": sid, "path": path, "start": a, "end": b, "text": "\n".join(src[a - 1:b]), "cut": cut}

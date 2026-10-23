@@ -78,3 +78,27 @@ def test_alias_like_and_non_utf8(idx, monkeypatch):
     assert S.show(c, "p", root, "pkg/lat.py::z")[1] is False       # latin-1 file: no symbols, no raise
     def boom(*a, **k): raise UnicodeDecodeError("utf-8", b"\xe9", 0, 1, "x")   # file turns non-UTF-8 between refresh and read
     monkeypatch.setattr(pathlib.Path, "read_text", boom); t, ok = S.show(c, "p", root, "pkg/a.py::A.m"); assert not ok and "UTF-8" in t
+
+
+def test_file_outline_and_source_of(tmp_path):
+    root = tmp_path / "proj"; root.mkdir(); c = S.connect(tmp_path / "t.symbols.db")
+    (root / "a.py").write_text("class A:\n    def m(self):\n        return 1\n    class N:\n        def k(self): pass\n")
+    (root / "empty.py").write_text("x = 1\n"); (root / "bad.py").write_text("def (:\n")
+    (root / "latin.py").write_bytes(b"x = '\xe9'\n"); (root / "n.txt").write_text("a\nb\n")
+    (root / "long.py").write_text("def big():\n" + "    pass\n" * 250)
+    o = S.file_outline(c, "p", root, "./a.py"); s = {x["id"]: x for x in o["symbols"]}
+    assert o["path"] == "a.py" and o["loc"] == 5 and o["error"] is None and [x["start"] for x in o["symbols"]] == [1, 2, 4, 5]
+    assert s["a.py::A.N.k"]["parent_id"] == "a.py::A.N" and s["a.py::A.N"]["parent_id"] == "a.py::A" and s["a.py::A"]["parent_id"] is None
+    assert S.file_outline(c, "p", root, "empty.py") == {"path": "empty.py", "loc": 1, "symbols": [], "error": None}
+    assert S.file_outline(c, "p", root, "bad.py")["error"] == "syntax error" and S.file_outline(c, "p", root, "bad.py")["symbols"] == []
+    o = S.file_outline(c, "p", root, "latin.py"); assert o["error"] == "not UTF-8" and o["loc"] == 1 and o["symbols"] == []
+    assert S.file_outline(c, "p", root, "n.txt") == {"path": "n.txt", "loc": 2, "symbols": [], "error": None}
+    for bad in ("../x.py", "/etc/passwd"):
+        with pytest.raises(ValueError): S.file_outline(c, "p", root, bad)
+    with pytest.raises(FileNotFoundError): S.file_outline(c, "p", root, "nope.py")
+    r = S.source_of(c, "p", root, "a.py::A.m"); assert r == {"id": "a.py::A.m", "path": "a.py", "start": 2, "end": 3, "text": "    def m(self):\n        return 1", "cut": False}
+    assert S.source_of(c, "p", root, "a.py::A.m", ctx=1)["start"] == 1
+    r = S.source_of(c, "p", root, "long.py::big"); assert r["cut"] and r["end"] - r["start"] + 1 == S.CAP and r["text"].count("\n") == S.CAP - 1
+    with pytest.raises(KeyError, match="candidate: a.py::A.m"): S.source_of(c, "p", root, "a.py::B.m")
+    with pytest.raises(ValueError): S.source_of(c, "p", root, "a.py")
+    with pytest.raises(ValueError): S.source_of(c, "p", root, "../a.py::x")
