@@ -840,7 +840,7 @@ const fetchModel=()=>fetch("/api/c4"+location.search).then(r=>r.ok?r.json():Prom
 fetchModel().then(load).catch(e=>{$("#drop").textContent=e===404?"No C4 map (layered format) for this project":`Could not load model (${e}).`});
 /* task #249: Code panel. Read-only: GET /api/code/{files,symbols,src}. All server text goes in through textContent. */
 let C=null, codeBooted=false;
-const hashParts=()=>{let h=location.hash.slice(1);try{h=decodeURIComponent(h)}catch{}const m=/^([^/]*)\/code(?:\/(.*))?$/.exec(h);return m?{obj:m[1],code:true,sym:m[2]||""}:{obj:h,code:false,sym:""}};
+const hashParts=()=>{let h=location.hash.slice(1);try{h=decodeURIComponent(h)}catch{}const i=h.indexOf("/"),t=h.slice(i+1);return i>=0&&(t==="code"||t.startsWith("code/"))?{obj:h.slice(0,i),code:true,sym:t.slice(5)}:{obj:h,code:false,sym:""}};
 const mk=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e};
 async function codeApi(kind,params){
   const q=new URLSearchParams(params); if(P.get("project")) q.set("project",P.get("project"));
