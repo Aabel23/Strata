@@ -1,19 +1,44 @@
 # Endo
 
-> **Endoskeleton framework for AI coding agents.**
+> **Endoskeleton framework for Hierarchical Multi-Agent Systems & Tree-sitter Repo Map Engine.**
 
-Endo là nền tảng khung xương (backbone / scaffolding framework) định hình toàn bộ hệ thống agent:
-- **Code Intelligence**: Bóc tách cấu trúc AST bằng Tree-sitter, tạo Repo Map/Skeleton (rút gọn 90%+ token) thay vì nạp cả codebase.
-- **Surgical Tools**: Bộ công cụ tìm kiếm và bóc tách chính xác (ripgrep, file slicer) để agent tra cứu đúng dòng code khi cần.
-- **Agent Kernel**: Bộ điều phối luồng suy nghĩ, lắp ráp prompt tối ưu và thực thi tool loop.
-- **State & Cache**: Lưu trữ trạng thái phiên làm việc và cache AST băm vào SQLite.
+Endo là nền tảng khung xương (backbone framework) kết hợp giữa:
+1. **Tree-sitter Repo Map Engine**: Động cơ bóc tách AST, tính PageRank trọng số ký hiệu để tạo Repo Map đa tầng (Macro Map cho Orchestrator, Local Map cho Area Lead) nhằm tối ưu triệt để token context.
+2. **Hierarchical Multi-Agent Architecture**: Hệ thống agent phân tầng kim tự tháp (Orchestrator $\rightarrow$ Area Lead $\rightarrow$ Coder $\rightarrow$ Verifier) giúp cô lập phạm vi tác vụ (Strict Context Scoping), loại bỏ xung đột ghi file và ảo giác khi làm việc với codebase lớn.
 
-## Cấu trúc kiến trúc C4 (Strata)
+---
 
-Kiến trúc dự án được quản lý trực tiếp qua Strata tại `docs/c4/`:
-- `map.yaml`: Định nghĩa các tầng System, App, Component và Link kết nối.
+## 🏛️ Kiến trúc C4 (Strata)
 
-Kiểm tra và import bản đồ C4:
+Hệ thống được thiết kế theo mô hình DAG sạch (11 objects, 12 links) tại [`docs/c4/map.yaml`](docs/c4/map.yaml):
+
+```text
+User (Chat)
+  │ WS prompt
+  ▼
+chat (Chat Interface / Gateway)
+  │ IPC task
+  ▼
+orchestrator (Root Orchestrator - Nắm C4 & Macro Repo Map)
+  │
+  ├──> repo_engine (Tree-sitter AST & Multi-tier Skeletonizer)
+  │      └──> fs (Target Codebase scan)
+  │
+  ├──> area_lead (Subsystem Specialist - Nắm Local Map & Fault Localization)
+  │      │
+  │      ├──> repo_engine (Trích xuất Local Repo Map của thư mục được giao)
+  │      │
+  │      ├──> coder (Micro-Agent - Sửa code phẫu thuật với Mini-Context <2k tokens)
+  │      │      └──> fs (Ghi file patch bị giới hạn phạm vi)
+  │      │
+  │      └──> verifier (Gatekeeper - Chạy test cô lập trước khi merge)
+  │             └──> fs (Chạy test suite tự động)
+  │
+  ├──> llm (Frontier LLM - Claude, Gemini, OpenAI)
+  └──> store (SQLite Task Queue, Session Memory & AST Cache)
+```
+
+Kiểm tra và import bản đồ C4 vào Strata:
 ```bash
 python3 ../strata/strata.py c4 validate docs/c4
 python3 ../strata/strata.py c4 import docs/c4 --project endo --yes
