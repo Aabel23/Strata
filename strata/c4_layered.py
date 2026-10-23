@@ -257,6 +257,22 @@ def coverage(owns_by_object, root):
     return out
 
 
+FILE_CAP = 2000
+
+
+def component_files(c, project, object_id):
+    """{object, root, files: [{path, exists}], missing, truncated}: code files owned by one object; KeyError if project/object unknown."""
+    meta = c.execute("SELECT root FROM c4_meta WHERE project=?", (project,)).fetchone()
+    if not meta: raise KeyError(f"unknown project or no C4 map: {project}")
+    o = c.execute("SELECT owns FROM c4_object WHERE project=? AND id=?", (project, object_id)).fetchone()
+    if not o: raise KeyError(f"unknown object {object_id} in project {project}")
+    root = meta["root"]
+    ents = _expand({object_id: json.loads(o["owns"]) if o["owns"] else []}, root).get(object_id, {})
+    fs = sorted(f for f in set().union(*ents.values()) if pathlib.PurePath(f).suffix in CODE_EXT)
+    return {"object": object_id, "root": str(root), "files": [{"path": f, "exists": True} for f in fs[:FILE_CAP]],
+            "missing": [e for e, v in ents.items() if not v], "truncated": len(fs) > FILE_CAP}
+
+
 def _owns_findings(objs, root):
     ex, out, by_file = _expand({i: o.get("owns") for i, o in objs.items()}, root), [], {}
     for oid, ents in ex.items():
