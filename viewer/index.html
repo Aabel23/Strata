@@ -173,14 +173,39 @@ main.info-hidden #show-info{display:block}
 .ehead{display:flex;justify-content:space-between;align-items:center}.ehead button{font-size:12px}
 .clist div{padding:3px 0;cursor:pointer}.clist div:hover{color:var(--accent)}.clist .m{color:var(--muted);font-size:12px}
 .pbody ol,.pbody ul.r{margin:4px 0;padding-left:18px}
-.embed{grid-template-rows:1fr}
+.embed{grid-template-rows:auto 1fr}
 .embed #top,.embed #sub,.embed #tools{display:none}
 .embed main{grid-template-columns:minmax(0,1fr) var(--info-width,320px)}
 .shell{grid-template-rows:auto 1fr}.shell #top{display:none}
 @media (max-width:760px){main{grid-template-columns:1fr;grid-template-rows:1fr 42vh}main.info-hidden{grid-template-columns:1fr;grid-template-rows:1fr}#tools{display:none}aside{border-left:0;border-top:1px solid var(--line)}#info-resize{display:none}#show-info{top:auto;bottom:8px}}
+/* task #240: Architect editor (toolbar, dialog) */
+#edbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:5px 12px;background:var(--bar);border-bottom:1px solid var(--line);min-width:0}
+#edbar button,#edlg button{font-size:12px;padding:3px 10px}
+#edbar button:disabled{opacity:.4;cursor:default}#edbar button:disabled:hover{border-color:var(--line)}
+#edbar .seg{display:flex}#edbar .seg button:first-child{border-radius:6px 0 0 6px}#edbar .seg button:last-child{border-radius:0 6px 6px 0;margin-left:-1px}
+#edbar button[aria-pressed=true]{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+#ed-acts{display:flex;flex-wrap:wrap;gap:6px}#ed-acts[hidden]{display:none}
+#ed-msg{margin-left:auto;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--muted)}#ed-msg.err{color:var(--err)}
+#edhint{position:absolute;left:50%;top:12px;transform:translateX(-50%);z-index:3;max-width:calc(100% - 24px);background:var(--accent);color:var(--bg);border-radius:6px;padding:5px 12px;font-size:12px;font-weight:600;text-align:center}
+#edhint[hidden]{display:none}
+#edov{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.45);display:grid;place-items:center;padding:16px}
+#edlg{width:min(420px,100%);max-height:100%;overflow:auto;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.4);-webkit-user-select:text;user-select:text}
+#edlg h3{margin:0 0 8px;font-size:15px}#edlg .edmsg{margin:0 0 10px;white-space:pre-wrap;color:var(--muted)}
+#edlg input,#edlg select,#edlg textarea{display:block;width:100%;margin:2px 0 10px;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font:inherit}
+#edlg .eferr{white-space:pre-wrap;margin:0 0 8px}#edlg .lbl{margin-top:0}
+#edbar .pri,#edlg .pri{background:var(--accent);color:var(--bg);border-color:var(--accent)}#edlg .dng{background:var(--err);color:#fff;border-color:var(--err)}
+#edbar button:focus-visible,#edlg button:focus-visible,#edlg input:focus-visible,#edlg select:focus-visible,#edlg textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 </style>
 </head>
 <body>
+<div id="edbar" role="toolbar" aria-label="Architect editor">
+  <div class="seg" role="group" aria-label="Mode"><button id="ed-sel" aria-pressed="true">Select</button><button id="ed-edit" aria-pressed="false" title="Turn on editing">Edit</button></div>
+  <div id="ed-acts" hidden>
+    <button id="ed-addo">Add object</button><button id="ed-eo">Edit selected</button><button id="ed-do">Delete selected</button>
+    <button id="ed-addl">Add link</button><button id="ed-el">Edit link</button><button id="ed-dl">Delete link</button>
+  </div>
+  <span id="ed-msg" role="status" aria-live="polite"></span>
+</div>
 <header id="top">
   <div class="logo">S</div>
   <a id="home" href="/">← Strata</a><span class="tab">MODEL</span><span class="tab on">DIAGRAMS</span>
@@ -199,6 +224,7 @@ main.info-hidden #show-info{display:block}
   </div>
   <div id="stage">
     <div id="drop">Loading model…</div>
+    <div id="edhint" role="status" hidden></div>
     <details id="legend" open><summary>Legend</summary><div class="lg" id="lgbody"></div></details>
     <button id="flat" title="Show every card (except functions) on one map">All</button>
     <div id="bottom">
@@ -395,8 +421,8 @@ function render(keepCam,keepOld){
   $("#stage").insertAdjacentHTML("afterbegin",s+"</g></svg>");
   if(!keepCam) fit(); else applyCam();
   $("#stage").querySelectorAll(".node").forEach(el=>{
-    el.onclick=ev=>{if(ev.target.closest(".zbtn")) return go(el.dataset.id); selected=el.dataset.id;showObj(byId[selected]);paint()};
-    el.ondblclick=()=>{if(kids(el.dataset.id).length)go(el.dataset.id)};
+    el.onclick=ev=>{if(linkPick) return linkPicked(el.dataset.id); if(ev.target.closest(".zbtn")) return go(el.dataset.id); selected=el.dataset.id;showObj(byId[selected]);paint()};
+    el.ondblclick=()=>{if(linkPick)return;if(kids(el.dataset.id).length)go(el.dataset.id)};
   });
   paint();
   $("#stage").querySelectorAll(".edge").forEach(el=>el.onclick=()=>{if(el.dataset.c){const c=conns().find(x=>x.id===el.dataset.c);if(c)showConn(c)}else showEdge(edges.get(el.dataset.e),el.dataset.e)});
@@ -445,6 +471,7 @@ function paint(){
   const dimAll=!!selected||pk.size>0;
   document.querySelectorAll("#stage>svg:not(.old) .node").forEach(el=>{el.classList.toggle("sel",el.dataset.id===selected);el.classList.toggle("fade",dimAll&&!rel.has(el.dataset.id))});
   document.querySelectorAll("#stage>svg:not(.old) .edge").forEach(el=>{el.classList.toggle("rel",relE.has(el.dataset.e));el.classList.toggle("pick",el.dataset.c?el.dataset.c===pickConn||(!pickConn&&pk.has(el.dataset.e)):pk.has(el.dataset.e));el.classList.toggle("fade",dimAll&&!relE.has(el.dataset.e)&&!pk.has(el.dataset.e))});
+  updateEd();
 }
 function deselect(){const open=selected||$("#pinfo").dataset.open;delete $("#pinfo").dataset.step;selected=null;pickConn=null;pickEdge=null;delete $("#pinfo").dataset.open;$("#pinfo").innerHTML=EMPTY;paint();return !!open}
 function go(F,replace){
@@ -745,7 +772,8 @@ $("#q").onchange=e=>{
 };
 $("#theme").onclick=()=>{const r=document.documentElement;r.dataset.theme=r.dataset.theme==="light"?"dark":"light";try{localStorage.setItem("strata-theme",r.dataset.theme)}catch{}};
 try{const t=localStorage.getItem("strata-theme");if(t)document.documentElement.dataset.theme=t}catch{}
-document.onkeydown=e=>{if(!M||e.target.tagName==="SELECT"||e.target.tagName==="INPUT")return;
+document.onkeydown=e=>{if(e.key==="Escape"&&linkPick){cancelPick();return}
+  if(!M||e.target.tagName==="SELECT"||e.target.tagName==="INPUT")return;
   if(e.altKey&&e.key==="ArrowLeft")return history.back(); if(e.altKey&&e.key==="ArrowRight")return history.forward();
   if(e.key==="Escape"){if(!deselect()&&focus)go(par(focus))}
   if(e.key==="Enter"&&selected&&kids(selected).length&&!e.target.closest("button,summary"))go(selected);
@@ -777,9 +805,116 @@ $("#home").href="/#/p/"+encodeURIComponent(P.get("project")||"")+"/c4";
 if(window.top===window){location.replace("/#/p/"+encodeURIComponent(P.get("project")||"")+"/c4"+location.hash.replace(/^#(.+)/,"/$1"))}
 document.body.classList.add("embed");
 if(P.get("shell")) document.body.classList.add("shell");
-const fetchModel=()=>fetch("/api/c4"+location.search).then(r=>r.ok?r.json():Promise.reject(r.status))
-  .then(d=>({...d.meta,objects:d.objects,connections:d.connections,flows:d.flows,links:d.links,open_issues:d.open_issues,layered:d.layered,contracts:d.contracts,behavior:d.behavior}));
+const toModel=d=>({...d.meta,objects:d.objects,connections:d.connections,flows:d.flows,links:d.links,open_issues:d.open_issues,layered:d.layered,contracts:d.contracts,behavior:d.behavior});
+const fetchModel=()=>fetch("/api/c4"+location.search).then(r=>r.ok?r.json():Promise.reject(r.status)).then(toModel);
 fetchModel().then(load).catch(e=>{$("#drop").textContent=e===404?"No C4 map (layered format) for this project":`Could not load model (${e}).`});
+/* task #240: Architect editor. One write route: POST /api/c4/edit; the reply carries the whole new model. */
+let edit=false, linkPick=null, dlgBack=null;
+const KINDS=["actor","system","app","store","component","group"];
+const tree=(p=null,d=0)=>kids(p).flatMap(o=>[[o,d],...tree(o.id,d+1)]);
+const parentOpts=skip=>[["","(top level)"],...tree().filter(([o])=>!skip||(o.id!==skip&&!isAnc(skip,o.id))).map(([o,d])=>[o.id,"  ".repeat(d)+(o.name||o.id)])];
+const statusOpts=[["","(default)"],...Object.entries(SDOT).map(([k,v])=>[k,v[1]])];
+function setMsg(t,err,title){const m=$("#ed-msg");m.textContent=t;m.title=title||t;m.classList.toggle("err",!!err)}
+function updateEd(){
+  const sel=selected&&byId[selected], c=pickConn&&conns().find(x=>x.id===pickConn);
+  $("#ed-acts").hidden=!edit; $("#ed-sel").setAttribute("aria-pressed",String(!edit)); $("#ed-edit").setAttribute("aria-pressed",String(edit));
+  $("#ed-eo").disabled=$("#ed-do").disabled=!sel; $("#ed-el").disabled=$("#ed-dl").disabled=!c;
+  $("#ed-eo").title=$("#ed-do").title=sel?"":"Click a card first"; $("#ed-el").title=$("#ed-dl").title=c?"":"Click a single connection first";
+}
+function setEdit(on){edit=on; if(!on) cancelPick(); updateEd()}
+$("#ed-sel").onclick=()=>setEdit(false); $("#ed-edit").onclick=()=>setEdit(true);
+function hint(t){const h=$("#edhint");h.hidden=!t;h.textContent=t||""}
+function cancelPick(){if(linkPick){linkPick=null;hint("");setMsg("Link cancelled")}}
+function closeDlg(keep){const ov=$("#edov"); if(!ov) return; ov.remove(); if(!keep&&dlgBack&&document.contains(dlgBack)) dlgBack.focus(); if(!keep) dlgBack=null}
+// Modal form. fields: [{k,l,t:"text"|"area"|"select",v,opts}]. onOk(values) resolves true (close), false (handled) or an error string (shown inline).
+function dlg({title,msg,fields=[],ok,okCls="pri",onOk}){
+  if(!$("#edov")) dlgBack=document.activeElement;
+  closeDlg(true);
+  const ov=document.createElement("div"); ov.id="edov";
+  const fh=fields.map(f=>{const id="ef-"+f.k; let c;
+    if(f.t==="select") c=`<select id="${id}">${f.opts.map(([v,l])=>`<option value="${esc(v)}"${v===f.v?" selected":""}>${esc(l)}</option>`).join("")}</select>`;
+    else if(f.t==="area") c=`<textarea id="${id}" rows="3">${esc(f.v)}</textarea>`;
+    else c=`<input type="text" id="${id}" value="${esc(f.v)}" autocomplete="off">`;
+    return `<label for="${id}" class="lbl">${esc(f.l)}</label>${c}`}).join("");
+  ov.innerHTML=`<form id="edlg" role="dialog" aria-modal="true" aria-labelledby="edt"><h3 id="edt">${esc(title)}</h3>${msg?'<p class="edmsg"></p>':""}${fh}<div class="eferr" id="ederr" role="alert"></div><div class="efbtns"><button type="submit" id="edok" class="${okCls}">${esc(ok)}</button><button type="button" id="edno">Cancel</button></div></form>`;
+  if(msg) ov.querySelector(".edmsg").textContent=msg;
+  document.body.append(ov);
+  const form=ov.firstChild, okb=$("#edok");
+  form.onsubmit=async e=>{e.preventDefault(); const v={}; fields.forEach(f=>v[f.k]=$("#ef-"+f.k).value.trim());
+    okb.disabled=true; const r=await onOk(v); okb.disabled=false;
+    if(r!==true&&okb.isConnected) okb.focus(); // disabling dropped focus; keep Esc and Tab inside the dialog
+    if(r===true) closeDlg(); else if(typeof r==="string"){const er=$("#ederr"); if(er) er.textContent=r}};
+  $("#edno").onclick=()=>closeDlg();
+  ov.onclick=e=>{if(e.target===ov) closeDlg()};
+  ov.onkeydown=e=>{e.stopPropagation(); // keep the diagram's shortcuts out of the form
+    if(e.key==="Escape"){e.preventDefault();closeDlg()}
+    else if(e.key==="Tab"){const f=[...ov.querySelectorAll("input,select,textarea,button:not(:disabled)")],i=f.indexOf(document.activeElement);
+      if(e.shiftKey&&i<=0){e.preventDefault();f[f.length-1].focus()}else if(!e.shiftKey&&i===f.length-1){e.preventDefault();f[0].focus()}}};
+  (ov.querySelector("input,select,textarea")||okb).focus();
+}
+async function send(op){
+  const q=P.get("project")?"?project="+encodeURIComponent(P.get("project")):"";
+  try{const r=await fetch("/api/c4/edit"+q,{method:"POST",headers:{"Content-Type":"application/json","X-Strata-Edit":"1"},body:JSON.stringify(op)});
+    const d=await r.json().catch(()=>({}));
+    return r.ok?{ok:true,d}:{status:r.status,error:d.error||`Server answered ${r.status}`};
+  }catch(e){return {status:0,error:"Could not reach the server."}}
+}
+// true = saved; string = error to show inline; false = another confirm took over
+async function commit(op,yes){
+  const r=await send(yes?{...op,yes:true}:op);
+  if(r.ok){const w=r.d.warnings||[];
+    setMsg(`Saved${w.length?` · ${w.length} new warning${w.length>1?"s":""}`:""}`,false,w.length?w.map(x=>x.message||String(x)).join("\n"):"Saved");
+    await swapModel(r.d.model,op); return true}
+  if(r.status===403){closeDlg(); setEdit(false); setMsg("Editing is turned off on this server.",true); return false}
+  if(r.status===400&&!yes&&/task links/i.test(r.error)){
+    dlg({title:"Drop task links?",msg:r.error,ok:"Apply and drop links",okCls:"dng",onOk:()=>commit(op,true)}); return false}
+  if(r.status===400&&op.op==="delete_object"&&!op.cascade&&/cascade/i.test(r.error)){
+    dlg({title:"Delete everything under it?",msg:r.error,ok:"Delete with everything under it",okCls:"dng",onOk:()=>commit({...op,cascade:true},yes)}); return false}
+  setMsg(r.error,true); return r.error;
+}
+// Replace the model and redraw, keeping level, selection, flow and zoom where they still exist.
+async function swapModel(d,op){
+  const before=new Set(Object.keys(byId)), sel=selected, pc=pickConn, c={...cam}, fl=flow, st=step;
+  load(toModel(d));
+  const nid=op.op==="add_object"&&(M.objects||[]).map(o=>o.id).find(i=>!before.has(i));
+  if(nid){await go(byId[nid].parent||null); selected=nid; showObj(byId[nid]); render(true); return}
+  if(sel&&byId[sel]) selected=sel;
+  cam=c; render(true);
+  if(fl&&(M.flows||[]).some(x=>x.id===fl)){flow=fl;$("#flow").value=fl;setStep(st);return}
+  const cc=pc&&conns().find(x=>x.id===pc);
+  if(selected) showObj(byId[selected]); else if(cc) showConn(cc); else deselect();
+}
+function objFields(o){return [
+  {k:"name",l:"Name",v:o?.name||""},
+  {k:"kind",l:"Kind",t:"select",v:o?.type||"component",opts:KINDS.map(k=>[k,TYPE_LABEL[k]])},
+  {k:"parent",l:"Parent",t:"select",v:o?o.parent||"":(selected&&byId[selected]?selected:focus||""),opts:parentOpts(o?.id)},
+  {k:"tech",l:"Tech",v:o?.tech||""},
+  {k:"summary",l:"Summary",t:"area",v:o?.description||""},
+  ...(o?[{k:"status",l:"Status",t:"select",v:o.status||"",opts:statusOpts}]:[])]}
+$("#ed-addo").onclick=()=>dlg({title:"Add object",fields:objFields(),ok:"Add",onOk:v=>{
+  if(!v.name) return "Name is required.";
+  const op={op:"add_object",name:v.name,kind:v.kind}; ["parent","tech","summary"].forEach(k=>{if(v[k])op[k]=v[k]}); return commit(op)}});
+$("#ed-eo").onclick=()=>{const o=byId[selected]; if(!o) return;
+  dlg({title:"Edit "+(o.name||o.id),fields:objFields(o),ok:"Save",onOk:v=>{
+    if(!v.name) return "Name is required.";
+    return commit({op:"update_object",id:o.id,set:{name:v.name,kind:v.kind,parent:v.parent||null,tech:v.tech||null,summary:v.summary||null,status:v.status||null}})}})};
+$("#ed-do").onclick=()=>{const o=byId[selected]; if(!o) return;
+  dlg({title:"Delete object?",msg:`Delete "${o.name||o.id}"? The server refuses if it has children or links, and then offers to delete them too.`,ok:"Delete",okCls:"dng",onOk:()=>commit({op:"delete_object",id:o.id})})};
+$("#ed-addl").onclick=()=>{linkPick={from:null};hint("Add link: click the object the link starts from. Esc cancels.");setMsg("")};
+function linkPicked(id){
+  if(!linkPick.from){linkPick.from=id;hint(`From ${nm(id)}. Now click the object it points to. Esc cancels.`);return}
+  const from=linkPick.from; linkPick=null; hint("");
+  dlg({title:"Add link",msg:`${nm(from)} → ${nm(id)}`,fields:[{k:"name",l:"Name",v:""},{k:"summary",l:"Summary",t:"area",v:""}],ok:"Add link",onOk:v=>{
+    if(!v.name) return "Name is required.";
+    return commit({op:"add_link",from,to:id,name:v.name,...(v.summary?{summary:v.summary}:{})})}});
+}
+const curLink=()=>pickConn&&conns().find(x=>x.id===pickConn);
+$("#ed-el").onclick=()=>{const c=curLink(); if(!c) return;
+  dlg({title:"Edit link",msg:`${nm(c.from)} → ${nm(c.to)}`,fields:[{k:"name",l:"Name",v:c.name||""},{k:"summary",l:"Summary",t:"area",v:c.description||""},{k:"status",l:"Status",t:"select",v:c.status||"",opts:statusOpts}],ok:"Save",onOk:v=>{
+    if(!v.name) return "Name is required.";
+    return commit({op:"update_link",id:c.id,set:{name:v.name,summary:v.summary||null,status:v.status||null}})}})};
+$("#ed-dl").onclick=()=>{const c=curLink(); if(!c) return;
+  dlg({title:"Delete link?",msg:`Delete "${c.name||"connection"}" (${nm(c.from)} → ${nm(c.to)})?`,ok:"Delete",okCls:"dng",onOk:()=>commit({op:"delete_link",id:c.id})})};
 /* live: after a `c4 import` (or a linked task/issue change) reload the model and stay on the same level, flow and step */
 {let ver=null;const live=async()=>{
   if(document.hidden||busy||drag)return;
