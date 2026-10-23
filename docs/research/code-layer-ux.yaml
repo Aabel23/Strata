@@ -1,0 +1,87 @@
+title: How other tools show the code level, and what Strata builds
+summary: Survey of how architecture tools and code explorers display files, classes and functions below a component, and the derived, read-only code level chosen for Strata's Architect view.
+code: [strata/symbols.py, viewer/index.html]
+
+blocks:
+  - md: |
+      ## 1. Conclusion
+      **Status: research done; the user asked to build it (2026-10-23).** Sources were read with Firecrawl as excerpts or extracted answers; no screenshots were viewed. Claims marked UNVERIFIED come from general knowledge.
+
+      - Tools that go below the component level **generate it from an index** (Sourcetrail, SciTools Understand, Visual Studio Code Map, Doxygen). IcePanel refuses to diagram C4 level 4 at all, because hand-drawn code diagrams rot, and links out to the IDE or repo instead.
+      - Code explorers (VS Code, JetBrains, Zed, GitHub) show the code level as an **outline tree** (file, class, method) with kind icons, a filter box, breadcrumbs and an inline source peek.
+      - Strata already has the data: the `owns` globs say which files a component holds, and `symbols.py` indexes classes and functions with signatures and line ranges. So the code level is **derived and read-only**, shown in a side panel beside the map. Nothing is stored in the YAML map.
+
+  - md: |
+      ## 2. Architecture and C4 tools
+  - table:
+      head: [Tool, "How the code level is shown", "Generated or hand-made", Source]
+      rows:
+        - ["IcePanel", "Does not diagram level 4; model objects carry technology and links to the code", "Hand-made model plus links out", "https://docs.icepanel.io/core-features/modelling"]
+        - ["Structurizr", "DSL stops at component; `!components` auto-discovers components from Java code; `url` links out", "Components generated, views hand-written", "https://docs.structurizr.com/dsl/language"]
+        - ["Ilograph", "Resources nest through `children` to any depth, shown in perspectives", "Hand-written YAML", "https://www.ilograph.com/docs/editing/resources/"]
+        - ["CodeSee (shut down)", "Map of folders and files with dependency arrows; folders collapsed by default; View Code opens a code panel; file-tree sidebar with filter and hide", Generated, "https://docs.codesee.io/docs/explore-your-map"]
+        - ["Sourcetrail (archived)", "Symbol graph: class nodes contain members; a collapsed class shows an arrow and a count; kind colours; hatching for referenced-but-not-indexed; source pane synced with the selection", "Fully generated", "https://github.com/CoatiSoftware/Sourcetrail/blob/master/DOCUMENTATION.md"]
+        - ["SciTools Understand", "Graph variants per entity (butterfly: callers left, callees right); hand-defined architectures group code", Generated, "https://scitools.com/graphs"]
+        - ["Visual Studio Code Map", "Assemblies with aggregated links, expand through namespace, type and member; Show Contributing Links; filter by element kind; legend", Generated, "https://learn.microsoft.com/en-us/visualstudio/modeling/map-dependencies-across-your-solutions?view=visualstudio"]
+        - ["JetBrains UML class diagram", "Class boxes with members; visibility filter; focus on a node's neighbourhood", "Generated, user picks classes", "https://www.jetbrains.com/help/idea/class-diagram.html"]
+        - ["Doxygen + Graphviz", "Per file include graphs, per class inheritance, per function call graphs; red border marks truncation; node and depth caps", Generated, "https://www.doxygen.nl/manual/diagrams.html"]
+  - md: |
+      Not read at all (UNVERIFIED): Archi/ArchiMate, C4-PlantUML, Mermaid C4. No tool documented how it shows drift between model and code.
+
+  - md: |
+      ## 3. Code explorers and visualisations
+  - table:
+      head: [Tool, "Per symbol", "Grouping and scaling", Source]
+      rows:
+        - ["VS Code Outline, Breadcrumbs, Go to Symbol", "Kind icon and name; breadcrumbs show the path to the cursor", "Tree by nesting; filter box; sibling dropdown at each breadcrumb level; fuzzy symbol picker", "https://code.visualstudio.com/docs/editing/editingevolved"]
+        - ["VS Code Peek", "Source shown inline in an embedded editor", "No navigation away from the current file", "same page"]
+        - ["JetBrains Structure window", "Icon, name, visibility icon; inherited members grey", "Sorted by visibility then name; toggles; type-to-filter popup", "https://www.jetbrains.com/help/idea/viewing-structure-of-a-source-file.html"]
+        - ["Zed Outline Panel", "Symbol names", "Persistent tree of the current file; symbol pickers per file and per project", "https://zed.dev/docs/outline-panel"]
+        - ["GitHub symbols pane", "Clickable symbols with definition and reference popover", "Per file; search across repos", "https://docs.github.com/en/repositories/working-with-files/using-files/navigating-code-on-github"]
+        - ["CodeCharta", "File = building, folder = district; area, height and colour from chosen metrics", "Folder hierarchy; needs 3D", "https://codecharta.com/"]
+        - ["NDepend treemap", "Rectangle size and colour from two metrics at a chosen level", "Nested rectangles", "https://www.ndepend.com/docs/treemap-visualization-of-code-metrics"]
+        - ["DSM (Lattix and others)", "A cell is the dependency between two items", "Rows reordered to expose layering", "https://dsmsuite.github.io/dsm_overview.html"]
+  - md: |
+      UNVERIFIED (no source read): Sourcegraph's symbol sidebar details, Gource, dependency-cruiser and Madge, d3 icicle, WebTreeMap, minimaps. Whether any tool sizes nodes by lines of code was not found.
+
+  - md: |
+      ## 4. Recurring patterns
+      1. **Outline tree** (VS Code, JetBrains, Zed): rows with kind icon, name, signature, size, grouped file, class, method. Low effort, directly fed by the index, no relationships shown.
+      2. **Filter and search over symbols**: what makes thousands of symbols tolerable. Low effort client-side.
+      3. **Breadcrumbs with sibling dropdowns**: ties the C4 path to the code path, `system > app > component > file > class > method`.
+      4. **Inline source peek / synced source pane** (VS Code Peek, Sourcetrail, CodeSee): the map becomes an entry point to code. Needs a read route for source; highlighting needs a library, so skip it.
+      5. **Expand-in-place nesting with a count badge** (Visual Studio, Sourcetrail, CodeSee): no context switch but layout reflow and poor scaling.
+      6. **Aggregated edges, Show Contributing Links** (Visual Studio): readable zoomed out, needs edges per level.
+      7. **Treemap of the component** (NDepend): area by lines, colour by symbol count; medium effort.
+      8. **Not buildable here:** dependency matrix and call graphs (the index has no edges), 3D city (needs WebGL).
+
+  - md: |
+      ## 5. What the symbol index offers today
+      `symbols.py` keeps `file(project, path, sha256, mtime, size)` and `symbol(id, file, kind, name, parent_id, signature, start_line, end_line, doc1, visibility, body_hash)`. Kinds are only class, def and async def, nested through `parent_id`. Visibility is public or private (leading underscore). It is Python only, a file with a syntax error yields zero symbols, and there are no module-level constants, imports, call edges or references. `ls`, `find`, `show` (capped at 200 lines) and `resolves` exist. Missing for this feature: a per-file line count, and an HTTP read route.
+
+  - md: |
+      ## 6. Design chosen for Strata (derived, read-only)
+      - **Where:** a component in the Architect view gets a **Code** action. It opens a side panel docked to the right, so the map stays visible. Double-clicking a component with no child objects opens it too.
+      - **Panel:** breadcrumb `system > app > component > file > symbol`, a filter box with kind and public-only toggles, then an **outline tree** of the component's files (from `owns`), each expandable to classes and methods, lazy per file. Rows show kind icon, name, muted signature, line count and a private cue. Collapsed by default with a symbol count per file; rows capped at 500 with a "+N more" row (Doxygen-style truncation marker).
+      - **Source peek:** selecting a symbol shows its source in a plain `<pre>` below the tree (200-line cap with a message), loaded lazily; no syntax highlighting.
+      - **Drift cues:** files owned by the component but missing from disk are listed as missing; symbols are refreshed from disk before showing.
+      - **Link:** the URL hash carries the component and symbol id (`path::Class.method`) so a view can be shared.
+      - **Data and routes (GET only):** the component's files come from its `owns` globs; the symbol cache is refreshed lazily on demand (it is derived data, rebuilt from files, like the doc autoscan). New read routes: file list for a component, symbols for a file, source for a symbol.
+      - **Not built:** hand-drawn code objects in the YAML, expand-in-place on the SVG map, call graphs, dependency matrix, 3D city, syntax highlighting, editing code from the viewer, non-Python languages (later through the regex or tree-sitter extractors from the other research doc).
+
+  - md: |
+      ## 7. Later steps
+      - Treemap tab for a component: area by lines, colour by symbol count.
+      - Import edges between files, aggregated up to components (Visual Studio style), labelled approximate.
+      - Pin a symbol as a contract endpoint from the panel.
+      - JS and SQL symbols through the extractors proposed in `research/tree-sitter-agent-code-reading.yaml`.
+
+  - md: |
+      ## 8. Open questions
+  - question:
+      q: After the outline panel works, which extra do you want first?
+      options:
+        - {label: "Treemap of a component", note: "see where the code mass is"}
+        - {label: "Import edges between files", note: "needs new indexing, approximate"}
+        - {label: "Pin a symbol as a contract endpoint"}
+      recommend: "Pin a symbol as a contract endpoint"
