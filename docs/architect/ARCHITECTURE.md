@@ -8,12 +8,12 @@ Strata is a local tool for managing the knowledge of multiple projects: tasks/is
 
 Principles:
 
-- **Write through audited services.** CLI/MCP and three scoped viewer routes use the shared service layer. `POST /api/c4/object` mutates objects; `/api/c4/port` mutates ports; `/api/c4/link` mutates connections; no route stores layout. Every route validates and writes the DB source of truth and audit row transactionally, with Host, Origin, JSON, and size checks. YAML is only an import/export format; it is not mutated by viewer edits.
+- **Write through audited services.** CLI/MCP are the common write path. The one exception is `POST /api/c4/edit` (the Architect editor), the only write route in the server. It edits the YAML folder (`docs/c4`) through `strata/c4_edit.py` and re-imports it, so the folder stays the source of truth and each edit leaves a `c4-import` audit row. Everything else in the viewer and server is read-only.
 - **Database is the source of truth.** C4 YAML is an import/export format; the viewer reads the DB. The renderer owns layout: no coordinates are stored.
 - **No heavy dependencies.** Python stdlib + PyYAML; vanilla JS, no build, no CDN (third-party libraries live in `viewer/vendor/`).
 
 ```
- YAML / JSON / docs_dir ──► strata.py (CLI) ──► SQLite ◄── strata/server.py (GET + scoped C4 POST) ◄── browser (viewer/)
+ YAML / JSON / docs_dir ──► strata.py (CLI) ──► SQLite ◄── strata/server.py (GET + POST /api/c4/edit) ◄── browser (viewer/)
                                    │                                     ▲
                                    └──────── c4 context / flow ──► agent ┘ (compact text)
 ```
@@ -25,10 +25,11 @@ Principles:
 | `strata.py` | CLI entry point (argparse), calls into the modules in `strata/` |
 | `strata/schema.sql` | The whole schema: tables, append-only triggers, FTS5 |
 | `strata/db.py` | Connection, `init` + migrate, CRUD for project/doc/item/page/link, audit, `fold` for search |
-| `strata/c4_layered.py` | The only C4 format (folder `map.yaml` + `contracts/` + `behavior/` + `flows/`): load, validate, import/export, `read_model`, `context`, flow trace, contract text |
+| `strata/c4_layered.py` | The only C4 format (folder `map.yaml` + `contracts/` + `behavior/` + `flows/`): load, validate, import/export, `read_model`, `context`, flow trace, contract text, `write_model` (atomic write of a loaded model back to the folder) |
 | `strata/roadmap.py` | Roadmap import, syncing steps/gates into items, phases/criteria, gate checks and audit |
 | `strata/blocks.py` | Validates the 8 block types of a page |
-| `strata/server.py` | HTTP server: static files, GET `/api/*`, read-only (no POST), `/docs/*`, `/code/*` |
+| `strata/c4_edit.py` | Architect editor back end: `apply(c, project, op, yes)` runs one of six ops (`add_object`, `update_object`, `delete_object`, `add_link`, `update_link`, `delete_link`) on the C4 folder |
+| `strata/server.py` | HTTP server: static files, GET `/api/*`, `/docs/*`, `/code/*`; the only write route is `POST /api/c4/edit` |
 | `viewer/app.html`, `app.js`, `app.css` | Multi-project app shell (sidebar, tabs, Ctrl+K, theme) |
 | `viewer/index.html` | C4 viewer (zoom by level, flows, tags, object search) |
 | `viewer/page.html`, `page.js`, `page.css` | Renders block-based pages |
@@ -100,6 +101,14 @@ Known limitation: HTML documents under `/docs/` are served from the same origin 
 
 Pages refresh themselves: `page.js` polls `/api/page/<p>/<s>/version` every 2 seconds (`updated_at` + `PRAGMA data_version`).
 
+### Architect editor (`POST /api/c4/edit`)
+
+- **`strata/c4_edit.py` `apply`:** loads the project's C4 folder (from `c4_meta.source`), applies one op to a copy, then runs `c4_layered.check` on it. Errors that already existed before the edit are not blamed; only a finding that is new rejects the edit (`ValueError`, nothing written). If the edit would drop task links, it is refused unless `yes` is true (the viewer asks the user to confirm). It then writes the folder and runs `import_dir`; if the import fails, the previous model is written back and the error is re-raised. The result is `{ok, changed, warnings}` where warnings are only the new ones.
+- **`c4_layered.write_model`:** writes a loaded model into the layered folder (`map.yaml`, `contracts/`, `behavior/`, `flows/`) with atomic writes and returns the changed paths.
+- **Route guards, in order:** Host check (DNS rebinding), editing enabled, path, `X-Strata-Edit: 1` header, `Origin` (if sent) equal to `http://<Host>`, `Content-Type: application/json`, `Content-Length` present and at most 64 KB (`MAX_BODY`), body is a JSON object, optional boolean `yes`. Project comes from `?project=`, else the default project. Failures return 403/415/413/400; unknown project 404.
+- **`allow_edit`:** `make_server(allow_edit=None)` enables the route only when the bind host is loopback. `strata.py serve --allow-edit` forces it on, `--no-edit` forces it off.
+- **Not editable here:** contracts, flows, behavior, renaming an object id, changing a link's `from`/`to`. Use the files and `c4 import`.
+
 ## 6. Extending
 
 ### Roadmaps by phase
@@ -112,7 +121,7 @@ See [Create and Run a Roadmap](../guide/roadmap.yaml) and [Task Board and Roadma
 
 - **New CLI command:** add a subparser in `strata.py`, put the logic in `strata/db.py` or `strata/c4_layered.py`, and write `audit` if it writes.
 - **New C4 field:** `KEYS` + validation in `c4_layered.py`, a column in `schema.sql` + `ADDED` in `db.py`, `import_dir`/`export_dir`/`read_model`, then the viewer.
-- **New API:** hold `lock` when reading or writing the shared DB connection, and filter inputs with a whitelist. The server has no write routes; C4 is edited in the folder and imported with the CLI.
+- **New API:** hold `lock` when reading or writing the shared DB connection, and filter inputs with a whitelist. The only write route is `POST /api/c4/edit`; for anything else, edit C4 in the folder and import with the CLI.
 - **Page blocks:** fixed at exactly 8 types; adding one requires agreement from the project owner first.
 
 ## 7. Running and testing

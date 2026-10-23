@@ -35,7 +35,7 @@ Route (GET): `/` shell, `/c4` viewer C4, `/pages`, `/page/<p>/<slug>`, `/api/pro
 `/api/docs?project=`, `/api/audit?project=&limit=`, `/api/search?q=&project=` (FTS, bm25, tối đa 30),
 `/docs/<project>/<path>` (phục vụ cả cây `docs_dir`; chặn `..`, dotfile, `.db`). Giá trị lọc ngoài whitelist trả 400.
 
-Server HTTP chỉ đọc: không có route POST. Map C4 sửa trong thư mục rồi `c4 import`; mọi ghi khác đi qua CLI/MCP (service có audit).
+Server HTTP chỉ đọc, trừ một route duy nhất `POST /api/c4/edit` (trình sửa Architect, xem dưới). Map C4 cũng có thể sửa trong thư mục rồi `c4 import`; mọi ghi khác đi qua CLI/MCP (service có audit).
 
 ### Liên kết object với task, context cho agent
 
@@ -139,6 +139,13 @@ Chi tiết và ví dụ: [docs/AGENT_C4.md](docs/AGENT_C4.md).
 - **Canvas:** kéo để pan, lăn chuột để zoom, `F` vừa khung, `+`/`-` zoom. Nút ◐ đổi sáng/tối.
 
 Thư viện bên thứ ba nằm trong `viewer/vendor/` (không dùng CDN): `dagre.min.js` 0.8.5, `mermaid.min.js` 10.9.1 (UMD, tải từ cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/).
+
+### Sửa sơ đồ trong viewer (Architect editor)
+
+Mở tab Architect, chuyển từ Select sang Edit. Thanh công cụ cho thêm, sửa, xóa object và link. Mỗi sửa được kiểm tra như `c4 validate`, ghi vào thư mục `docs/c4` rồi import (có dòng audit). Không sửa được contract, flow, behavior, id của object, hay from/to của link; làm các việc đó trong file.
+
+- `strata.py serve --allow-edit` bật, `--no-edit` tắt. Mặc định chỉ bật khi bind loopback.
+- Service thật bind `127.0.0.1` và địa chỉ Tailscale, nên chỉ sửa được qua `http://127.0.0.1:8740`. Muốn sửa qua cả Tailscale: thêm `--allow-edit` vào cuối dòng `ExecStart` trong `~/.config/systemd/user/strata.service`, rồi `systemctl --user daemon-reload && systemctl --user restart strata`.
 
 ## Page (tài liệu dạng block)
 

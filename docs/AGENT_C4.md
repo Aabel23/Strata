@@ -169,6 +169,14 @@ The semantic rules from `C4-PERSON-TARGET` to `C4-TECH-MISSING` are warnings onl
 - Task links: `c4 link|unlink --project P --object X --item ID`, `c4 links --project P --object X`.
   `unlink` also works for an object that was removed from the map.
 
+### The Architect editor (viewer toolbar)
+
+The user can also edit the map in the viewer. In the Architect tab the toolbar switches between Select and Edit; in Edit mode it can add, edit and delete an object, and add, edit and delete a link. Deleting an object that has children or links asks for a cascade confirm, and an edit that would drop task links asks for a task-link confirm.
+
+- It edits the same YAML folder you edit (`docs/c4`), not a separate copy. Each edit is checked like `c4 validate` (an edit that introduces a new error is rejected; errors that were already there are not blamed), written to the folder, and imported with an audit row.
+- Agents should still prefer editing the files and running `c4 import`. After the user has used the toolbar, re-read the folder before changing it; `git diff docs/c4` shows the user's edits.
+- The toolbar cannot edit contracts, flows or behavior, rename an object id, or change a link's from/to. Do those in the files.
+
 ## 5. Field reference
 
 | Entity | Required | Optional |
