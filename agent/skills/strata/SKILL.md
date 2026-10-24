@@ -1,6 +1,6 @@
 ---
 name: strata
-description: Sổ tay dùng app Strata (SQLite + CLI strata.py + viewer http://127.0.0.1:8740) để ghi/đọc task, issue, doc, sơ đồ C4 và flow của bất kỳ project nào. Dùng khi user nhắc "strata", "ghi task", "tạo issue", "đổi trạng thái task", "vẽ C4", "sửa map", "flow", "viết doc", "project add", "viewer 8740", "strata.db"; hoặc khi đi qua bước 2 (sơ đồ), 3 (research/doc), 4 (duyệt → task), 6 (lỗi → issue) của luồng làm việc.
+description: Sổ tay dùng app Strata (SQLite + CLI strata.py + viewer http://127.0.0.1:8740) để ghi/đọc task, issue, doc, sơ đồ C4 và flow của bất kỳ project nào. Dùng khi user nhắc "strata", "ghi task", "tạo issue", "đổi trạng thái task", "vẽ C4", "sửa map", "flow", "viết doc", "project add", "viewer 8740", "strata.db".
 ---
 
 # Strata
@@ -12,11 +12,6 @@ Ghi qua CLI `python3 /home/abel/project/tools/strata/strata.py`. Đọc qua web 
 ```bash
 S="python3 /home/abel/project/tools/strata/strata.py"   # dùng $S ở mọi lệnh dưới
 ```
-
-## Luật
-- Chỉ **agent chính** ghi (ngoại lệ: coder/reviewer qua MCP theo vai, xem mục MCP). Subagent không có MCP thì trả văn bản cho agent chính ghi.
-- Không sửa DB bằng `sqlite3` trực tiếp. Không tự viết HTML cho tài liệu (viết YAML, Strata lo trình bày).
-- Thử lệnh ghi lạ trên DB tạm: `$S init --db /tmp/x/t.db` rồi thêm `--db /tmp/x/t.db`.
 
 ## Bước 0: chọn project
 ```bash
@@ -55,7 +50,7 @@ Hiện có: `internproj`; `project1_app` (cha internproj, root `/home/abel/proje
 | Gán feature/status doc | `$S doc set --project P research/x.yaml --feature F --status current\|draft\|outdated\|missing [--ord N]` |
 | Page JSON | `$S page validate F.json` / `$S page put F.json` / `$S page list [--project P]` |
 
-Status item: `proposed|approved|open|doing|review|done|rejected` (mặc định `open`). Kind: `task|issue|step|gate`. Luồng task: approved → doing → review → done.
+Status item: `proposed|approved|open|doing|review|done|rejected` (mặc định `open`). Kind: `task|issue|step|gate`. Các chuyển trạng thái task hỗ trợ: approved → doing → review → done.
 
 ## Ví dụ doc tối thiểu (`<docs_dir>/research/vi-du.yaml`)
 ```yaml
@@ -77,20 +72,12 @@ blocks:
 Block khác: `diagram`, `layers`, `swimlane`, `mermaid`, `legend`, `c4`, `query` (xem doc-format.yaml).
 Kiểm lỗi: mở viewer (trang hiện khung lỗi) hoặc `curl -s 'localhost:8740/api/doc?project=P&path=...' | jq .errors`.
 
-## Luồng 6 bước → Strata
-- **B2 sơ đồ**: viết/sửa thư mục C4 (map, contracts, flows) → `c4 validate` → `c4 import`.
-- **B3 research**: mỗi research-stage là một doc YAML trong `<docs_dir>/research/` (chat chính ghi, theo skill `research-stage`).
-- **B4 user duyệt**: `item add --kind task --status approved` + `c4 link` vào object liên quan.
-- **B5 làm**: coder `item claim N --as coder` → `item submit N --as coder --note "..."`; main `item approve N`.
-- **B6 lỗi**: `item add --kind issue` (+ `c4 link`).
-- Ngoại lệ: `project1_app` vẫn dùng `documentation/plan/plan.json` cho luồng đang chạy.
-
 ## MCP
 Ba server cùng `strata.py mcp --role ...`, khác nhau ở tập tool theo vai:
 - `strata` (`--role main`): chat chính.
 - `strata-coder` (`--role coder`): coder claim/submit.
 - `strata-reviewer` (`--role reviewer`): reviewer đọc, thêm issue (`proposed`).
-Đăng ký đang chờ user (xem "Cài đặt" trong `agent/BOOTSTRAP.md`). Có MCP thì ưu tiên MCP hơn CLI.
+Cài đặt MCP: `claude mcp add --scope user strata -- python3 /home/abel/project/tools/strata/strata.py mcp --role main` (Codex: thay `claude` bằng `codex`, bỏ `--scope user`). Quyền từng role do server thực thi; quy trình agent thuộc Endo, không thuộc công cụ Strata.
 
 ## Lỗi hay gặp (thư mục C4)
 - Chuỗi có `:` `?` `{` `}` `,` `#` phải bọc `"..."`; dấu phẩy không bọc cắt chuỗi, `c4 validate` báo `key lạ`.

@@ -5,6 +5,10 @@ Kiến trúc C4 viết dưới dạng code. Bạn mô tả hệ thống trong m�
 
 Tài liệu viết bằng YAML thuần nội dung, đặt trong `docs_dir`; server tự quét và vẽ (xem `docs/architect/doc-format.yaml`). Ngoài ra: [docs/architect/ARCHITECTURE.md](docs/architect/ARCHITECTURE.md) (kiến trúc, dữ liệu, server, cách mở rộng) · [docs/AGENT_C4.md](docs/AGENT_C4.md) (agent vẽ/sửa map).
 
+## Dùng Strata với agent
+
+Strata cung cấp công cụ; sổ tay agent dùng CLI/MCP nằm tại [`agent/skills/strata/SKILL.md`](agent/skills/strata/SKILL.md). Luật, quy trình, vai agent và hook dùng chung thuộc Endo: [`../endo/agent/BOOTSTRAP.md`](../endo/agent/BOOTSTRAP.md), [`../endo/agent/HIEN_PHAP.md`](../endo/agent/HIEN_PHAP.md). Các đường dẫn quản trị agent cũ trong Strata chỉ là symlink tương thích về Endo.
+
 Dữ liệu nằm trong SQLite (`$STRATA_DB`, hoặc `--db FILE`). Thư mục C4 là nguồn chuẩn của map; DB chỉ là bản đọc.
 
 ```
