@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""PreToolUse: subagent không được chạm vault secondbrain.
+"""Best-effort PreToolUse guard against delegated private-memory access.
 
-Best-effort: khớp chuỗi và tên tool, vòng được bằng glob/symlink. Kiểm soát thật là
-allowlist `tools` trong agent/agents/*.md (subagent không có mcp__obsidian__*).
-Subagent = payload có agent_id hoặc agent_type; chat chính (không có cả hai) được phép.
+Matches literal inputs/tool names and relies on host agent identity fields.
+Aliases, symlinks, subprocesses and missing metadata can evade it; malformed
+payloads fail open. Role tool lists do not isolate files reachable by Read/Bash.
+Use runtime filesystem/process/tool restrictions for an actual privacy boundary.
+This hook is accident prevention, not proof of confidentiality.
 """
 import json
 import re
 import sys
 
-VAULT = re.compile(r"\.secondbrain", re.I)  # cần dấu chấm đầu: tên file hook chứa từ trần không bị chặn
+VAULT = re.compile(r"\.secondbrain", re.I)  # Require the dot: the hook filename itself must not match the bare word.
 VAULT_TOOL = re.compile(r"^mcp__obsidian", re.I)
 
 try:
