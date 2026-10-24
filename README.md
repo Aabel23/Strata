@@ -8,6 +8,12 @@ Endo là nền tảng khung xương (backbone framework) kết hợp giữa:
 
 ---
 
+## Quản trị agent
+
+Luật, quy trình, vai agent và hook dùng chung được quản lý tại [`agent/`](agent/). Agent bắt đầu từ [`agent/BOOTSTRAP.md`](agent/BOOTSTRAP.md) và tuân theo [`agent/HIEN_PHAP.md`](agent/HIEN_PHAP.md). Các đường dẫn cũ trong `strata/agent/` chỉ là symlink tương thích về Endo.
+
+Strata là công cụ quản lý task, issue, tài liệu và C4; hướng dẫn agent sử dụng công cụ nằm tại [`../strata/agent/skills/strata/SKILL.md`](../strata/agent/skills/strata/SKILL.md).
+
 ## 🏛️ Kiến trúc C4 (Strata)
 
 Hệ thống được thiết kế theo mô hình DAG sạch (11 objects, 12 links) tại [`docs/c4/map.yaml`](docs/c4/map.yaml):
