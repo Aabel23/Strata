@@ -18,6 +18,8 @@ steps:
   reverse: true
   text: graph JSON
 - at: codemap
+  text: adapt.js converts the raw graph
+- at: codemap
   text: force layout with graphology, draw on canvas
 - link: u_browse
   reverse: true

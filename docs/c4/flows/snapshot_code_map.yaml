@@ -20,7 +20,5 @@ steps:
 - link: cm_gx
   reverse: true
   text: graph export {nodes, relationships}
-- at: codemap_snap
-  text: convert to the Celeste graph format
 - link: cm_write
-  text: write the snapshot file
+  text: write the raw graph as the snapshot file

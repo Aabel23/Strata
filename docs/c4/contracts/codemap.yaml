@@ -1,24 +1,24 @@
-# All contracts here are PLANNED (status future). Paths marked "proposed" do not exist yet.
 - id: ag_gx
   transport: CLI subprocess
   body:
-    signature: node tools/gitnexus/<entry> <command> [args] (entry path proposed, fixed when vendored)
+    signature: node tools/gitnexus/dist/cli/index.js <command> [args]
     purpose: Agent queries or exports the code graph of a repository; gitnexus is vendored and never edited
     errors:
     - non-zero exit when the repository is not indexed
+  # non-Python ends on purpose: caller is the agent (SKILL.md), callee is the vendored Node CLI
   start: agent/skills/strata/SKILL.md::gitnexus
   end: tools/gitnexus/package.json::gitnexus
 - id: cm_cli
   transport: in-process
   body:
-    signature: 'strata.py code snapshot --project P [--out FILE] (command name proposed)'
+    signature: 'strata.py code snapshot --project P [--reindex]'
     purpose: Route the subcommand to the snapshot module
-  start: strata.py::main
+  start: strata.py::cmd_code
   end: strata/codemap.py::snapshot
 - id: cm_gx
   transport: CLI subprocess
   body:
-    signature: subprocess.run([node, tools/gitnexus/<entry>, ...], cwd=project root) -> {nodes, relationships}
+    signature: run_gitnexus(root, reindex=False) -> {nodes, relationships}; --reindex runs analyze --index-only first
     purpose: Index the project root and export the graph; Strata Python never imports gitnexus
     errors:
     - RuntimeError when node or tools/gitnexus is missing
@@ -28,30 +28,29 @@
 - id: cm_write
   transport: file write
   body:
-    signature: to_celeste(gitnexus_graph) -> graph; write_snapshot(project, graph)
-    purpose: Convert GitNexus {nodes, relationships} to the Celeste format and write it to .strata/codemap/graph.json (path proposed)
-    response: '{nodes, edges, communities, kinds, edgeTypes} validated against graph.schema.json'
-    errors:
-    - ValueError when the converted graph breaks the schema
+    signature: write_snapshot(path, body)
+    purpose: Write the raw GitNexus graph to <db dir>/<db stem>.codemap/<project>.json; conversion happens in the browser (adapt.js)
+    response: raw GitNexus {nodes, relationships}
   start: strata/codemap.py::snapshot
   end: strata/codemap.py::write_snapshot
 - id: cm_get
   transport: HTTP
   body:
-    signature: GET /api/codemap?project=P (route proposed)
+    signature: GET /api/codemap?project=P
     purpose: Return the stored snapshot to the Code map tab; read-only, no write route
-    response: Celeste graph JSON (nodes, edges, communities, kinds, edgeTypes)
+    response: raw GitNexus graph JSON (nodes, relationships)
     errors:
     - 403 unknown Host
+    - 400 missing or unknown project
     - 404 no snapshot for the project (run `strata.py code snapshot`)
-  start: viewer/codemap/codemap.js::load
-  end: strata/server.py::make_server
+  start: viewer/codemap/js/source.js::loadRaw
+  end: strata/server.py::make_server.H.codemap
 - id: cm_read
   transport: file read
   body:
-    signature: load_snapshot(project) -> dict
-    purpose: Read the snapshot file for the GET route (function proposed)
+    signature: load_snapshot(db_path, project) -> dict
+    purpose: Read the snapshot file for the GET route
     errors:
     - FileNotFoundError becomes 404
-  start: strata/server.py::make_server
+  start: strata/server.py::make_server.H.codemap
   end: strata/codemap.py::load_snapshot

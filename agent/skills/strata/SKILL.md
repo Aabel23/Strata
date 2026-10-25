@@ -43,6 +43,7 @@ Hiện có: `internproj`; `project1_app` (cha internproj, root `/home/abel/proje
 | Đọc map | `$S c4 context --project P [--object OBJ] [--max-tokens 2000]` |
 | Đọc flow | `$S c4 flow --project P` (liệt kê) / `$S c4 flow --project P --id FLOW` |
 | Sửa map | sửa thư mục `docs/c4` → `$S c4 validate docs/c4` (0 lỗi) → `$S c4 import docs/c4 --project P`. Chi tiết: `docs/AGENT_C4.md` |
+| Code map | `$S code snapshot --project P [--reindex]` (GitNexus quét code → `<db>.codemap/P.json`; `--reindex` chạy `analyze --index-only` trước); xem ở tab Code map (viewer `#/p/P/codemap`). GitNexus nằm ở `tools/gitnexus` (`fetch.sh`; `npm install` cần user duyệt) |
 | Đọc contract | `$S c4 contract ID --project P` |
 | Viết tài liệu | file YAML trong `<docs_dir>/research\|architect\|plan\|review/`, server tự quét. Định dạng: `docs/architect/doc-format.yaml` |
 | Kiểm tra doc | `$S doc validate FILE` |
