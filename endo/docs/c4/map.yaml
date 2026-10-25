@@ -1,3 +1,5 @@
+# Historical standalone Endo design. The active product map is ../../../docs/c4/map.yaml.
+# Keep this file as an archive; do not import it as a separate Endo project.
 project:
   id: endo
   name: Endo

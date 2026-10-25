@@ -1,0 +1,62 @@
+title: Endo and Strata integration design
+summary: One Strata product with agent governance, a Celeste code map, and GitNexus scanning.
+code: [strata.py, strata/, viewer/, viewer/codemap/, agent/, tools/gitnexus/]
+blocks:
+  - md: |
+      ## Product boundary
+      Strata is the public product; this repository's project ID is `strata`. It owns design, research, workflow records, the CLI, SQLite database, and viewer. Endo contributes agent governance and execution design inside Strata. Celeste is the viewer's Code map component. GitNexus is the sole repository scanner and runs as a vendored CLI subprocess.
+
+      The authoritative C4 source is `docs/c4/map.yaml` with `project.id: strata`; the Strata database is an imported read model of that directory. Documents remain YAML files under `docs/` and are scanned into the Docs view. Future C4 objects, including `runs` and the C4 editor/write path, describe planned behavior and must not be read as implemented code.
+
+  - table:
+      head: [Module, C4 owner, Current disposition]
+      rows:
+        - ["strata.py", "cli / argp", "Command dispatch and task/C4 operations"]
+        - ["strata/db/", "cli / dbmod", "SQLite workflow records and imported C4 read model"]
+        - ["strata/c4.py, strata/context.py", "cli / c4mod, ctxmod", "C4 import/context and task context"]
+        - ["strata/codemap.py", "cli / codemap_snap", "Runs GitNexus and writes the raw JSON snapshot"]
+        - ["strata/server.py", "server / handler", "Read endpoints, static serving, and three guarded write routes"]
+        - ["viewer/", "viewer / shell, c4view", "Strata UI and static assets"]
+        - ["viewer/codemap/", "viewer / codemap", "Celeste renderer embedded in the Viewer; reads the Strata code map endpoint"]
+        - ["agent/", "agent_gov", "Endo governance, roles, workflow, and skills are real files in this repository"]
+        - ["tools/gitnexus/", "gitnexus", "Vendored GitNexus CLI, the sole repository scanner"]
+        - [".gitnexus/lbug and *.codemap/*.json", "gitnexus_index, codemap_store", "Generated index and exported snapshot; neither is a source module"]
+        - ["endo/", "Historical source, outside active C4 ownership", "Preserves the original map and history; separate Endo-product design is superseded by Strata"]
+
+  - md: |
+      ## History and entrypoints
+      The two histories were joined by the two-parent subtree merge `33ec944`; subsequent commits placed governance in `agent/`, the Celeste renderer in `viewer/codemap/`, and GitNexus in `tools/gitnexus/`. The installed `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` links resolve to the canonical `agent/BOOTSTRAP.md`. Agents edit canonical files in `agent/`, never the installed links.
+
+      **Approved disposition:** The old `endo/docs/c4/map.yaml` depicts a separate Endo product and a Tree-sitter scanner. It is retained as history, is not imported into Strata, and does not require an `endo` project. The historical README points to the authoritative Strata map. The current code map uses GitNexus.
+
+  - diagram:
+      dir: LR
+      caption: Current product data flow; the agent run registry is a separate future slice.
+      nodes:
+        - {id: user, text: User, tone: ui}
+        - {id: viewer, text: Strata Viewer, note: "viewer/"}
+        - {id: cli, text: Strata CLI and server, note: "strata.py, strata/"}
+        - {id: db, text: SQLite records, shape: store}
+        - {id: governance, text: Agent governance, note: "agent/"}
+        - {id: celeste, text: Celeste Code map, note: "viewer/codemap/"}
+        - {id: gitnexus, text: GitNexus, note: "tools/gitnexus/"}
+        - {id: index, text: GitNexus index, shape: store}
+        - {id: snapshot, text: JSON code map snapshot, shape: store}
+        - {id: repo, text: Repository files, shape: store}
+      edges:
+        - [user, viewer]
+        - [viewer, cli, "GET endpoints"]
+        - [cli, db]
+        - [viewer, celeste, "Code map tab"]
+        - [cli, gitnexus, "codemap_snap subprocess"]
+        - [gitnexus, repo, "scan"]
+        - [gitnexus, index, "build index"]
+        - [cli, snapshot, "codemap_snap export"]
+        - [snapshot, cli, "read for GET /api/codemap"]
+        - [governance, cli, "task and C4 operations"]
+
+  - md: |
+      ## Boundaries and follow-on work
+      `celeste/backend` remains excluded pending an owner decision. Untracked files visible in the current Strata worktree are outside this integration design; their provenance and publication status are not inferred here.
+
+      Stage 1–2 establishes the unified product and module ownership. Implemented code and proposed B1 agent execution remain distinct. The current Strata C4 map validates with zero errors (existing warnings remain) and matches its imported DB copy; this narrative diagram is not itself a C4 import. The owner approved the current map and the historical Endo-map disposition. Later implementation tasks may migrate additional material only after their own scope and approval gates.
