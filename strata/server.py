@@ -1,7 +1,7 @@
 """HTTP server: C4 viewer, pages and their JSON APIs. All data comes from the DB."""
 import hmac, http.server, json, mimetypes, pathlib, re, secrets, socket, sqlite3, threading
 from urllib.parse import parse_qs, unquote, urlsplit
-from strata import blocks, c4_edit, c4_layered, db, service, symbols
+from strata import blocks, c4_edit, c4_layered, codemap, db, service, symbols
 
 SERVE_EXT = set(".py .js .mjs .ts .tsx .css .html .htm .md .txt .yaml .yml .json .toml .c .h .cpp .hpp .dart .java .kt .go .rs .svg .png .jpg .jpeg .gif .webp".split())
 
@@ -183,6 +183,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             if p == "/api/docs":
                 return self.json(rows("SELECT project,path,title,feature,kind,status,ord,updated_at,summary,json(code) code FROM doc" + (" WHERE project=?" if q.get("project") else "")
                                       + " ORDER BY project,ord,path", (q["project"],) if q.get("project") else ()))
+            if p == "/api/codemap": return self.codemap(q)
             if p.startswith("/api/code/"): return self.code(p, q)
             if p == "/api/audit": return self.audit(q)
             if p == "/api/search": return self.search(q)
@@ -310,6 +311,13 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
             self.wfile.write(body)
+
+        def codemap(self, q):
+            if not q.get("project"): return self.json({"error": "missing project"}, 400)
+            with lock:
+                if not conn.execute("SELECT 1 FROM project WHERE id=?", (q["project"],)).fetchone(): return self.json({"error": "unknown project"}, 400)
+            try: return self.json(codemap.load_snapshot(db.db_path(db_path), q["project"]))
+            except FileNotFoundError: return self.json({"error": "no snapshot; run `strata.py code snapshot --project " + q["project"] + "`"}, 404)
 
         def code(self, p, q):
             need = {"/api/code/files": ("project", "object"), "/api/code/symbols": ("project", "path"), "/api/code/src": ("project", "id")}.get(p)

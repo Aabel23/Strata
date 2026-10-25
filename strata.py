@@ -14,6 +14,7 @@
   strata.py c4 flow --project P [--id F]          numbered step trace (no --id: list flows)
   strata.py c4 contract ID --project P            one contract of a layered project
   strata.py sym index --project P | ls PATH|DIR --project P [--public] | show ID --project P [--sig-only --ctx N] | find PATTERN --project P   Python symbol index (cache next to the DB)
+  strata.py code snapshot --project P [--reindex]   code graph via GitNexus -> <db>.codemap/P.json (--reindex: gitnexus analyze --index-only first)
   strata.py search Q [--project P --src item|page|doc --limit N]
   strata.py mcp --role main|coder|reviewer [--db]   MCP server on stdio
   strata.py task context ID [--budget N] [--db]   ticket + rules + c4 + paths in one budgeted text
@@ -22,7 +23,7 @@
   strata.py item claim ID --as NAME | submit ID --note N [--as NAME] | rework ID --note N | close ID --note N (open -> done) | approve ID [--note --as] | reject ID --note N | release ID | dep add|rm ID DEP   (all: --json)
 """
 import argparse, json, pathlib, sqlite3, sys, threading, webbrowser
-from strata import blocks, c4_layered, db, service, symbols
+from strata import blocks, c4_layered, codemap, db, service, symbols
 
 
 def cmd_page(a):
@@ -87,6 +88,14 @@ def cmd_item(c, a):
         service.transition(c, "main", a.id, to, who, getattr(a, "note", None)); out({"ok": True, "status": to}, f"ok: {to}")
 
     return 0
+
+
+def cmd_code(a):
+    try:
+        p, g = codemap.snapshot(db.init(a.db), db.db_path(a.db), a.project, a.reindex)
+    except (KeyError, ValueError, RuntimeError, OSError) as e:
+        print("ERROR", e.args[0] if isinstance(e, KeyError) else e); return 1
+    print(f"snapshot {a.project}: {len(g['nodes'])} nodes, {len(g['relationships'])} relationships -> {p}"); return 0
 
 
 def cmd_sym(a):
@@ -217,6 +226,7 @@ def main(argv=None):
     group("sym", {"index": [(["--project"], req)], "ls": [(["path"], {}), (["--project"], req), (["--public"], {"action": "store_true"})],
                   "show": [(["id"], {}), (["--project"], req), (["--sig-only"], {"action": "store_true"}), (["--ctx"], {"type": int, "default": 0})],
                   "find": [(["pattern"], {}), (["--project"], req)]})
+    group("code", {"snapshot": [(["--project"], req), (["--reindex"], {"action": "store_true"})]})
     add("mcp", (["--role"], {"required": True, "choices": service.ROLES}))
     g4 = sub.add_parser("c4"); gs4 = g4.add_subparsers(dest="action", required=True)
     ref = [(["--project"], req), (["--object"], req), (["--item"], {"type": int})]
@@ -233,6 +243,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.cmd == "doc" and a.action == "validate": return cmd_doc_validate(a)
     if a.cmd == "sym": return cmd_sym(a)
+    if a.cmd == "code": return cmd_code(a)
     if a.cmd == "c4" and a.action == "validate": return c4_layered.report(a.dir, _idx(a), json_out=a.json, strict=a.strict)
     if a.cmd in ("project", "doc", "item", "c4", "search", "task"): return cmd_write(a)
     if a.cmd == "mcp":
