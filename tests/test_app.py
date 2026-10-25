@@ -79,6 +79,7 @@ def test_cli_project_doc_item_audit(env):
 def test_api_projects_and_filters(env):
     ps = {x["id"]: x for x in J(env, "/api/projects")}
     assert ps["a"]["parent"] == "g" and ps["a"]["tasks"] == {"doing": 1} and ps["a"]["issues_open"] == 1 and ps["a"]["issues_total"] == 1
+    assert "docs_dir" in ps["a"] and "root" in ps["a"]
     assert ps["a"]["pages"] == 1 and ps["a"]["docs"] == 3 and ps["a"]["last_update"]
     assert [(x["kind"], x["label"]) for x in J(env, "/api/items?project=a")] == [("task", None), ("task", "issue")]  # id order
     assert [x["title"] for x in J(env, "/api/items?project=a&label=issue")] == ["lỗi đăng nhập"]

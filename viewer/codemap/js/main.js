@@ -111,7 +111,8 @@ async function load(name, poll) {
     if (my !== token) return;
     // calm states from /api/codemap: building polls every 3 s, a failed build shows its reason
     if (err.building) { panel.message('Code map', 'Building code map…', 'This can take a minute. The map appears here when it is ready.'); setTimeout(() => my === token && load(name, true), 3000); return; }
-    if (err.buildState) return panel.message('Code map', 'The build did not finish', "Couldn't build the code map. Make sure GitNexus is installed and the folder is a git repository, then run `strata init` in that folder.", err.message);
+    if (err.empty) return panel.message('Code map', 'No code map yet', `Run this in ${err.root ? 'the project folder' : 'your project folder'}:`, err.root, 'strata init');
+    if (err.buildState) return panel.message('Code map', 'The build did not finish', "Couldn't build the code map. Make sure GitNexus is installed and the folder is a git repository, then run this in that folder:", err.message, 'strata init');
     console.error('[celeste] load failed', err);
     panel.message('Error', 'Could not load', `${name}: ${err.message}`);
   }

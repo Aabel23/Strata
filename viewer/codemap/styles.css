@@ -79,3 +79,6 @@ button, select, input { font: inherit; }
 [hidden] { display: none !important; }
 @media (max-width: 700px) { .gravity-control { width: 158px; } .detail { width: min(270px, calc(100% - 16px)); } }
 .raw{display:block;margin-top:8px;opacity:.6;font-size:.85em}
+.detail.notice .detail-note { font-size: 14px; line-height: 1.5; color: #e5c89c; }
+.detail.notice .cmd { display: inline-block; margin: 6px 0 2px; padding: 3px 8px; font: 13px ui-monospace, Menlo, Consolas, monospace; background: rgba(0, 0, 0, .3); border: 1px solid var(--rule); color: #f0cf9d; }
+.detail.notice .raw { font: 11px ui-monospace, Menlo, Consolas, monospace; opacity: .75; }

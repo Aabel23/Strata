@@ -66,7 +66,8 @@ def test_route(env):
             with urllib.request.urlopen(f"http://127.0.0.1:{srv.server_address[1]}{path}") as r: return r.status, r.headers["Content-Type"], json.loads(r.read())
         except urllib.error.HTTPError as e: return e.code, "", json.loads(e.read())
     try:
-        assert get("/api/codemap?project=p")[0] == 404
+        st, _, body = get("/api/codemap?project=p")
+        assert st == 404 and body["error"] == "no code map" and body["empty"] is True and "root" in body
         assert get("/api/codemap")[0] == 400 and get("/api/codemap?project=zz")[0] == 400
         codemap.write_snapshot(codemap.snapshot_path(p, "p"), json.dumps(G).encode())
         st, ct, body = get("/api/codemap?project=p")

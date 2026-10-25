@@ -286,7 +286,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             self.json({**d, "errors": errs, "mtime": f.stat().st_mtime_ns})
 
         def projects(self):
-            out = rows("SELECT id,name,description,parent,status FROM project ORDER BY id")
+            out = rows("SELECT id,name,description,parent,status,root,docs_dir FROM project ORDER BY id")
             for r in out:
                 pid = r["id"]
                 r["tasks"] = {x["status"]: x["n"] for x in rows("SELECT status,count(*) n FROM item WHERE project=? AND kind='task' AND coalesce(label,'')!='issue' GROUP BY status", (pid,))}
@@ -355,7 +355,8 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             except FileNotFoundError:
                 with bl: why = failed.get(q["project"])
                 if why: return self.json({"error": why, "building": False}, 404)
-                return self.json({"error": "no snapshot; run `strata.py code snapshot --project " + q["project"] + "`"}, 404)
+                with lock: row = conn.execute("SELECT root FROM project WHERE id=?", (q["project"],)).fetchone()
+                return self.json({"error": "no code map", "empty": True, "root": (row and row[0]) or None}, 404)
 
         def code(self, p, q):
             need = {"/api/code/files": ("project", "object"), "/api/code/symbols": ("project", "path"), "/api/code/src": ("project", "id")}.get(p)

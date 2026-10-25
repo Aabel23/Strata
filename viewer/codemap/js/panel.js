@@ -6,18 +6,20 @@ export function createPanel({ onPick, onClose }) {
   $('detail-close').addEventListener('click', () => onClose());
   const f = { kicker: $('detail-kicker'), title: $('detail-title'), kind: $('detail-kind'), degree: $('detail-degree'),
     community: $('detail-community'), file: $('detail-file'), note: $('detail-note'), list: $('neighbours'), label: $('neighbours-label') };
+  const grid = box.querySelector('.detail-grid');
   const dash = (...els) => els.forEach((e) => { e.textContent = '—'; });
   const clearList = () => { f.list.replaceChildren(); f.label.hidden = true; };
 
-  function message(kicker, title, note, raw) { // loading / error notice, pinned top-left
+  function message(kicker, title, note, raw, cmd) { // loading / error notice, pinned top-left
     box.hidden = false; box.classList.add('notice'); box.style.left = box.style.top = '';
     f.kicker.textContent = kicker; f.title.textContent = title; f.note.textContent = note;
     if (raw) { const m = document.createElement('small'); m.className = 'raw'; m.textContent = raw; f.note.append(document.createElement('br'), m); }
-    dash(f.kind, f.degree, f.community, f.file); clearList();
+    if (cmd) { const c = document.createElement('code'); c.className = 'cmd'; c.textContent = cmd; f.note.append(document.createElement('br'), c); }
+    grid.hidden = true; dash(f.kind, f.degree, f.community, f.file); clearList();
   }
   // node: adapt() node; neighbours: [{index, name, degree}]
   function showNode(node, neighbours) {
-    box.hidden = false; box.classList.remove('notice');
+    box.hidden = false; box.classList.remove('notice'); grid.hidden = false;
     f.kicker.textContent = 'Selected object';
     f.title.textContent = node.name;
     f.kind.textContent = node.kind;

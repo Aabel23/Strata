@@ -59,7 +59,10 @@ main{display:grid;grid-template-columns:56px minmax(0,1fr) var(--info-width,320p
 #stage{position:relative;overflow:hidden;background-color:var(--canvas);background-image:radial-gradient(var(--dot) 1px,transparent 1px);background-size:18px 18px;cursor:grab}
 #stage.pan{cursor:grabbing}
 #stage>svg{position:absolute;inset:0;width:100%;height:100%}
-#drop{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);text-align:center;padding:16px}
+body.nomodel #edbar,body.nomodel #legend,body.nomodel #bottom,body.nomodel #flat,body.nomodel #info-wrap{display:none}
+body.nomodel,body.nomodel main{grid-template-rows:1fr;grid-template-columns:minmax(0,1fr)}
+#drop b{display:block;color:var(--ink);font-size:16px;margin-bottom:6px}#drop p{margin:0;font-size:14px}
+#drop{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--muted);text-align:center;padding:16px}
 #flat{position:absolute;right:12px;bottom:12px;z-index:2}#flat.on{background:var(--accent);color:#fff;border-color:var(--accent)}
 #cardk{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);background:var(--bar);border:1px solid var(--line);border-radius:6px;padding:3px 8px}#cardsz{width:90px}
 #bottom{position:absolute;left:12px;bottom:12px;display:flex;gap:8px;align-items:center}
@@ -314,6 +317,7 @@ const ICON={
 };
 
 function load(m){
+  document.body.classList.remove("nomodel");
   M=m; byId={}; M.links=m.links||{}; M.open_issues=m.open_issues||[];
   $("#qlist").innerHTML=(m.objects||[]).map(o=>`<option value="${esc(o.id)}">${esc(o.name||"")}</option>`).join("");
   (m.objects||[]).forEach(o=>byId[o.id]=o);
@@ -837,7 +841,9 @@ document.body.classList.add("embed");
 if(P.get("shell")) document.body.classList.add("shell");
 const toModel=d=>({...d.meta,objects:d.objects,connections:d.connections,flows:d.flows,links:d.links,open_issues:d.open_issues,layered:d.layered,contracts:d.contracts,behavior:d.behavior});
 const fetchModel=()=>fetch("/api/c4"+location.search).then(r=>r.ok?r.json():Promise.reject(r.status)).then(toModel);
-fetchModel().then(load).catch(e=>{$("#drop").textContent=e===404?"No C4 map (layered format) for this project":`Could not load model (${e}).`});
+fetchModel().then(load).catch(e=>{const d=$("#drop"),no=e===404;document.body.classList.add("nomodel");
+  if(!no)return d.textContent=`Could not load model (${e}).`;
+  const b=document.createElement("b"),p=document.createElement("p"),c=document.createElement("code");b.textContent="No architecture map yet";c.textContent="strata init";p.append("Run ",c," in the project folder to create a starter map.");d.replaceChildren(b,p)});
 /* task #249: Code panel. Read-only: GET /api/code/{files,symbols,src}. All server text goes in through textContent. */
 let C=null, codeBooted=false;
 const hashParts=()=>{let h=location.hash.slice(1);try{h=decodeURIComponent(h)}catch{}const i=h.indexOf("/"),t=h.slice(i+1);return i>=0&&(t==="code"||t.startsWith("code/"))?{obj:h.slice(0,i),code:true,sym:t.slice(5)}:{obj:h,code:false,sym:""}};

@@ -59,9 +59,9 @@ const IC={edit:'<path d="M3 13l.6-2.8 7-7a1.4 1.4 0 0 1 2 2l-7 7z"/>',plus:'<pat
   sun:'<circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1"/>'};
 const icon=k=>svg(S("0 0 16 16",IC[k],'stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"'));
 const orn=(cls,s)=>{const d=el("div",cls);d.setAttribute("aria-hidden","true");d.append(svg(s));return d};
-function empty(title,hint,code){
+function empty(title,hint,code,tail){
   const d=el("div","empty");d.append(orn("dragon",O.dragon),el("b","",title));
-  if(hint){const p=el("p","muted",hint);if(code)p.append(" ",el("code","",code));d.append(p)}
+  if(hint){const p=el("p","muted",hint);if(code)p.append(" ",el("code","",code));if(tail)p.append(tail);d.append(p)}
   return d;
 }
 
@@ -128,7 +128,7 @@ function addProject(){
   const line=s=>{const t=STEP[s.step]||[s.step,s.step],d=s.detail?": "+s.detail:"";
     if(s.status==="done")return["✓ "+t[0]];
     if(s.status==="started")return["… "+(s.step==="codemap"?"Code map is building in the background":t[0]+" (in progress)")];
-    if(s.status==="skipped")return["– "+(s.step==="codemap"?"No code found, code map skipped":s.step==="project"?"Already set up as "+((s.detail||"").match(/registered as (\S+)/)||[0,"an existing project"])[1]:t[0].replace(/ created| registered/,"")+" skipped"+d)];
+    if(s.status==="skipped")return["– "+(s.step==="codemap"?"No code found, code map skipped":s.step==="docs"?"Docs folders already there":s.step==="c4"?"Architecture map already there":s.step==="project"?"Already set up as "+((s.detail||"").match(/registered as (\S+)/)||[0,"an existing project"])[1]:t[0].replace(/ created| registered/,"")+" skipped"+d)];
     return["✗ "+t[1]+d]};
   const d=dialog("Add project",[name,pid,root,docs,par,desc,sl],(d,fail)=>{
     const ok=el("button","primary","Add project");ok.type="submit";
@@ -215,7 +215,7 @@ async function render(keep){
   const r=route();CUR=r;side(r);crumbs(r);
   const box=el("div");
   try{
-    if(!r.p){box.append(empty("No projects yet","Create one from the + beside Projects, or with:","strata.py project add ID --name ..."))}
+    if(!r.p){box.append(empty("No projects yet","Run","strata init"," in your project folder, or click + to add one."))}
     else await VIEW[r.tab](box,r.p,r.id);
   }catch(e){box.append(el("p","err",e.message))}
   if(my!==token)return;
@@ -272,7 +272,7 @@ const VIEW={
     const docs=await get("/api/docs?project="+enc(p));
     docs.forEach(x=>{try{x.code=JSON.parse(x.code||"[]")||[]}catch{x.code=[]}});
     if(id)return docReader(box,p,id,docs);
-    if(!docs.length){box.append(head("Contents",0));return box.append(empty("No docs yet","Write a YAML file into the project's docs_dir, e.g.","docs/strata/c4.yaml"))}
+    if(!docs.length){box.append(head("Contents",0));return box.append(empty("No docs yet","A doc is a short YAML page of notes or decisions. Add one, for example:",(byId[p].docs_dir||"docs")+"/research/notes.yaml"))}
     toc(box,p,docs.filter(x=>x.status!=="missing"),docs.filter(x=>x.status==="missing").length);
   },
   async c4(box,p,id){
