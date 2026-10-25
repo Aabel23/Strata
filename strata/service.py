@@ -129,6 +129,7 @@ def add_item(c, role, project, kind, title, body=None, priority=None, status=Non
     if role != "main" and (kind, label) != ("task", "issue"): _deny(c, role, "item.add", project, None, info, f"{role} may only add issues")
     if role != "main": status = "proposed"
     if spec is not None and not isinstance(spec, dict): raise ValueError("spec must be a JSON object")
+    if spec is not None and "scope" in spec and not isinstance(spec["scope"], dict): raise ValueError("spec.scope must be a JSON object")
     return db.add_item(c, project, kind, title, body, priority, status, role, spec, label=label)
 
 
@@ -147,7 +148,8 @@ def _spec(r): return json.loads(r["spec"]) if r["spec"] else {}
 def _gate(spec):
     """Why a task spec is not ready to be approved ([] = ok)."""
     miss = [k for k in ("goal", "acceptance", "verify") if not spec.get(k)]
-    if not (spec.get("scope") or {}).get("touch"): miss.append("scope.touch")
+    scope = spec.get("scope")
+    if not isinstance(scope, dict) or not scope.get("touch"): miss.append("scope.touch")
     return miss + (["open_questions must be empty"] if spec.get("open_questions") else [])
 
 
@@ -203,6 +205,7 @@ def edit_item(c, role, id, title=None, body=None, spec=None, priority=None):
     if role != "main": _deny(c, role, "item.edit", r and r["project"], f"item:{id}", {"id": id}, f"{role} may not edit items")
     if not r: raise KeyError(f"no item {id}")
     if spec is not None and not isinstance(spec, dict): raise ValueError("spec must be a JSON object")
+    if spec is not None and "scope" in spec and not isinstance(spec["scope"], dict): raise ValueError("spec.scope must be a JSON object")
     new = {k: v for k, v in (("title", title), ("body", body), ("priority", priority),
                              ("spec", spec)) if v is not None}
     if not new: raise ValueError("nothing to edit")
@@ -290,4 +293,3 @@ def search(c, q, project=None, src=None, limit=30, role="main"):
         r = c.execute(f"SELECT title, {col} AS k FROM {SRC_TABLE[h['src']]} WHERE {key}=?", (h["ref"],)).fetchone()
         h["title"], h["key"] = (r["title"], r["k"]) if r else ("", "")
     return hits
-

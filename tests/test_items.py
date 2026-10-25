@@ -135,6 +135,40 @@ def test_approve_gate(c):
         assert st(c, i)[0] == "approved"
 
 
+@pytest.mark.parametrize("operation", ["add", "edit"])
+def test_scope_must_be_object_on_add_and_edit(c, operation):
+    bad = {**GOOD, "scope": []}
+    if operation == "add":
+        with pytest.raises(ValueError, match="spec.scope must be a JSON object"):
+            service.add_item(c, "main", "p", "task", "T", status="proposed", spec=bad)
+        assert c.execute("SELECT count(*) FROM item").fetchone()[0] == 0
+    else:
+        t = task(c)
+        before = c.execute("SELECT spec,version FROM item WHERE id=?", (t,)).fetchone()
+        with pytest.raises(ValueError, match="spec.scope must be a JSON object"):
+            service.edit_item(c, "main", t, spec=bad)
+        assert tuple(c.execute("SELECT spec,version FROM item WHERE id=?", (t,)).fetchone()) == tuple(before)
+
+
+def test_approve_legacy_non_object_scope_is_incomplete(c):
+    t = task(c, status="proposed")
+    legacy = {**GOOD, "scope": []}
+    c.execute("UPDATE item SET spec=? WHERE id=?", (json.dumps(legacy), t)); c.commit()
+    with pytest.raises(PermissionError, match="spec incomplete: scope.touch"):
+        service.transition(c, "main", t, "approved")
+    assert st(c, t)[0] == "proposed" and denied(c) == ["approved"]
+
+
+def test_cli_approve_legacy_non_object_scope_is_clean(tmp_path, capsys):
+    db_path = str(tmp_path / "legacy.db")
+    c = db.init(db_path); db.add_project(c, "p", "P")
+    t = service.add_item(c, "main", "p", "task", "T", status="proposed", spec=GOOD)
+    c.execute("UPDATE item SET spec=? WHERE id=?", (json.dumps({**GOOD, "scope": []}), t)); c.commit(); c.close()
+    assert cli.main(["item", "approve", str(t), "--db", db_path]) == 1
+    out = capsys.readouterr()
+    assert "spec incomplete: scope.touch" in out.out and "Traceback" not in out.err
+
+
 def test_issue_by_coder_reviewer_is_proposed(c):
     for r in ("coder", "reviewer"):
         i = service.add_item(c, r, "p", "issue", "i", status="done")
