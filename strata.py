@@ -24,7 +24,7 @@
   strata item claim ID --as NAME | submit ID --note N [--as NAME] | rework ID --note N | close ID --note N (open -> done) | approve ID [--note --as] | reject ID --note N | release ID | dep add|rm ID DEP   (all: --json)
 """
 import argparse, json, pathlib, sys, threading, time, urllib.request, webbrowser
-from strata import blocks, c4_layered, codemap, db, service, symbols
+from strata import blocks, c4_drift, c4_layered, codemap, db, service, symbols
 
 
 def cmd_page(a):
@@ -249,6 +249,7 @@ def main(argv=None):
     for n, args in {"link": ref, "unlink": ref, "links": ref[:2],
                     "context": [(["--project"], req), (["--object"], {}), (["--max-tokens"], {"type": int, "default": 2000})],
                     "coverage": [(["--project"], req), (["--json"], {"action": "store_true"})],
+                    "drift": [(["--project"], req), (["--json"], {"action": "store_true"}), (["--fail-on-undeclared"], {"action": "store_true"})],
                     "flow": [(["--project"], req), (["--id"], {})], "contract": [(["id"], {}), (["--project"], req)],
                     "import": [(["dir"], {}), (["--project"], req), (["--force"], {"action": "store_true"}),
                                (["--dry-run"], {"action": "store_true"}), (["--yes"], {"action": "store_true"})],
@@ -261,6 +262,7 @@ def main(argv=None):
     if a.cmd == "sym": return cmd_sym(a)
     if a.cmd == "code": return cmd_code(a)
     if a.cmd == "c4" and a.action == "validate": return c4_layered.report(a.dir, _idx(a), json_out=a.json, strict=a.strict)
+    if a.cmd == "c4" and a.action == "drift": return c4_drift.report(db.connect(a.db), a.project, a.json, a.fail_on_undeclared)
     if a.cmd in ("project", "doc", "item", "c4", "search", "task"): return cmd_write(a)
     if a.cmd == "mcp":
         from strata import mcp
