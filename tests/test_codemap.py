@@ -7,12 +7,15 @@ G = {"nodes": [{"id": "a"}], "relationships": []}
 
 
 class Child:
-    terminated = False
-    def __init__(self, exit_code=None, wait_log=False): self.exit_code = exit_code; self.wait_log = wait_log; self.output = None
-    def poll(self): return self.exit_code
+    def __init__(self, exit_code=None, wait_log=False): self.exit_code = exit_code; self.wait_log = wait_log; self.output = None; self.stderr = None; self.terminated = False; self.waited = False; self.on_poll = None
+    def poll(self):
+        if self.on_poll: self.on_poll()
+        return self.exit_code
     def terminate(self): self.terminated = True
     def wait(self, t=None):
+        self.waited = True
         if self.wait_log: self.output.write(b"written while reaping")
+        if getattr(self, "cancel_on_wait", None) is not None: self.cancel_on_wait.set()
     def kill(self): pass
 
 
@@ -23,10 +26,13 @@ def env(tmp_path, monkeypatch):
     return p, c, tmp_path
 
 
-def fakes(root, repos=None, *, log=b"", run_code=0, serve_code=None, health_fail=False, wait_log=False):
-    calls, child = [], Child(serve_code, wait_log)
+def fakes(root, repos=None, *, log=b"", analyze_code=0, serve_code=None, health_fail=False, wait_log=False, cancel_on_health=None, cancel_on_analyze_poll=None, cancel_on_wait=None, block_health=None):
+    calls, children = [], []
     def fetch(url):
         calls.append(url)
+        if url.endswith("/health") and block_health is not None:
+            entered, release = block_health; entered.set(); release.wait()
+        if url.endswith("/health") and cancel_on_health is not None: cancel_on_health.set()
         if url.endswith("/health") and health_fail: raise OSError("not ready")
         if url.endswith("/health") and serve_code is not None: raise OSError("not ready")
         if url.endswith("/health"): return b"{}"
@@ -35,18 +41,20 @@ def fakes(root, repos=None, *, log=b"", run_code=0, serve_code=None, health_fail
     def write(stream):
         if stream is not None: stream.write(log)
     def spawn(cmd, stdout=None, stderr=None):
-        calls.append((cmd, stdout, stderr)); child.output = stdout; write(stdout); return child
-    def run(cmd, stdout=None, stderr=None):
-        calls.append(cmd); write(stdout); return type("R", (), {"returncode": run_code})()
-    return calls, child, dict(spawn=spawn, run=run, fetch=fetch)
+        calls.append(cmd); code = analyze_code if "analyze" in cmd else serve_code
+        child = Child(code, wait_log); child.output = stdout; child.stderr = stderr; children.append(child)
+        child.cancel_on_wait = cancel_on_wait
+        if "analyze" in cmd and cancel_on_analyze_poll is not None: child.on_poll = cancel_on_analyze_poll.set
+        write(stdout); return child
+    return calls, children, dict(spawn=spawn, fetch=fetch)
 
 
 def test_snapshot_raw_atomic(env):
-    p, c, root = env; calls, child, kw = fakes(root)
+    p, c, root = env; calls, children, kw = fakes(root)
     path, g = codemap.snapshot(c, p, "p", **kw)
     assert path == root / "t.codemap" / "p.json" and json.loads(path.read_text()) == G == g
-    assert not list(path.parent.glob("*.tmp")) and child.terminated
-    assert not any(isinstance(x, list) for x in calls) and calls[-1].endswith("/graph?repo=r")
+    assert not list(path.parent.glob("*.tmp")) and children[-1].terminated
+    assert not any(isinstance(x, list) and "analyze" in x for x in calls) and calls[-1].endswith("/graph?repo=r")
 
 
 def test_reindex_uses_index_only(env):
@@ -56,17 +64,16 @@ def test_reindex_uses_index_only(env):
 
 
 def test_subprocess_output_is_quiet_on_success(env, capsys):
-    p, c, root = env; calls, _, kw = fakes(root, log=b"banner\nprogress\n")
+    p, c, root = env; calls, children, kw = fakes(root, log=b"banner\nprogress\n")
     codemap.snapshot(c, p, "p", True, **kw)
     assert capsys.readouterr() == ("", "")
-    serve = next(x for x in calls if isinstance(x, tuple))
-    assert serve[1] is not None and serve[2] == codemap.subprocess.STDOUT
+    assert len(children) == 2 and all(x.output is not None and x.stderr == codemap.subprocess.STDOUT for x in children)
 
 
 def test_analyze_failure_reports_bounded_log_tail(env):
     p, c, root = env
     log = b"x" * 10000 + b"useful failure detail"
-    _, _, kw = fakes(root, log=log, run_code=1)
+    _, _, kw = fakes(root, log=log, analyze_code=1)
     with pytest.raises(RuntimeError) as exc:
         codemap.snapshot(c, p, "p", True, **kw)
     message = str(exc.value)
@@ -77,21 +84,80 @@ def test_analyze_failure_reports_bounded_log_tail(env):
 
 def test_serve_startup_failure_reports_log_tail_and_terminates(env):
     p, c, root = env
-    calls, child, kw = fakes(root, log=b"serve failed early", serve_code=1, wait_log=True)
+    calls, children, kw = fakes(root, log=b"serve failed early", serve_code=1, wait_log=True)
     with pytest.raises(RuntimeError) as exc:
         codemap.snapshot(c, p, "p", **kw)
     assert "serve exited during startup" in str(exc.value) and "serve failed early" in str(exc.value)
     assert "written while reaping" in str(exc.value)
-    assert child.terminated
+    assert children[-1].terminated and children[-1].waited
 
 
 def test_serve_health_failure_reports_log_tail(env):
     p, c, root = env
-    _, child, kw = fakes(root, log=b"health diagnostic", health_fail=True)
+    _, children, kw = fakes(root, log=b"health diagnostic", health_fail=True)
     with pytest.raises(RuntimeError) as exc:
         codemap.snapshot(c, p, "p", wait=0, **kw)
     assert "not healthy in 0s" in str(exc.value) and "health diagnostic" in str(exc.value)
-    assert child.terminated
+    assert children[-1].terminated
+
+
+def test_analyze_timeout_stops_and_reaps_child_without_snapshot(env):
+    p, c, root = env
+    _, children, kw = fakes(root, analyze_code=None)
+    with pytest.raises(RuntimeError, match="timed out during analyze"):
+        codemap.snapshot(c, p, "p", reindex=True, timeout=0.02, **kw)
+    assert children[0].terminated and children[0].waited
+    assert not codemap.snapshot_path(p, "p").exists()
+
+
+def test_analyze_cancellation_stops_and_reaps_child(env):
+    p, c, root = env; cancel = threading.Event()
+    _, children, kw = fakes(root, analyze_code=None, cancel_on_analyze_poll=cancel)
+    with pytest.raises(RuntimeError, match="cancelled during analyze"):
+        codemap.snapshot(c, p, "p", reindex=True, cancel=cancel, **kw)
+    assert children[0].terminated and children[0].waited
+    assert not codemap.snapshot_path(p, "p").exists()
+
+
+def test_serve_timeout_stops_child_without_snapshot(env):
+    p, c, root = env
+    _, children, kw = fakes(root, health_fail=True)
+    with pytest.raises(RuntimeError, match="timed out during serve health check"):
+        codemap.snapshot(c, p, "p", timeout=0.02, **kw)
+    assert children[-1].terminated and children[-1].waited
+    assert not codemap.snapshot_path(p, "p").exists()
+
+
+def test_cancellation_during_health_fetch_stops_child_without_snapshot(env):
+    p, c, root = env; cancel = threading.Event()
+    _, children, kw = fakes(root, cancel_on_health=cancel)
+    with pytest.raises(RuntimeError, match="cancelled during serve health check"):
+        codemap.snapshot(c, p, "p", cancel=cancel, **kw)
+    assert children[-1].terminated and children[-1].waited
+    assert not codemap.snapshot_path(p, "p").exists()
+
+
+def test_cancellation_interrupts_wait_for_blocked_health_fetch(env):
+    p, c, root = env; cancel = threading.Event(); entered = threading.Event(); release = threading.Event()
+    _, children, kw = fakes(root, block_health=(entered, release))
+    timer = threading.Timer(0.05, cancel.set); timer.start()
+    try:
+        with pytest.raises(RuntimeError, match="cancelled during serve health check"):
+            codemap.snapshot(c, p, "p", cancel=cancel, timeout=2, **kw)
+        assert entered.is_set() and children[-1].terminated and children[-1].waited
+        assert not codemap.snapshot_path(p, "p").exists()
+    finally:
+        release.set(); timer.cancel(); timer.join()
+
+
+def test_cancellation_during_serve_cleanup_prevents_snapshot(env):
+    p, c, root = env; cancel = threading.Event()
+    _, children, kw = fakes(root, cancel_on_wait=cancel)
+    with pytest.raises(RuntimeError, match="cancelled during serve cleanup") as exc:
+        codemap.snapshot(c, p, "p", cancel=cancel, **kw)
+    assert isinstance(exc.value.__cause__, RuntimeError)
+    assert children[-1].terminated and children[-1].waited
+    assert not codemap.snapshot_path(p, "p").exists()
 
 
 def test_failure_tail_read_is_explicitly_bounded():
@@ -108,9 +174,9 @@ def test_failure_tail_read_is_explicitly_bounded():
 def test_errors(env):
     p, c, root = env
     with pytest.raises(KeyError): codemap.snapshot(c, p, "nope", **fakes(root)[2])
-    _, child, kw = fakes(root, repos=[])
+    _, children, kw = fakes(root, repos=[])
     with pytest.raises(RuntimeError, match="--reindex"): codemap.snapshot(c, p, "p", **kw)
-    assert child.terminated and not (root / "t.codemap" / "p.json").exists()
+    assert children[-1].terminated and not (root / "t.codemap" / "p.json").exists()
 
 
 def test_cli_unknown_project(env):
