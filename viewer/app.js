@@ -2,7 +2,7 @@
 // App shell. Read-only except writes through POST /api/project and POST /api/item (token-guarded). All text goes through textContent (el() from page.js); never assigns markup.
 // el, get, enc and renderPage come from page.js (STRATA_SHELL makes it skip its own routing).
 const $=id=>document.getElementById(id);
-const TABS=[["task","Task","t"],["docs","Docs","r"],["c4","Architecture","a"],["audit","Log","l"]];
+const TABS=[["task","Task","t"],["docs","Docs","r"],["c4","Architecture","a"],["audit","Log","l"],["codemap","Code map","m"]];
 const TAB_LABEL=Object.fromEntries(TABS.map(t=>[t[0],t[1]]));
 const ST_ITEM=["proposed","approved","open","doing","review","done","rejected"];
 const ST_DOC=["current","draft","outdated","missing"], KIND_DOC=["research","architect","review","plan","other"];
@@ -52,6 +52,7 @@ const priIcon=p=>{const e=svg(S("0 0 16 16",PRI[p]||PRI.none,'class="pri"')), t=
 const IC={edit:'<path d="M3 13l.6-2.8 7-7a1.4 1.4 0 0 1 2 2l-7 7z"/>',plus:'<path d="M8 3.5v9M3.5 8h9"/>',trash:'<path d="M3.5 4.5h9M6.5 4.5V3h3v1.5M5 4.5l.5 8h5l.5-8"/>',overview:'<path d="M2.5 13.5h11M4 11V7M8 11V3.5M12 11V6"/>',task:'<circle cx="8" cy="8" r="5.5"/><path d="M5.6 8.1l1.6 1.6 3.2-3.4"/>',
   docs:'<path d="M4 2.5h5.5L12 5v8.5H4z"/><path d="M6 8h4M6 10.5h4"/>',
   c4:'<rect x="2.5" y="2.5" width="4" height="4" rx="1"/><rect x="9.5" y="9.5" width="4" height="4" rx="1"/><path d="M6.5 4.5h3a2 2 0 0 1 2 2v3"/>',
+  codemap:'<circle cx="4" cy="4" r="1.6"/><circle cx="12" cy="5" r="1.6"/><circle cx="7" cy="12" r="1.6"/><path d="M5.4 4.3l5 .5M4.8 5.4l1.6 5M10.9 6.4l-3 4.2"/>',
   audit:'<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',folder:'<path d="M2.5 4.5h4l1.5 1.5h5.5v6.5h-11z"/>',proj:'<path d="M2 12.5l3.5-6 2.5 3.5 2-2.5 4 5z"/>',
   chev:'<path d="M6 4l4 4-4 4"/>',prev:'<path d="M10 4L6 8l4 4"/>',reload:'<path d="M13 8a5 5 0 1 1-1.5-3.5M13 3v2.5h-2.5"/>',
   ext:'<path d="M9 3h4v4M13 3L7.5 8.5M11 9.5V13H3V5h3.5"/>',copy:'<rect x="5.5" y="5.5" width="7.5" height="7.5" rx="1.5"/><path d="M10.5 5.5V3H3v7.5h2.5"/>',
@@ -261,6 +262,10 @@ const VIEW={
   async c4(box,p,id){
     const r=el("div","reader c4"), f=el("iframe","frame c4");
     f.src="/c4?project="+enc(p)+"&embed=1"+(id?"#"+enc(id):"");f.title="C4 architecture";r.append(f);box.append(r);
+  },
+  async codemap(box,p){
+    const r=el("div","reader c4"), f=el("iframe","frame c4");
+    f.src="/codemap/?project="+enc(p);f.title="Code map";r.append(f);box.append(r);
   },
   async audit(box,p){
     const rs=await get("/api/audit?limit=200&project="+enc(p));

@@ -1,8 +1,8 @@
 import { edgeColor } from './render/palette.js';
 const $ = (id) => document.getElementById(id);
 
-export function createControls({ cam, onGravity, onEdgeToggle, onRepo, onEscape }) {
-  const gravity = $('gravity'), out = $('gravity-value'), slot = $('repo-slot'), filters = $('filters'), menu = $('edges-menu'), summary = menu.querySelector('summary');
+export function createControls({ cam, onGravity, onEdgeToggle, onEscape }) {
+  const gravity = $('gravity'), out = $('gravity-value'), filters = $('filters'), menu = $('edges-menu'), summary = menu.querySelector('summary');
   let raf = 0;
   $('zoom-in').onclick = () => cam.zoomCenter(1.35);
   $('zoom-out').onclick = () => cam.zoomCenter(1 / 1.35);
@@ -21,18 +21,6 @@ export function createControls({ cam, onGravity, onEdgeToggle, onRepo, onEscape 
   });
   return {
     resetGravity() { gravity.value = '0'; out.textContent = '0.00'; },
-    setRepos(repos, current) { // repos null => listRepos failed: free-text input
-      let w;
-      if (repos) {
-        w = document.createElement('select'); w.setAttribute('aria-label', 'Repository');
-        for (const r of new Set([...repos, current])) w.add(new Option(r, r));
-        w.value = current; w.onchange = () => onRepo(w.value);
-      } else {
-        w = document.createElement('input'); w.type = 'text'; w.className = 'repo-input'; w.value = current; w.setAttribute('aria-label', 'Repository');
-        w.onkeydown = (e) => { if (e.key === 'Enter' && w.value.trim()) onRepo(w.value.trim()); };
-      }
-      slot.replaceChildren(w);
-    },
     setEdgeTypes(types) {
       menu.hidden = types.length === 0; menu.open = false; summary.textContent = `Edges (${types.length})`;
       filters.replaceChildren(...types.map((t, i) => {

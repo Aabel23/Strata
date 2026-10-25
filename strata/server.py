@@ -16,7 +16,7 @@ def servable(root, segs):
 
 VIEWER = pathlib.Path(__file__).resolve().parent.parent / "viewer"
 STATIC = {"/": "app.html", "/app.js": "app.js", "/app.css": "app.css", "/c4": "index.html", "/index.html": "index.html", "/page.js": "page.js", "/swimlane.js": "swimlane.js", "/page.css": "page.css"}
-TYPES = {".html": "text/html", ".md": "text/plain", ".yaml": "text/plain", ".js": "application/javascript", ".css": "text/css", ".json": "application/json"}
+TYPES = {".html": "text/html", ".md": "text/plain", ".yaml": "text/plain", ".js": "application/javascript", ".mjs": "text/javascript", ".css": "text/css", ".json": "application/json"}
 SHOW = {"item": "id,project,kind,label,title,status,priority,owner"}
 ITEM_KINDS = ("rule", "task", "issue", "knowledge", "draft", "note", "step", "gate")
 ITEM_STATUS = ("proposed", "approved", "open", "doing", "review", "done", "rejected")
@@ -212,6 +212,9 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 with lock: m = c4_layered.read_model(conn, q.get("project") or default_project())
                 f = m and servable(m["root"], parts[2:])
                 return self.file(f, "text/plain") if f else self.send_error(404)
+            if parts[1:2] == ["codemap"]:
+                f = servable(VIEWER / "codemap", parts[2:] if parts[2:] != [""] else ["index.html"])
+                return self.file(f) if f else self.send_error(404)
             if parts[1:2] in (["vendor"], ["assets"]) and len(parts) == 3:
                 try:
                     f = (VIEWER / parts[1] / parts[2]).resolve()

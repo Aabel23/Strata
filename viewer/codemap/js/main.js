@@ -1,4 +1,4 @@
-import { listRepos, loadRaw } from './source.js';
+import { loadRaw } from './source.js';
 import { adapt } from './adapt.js';
 import { layout } from './layout.js';
 import { createCamera } from './camera.js';
@@ -13,7 +13,6 @@ import { buildScene, applyGravity, hit, neighbours, GRAVITY_MAX } from './render
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
-const snapshot = params.get('snapshot') === '1';
 const edgesCanvas = $('edges'), starsCanvas = $('stars');
 
 let scene = null, enabled = new Uint8Array(0), hover = -1, sel = -1, nbr = new Uint8Array(0), raf = 0, token = 0;
@@ -49,7 +48,6 @@ const controls = createControls({
   cam,
   onGravity: (g) => { if (!scene) return; applyGravity(scene, g); sky.setGlow(Math.min(1, g / GRAVITY_MAX)); refreshMarks(); schedule(); },
   onEdgeToggle: (t, on) => { enabled[t] = on ? 1 : 0; schedule(); },
-  onRepo: (r) => load(r),
   onEscape: () => select(-1),
 });
 
@@ -85,13 +83,12 @@ function select(i) {
 async function load(name) {
   const my = ++token, t0 = performance.now();
   scene = null; hover = sel = -1; refreshOverlayOff(); // drops the previous graph from canvases + overlay
-  const u = new URL(location.href); u.searchParams.set('repo', name); history.replaceState(null, '', u);
   $('source-note').textContent = `GitNexus ${name}`;
   $('node-count').textContent = $('edge-count').textContent = '0';
-  panel.message('Loading', name, snapshot ? 'Reading snapshot…' : 'Fetching graph from GitNexus…');
+  panel.message('Loading', name, 'Reading code map…');
   controls.setEdgeTypes([]); controls.resetGravity(); sky.setGlow(0);
   try {
-    const raw = await loadRaw({ repo: name, snapshot }); const t1 = performance.now();
+    const raw = await loadRaw(name); const t1 = performance.now();
     if (my !== token) return;
     const graph = adapt(raw); const t2 = performance.now();
     if (!graph.nodes.length) return panel.message('Empty', name, 'This graph has no nodes.');
@@ -121,8 +118,4 @@ function refreshOverlayOff() { overlay.mark(null); overlay.hover(0, 0, null, cam
 window.addEventListener('resize', () => cam.resize());
 cam.resize();
 
-let repos = null;
-try { repos = await listRepos(); } catch (err) { console.warn('[celeste] listRepos failed, using text input:', err.message); }
-const initial = params.get('repo') || repos?.[0] || 'endo';
-controls.setRepos(repos, initial);
-load(initial);
+load(params.get('project') || '');
