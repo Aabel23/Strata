@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "celeste/contract/graph.schema.json",
+  "title": "CelesteGraph",
+  "type": "object",
+  "required": ["nodes", "edges", "communities", "kinds", "edgeTypes"],
+  "additionalProperties": false,
+  "properties": {
+    "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
+    "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" } },
+    "communities": { "type": "array", "items": { "$ref": "#/$defs/community" } },
+    "kinds": { "type": "array", "items": { "type": "string" } },
+    "edgeTypes": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "required": ["id", "kind", "name", "file", "community", "degree"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "type": "string" },
+        "name": { "type": "string" },
+        "file": { "type": ["string", "null"] },
+        "community": { "type": ["string", "null"] },
+        "degree": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": ["source", "target", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "source": { "type": "string" },
+        "target": { "type": "string" },
+        "type": { "type": "string" }
+      }
+    },
+    "community": {
+      "type": "object",
+      "required": ["id", "name", "size"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "size": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

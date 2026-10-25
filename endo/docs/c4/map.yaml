@@ -1,0 +1,155 @@
+project:
+  id: endo
+  name: Endo
+  root: ../..
+
+objects:
+  - id: user
+    kind: actor
+    name: User / Developer
+    summary: Chats in UI, assigns tasks, and reviews generated code
+
+  - id: endo
+    kind: system
+    name: Endo
+    summary: Hierarchical Agent Framework with Tree-sitter Repo Map Engine
+    tech: Python
+
+  - id: chat
+    parent: endo
+    kind: app
+    name: Chat Interface
+    summary: WebSocket / CLI gateway receiving user messages and streaming agent events
+    tech: Python + Web/CLI
+    status: future
+
+  - id: orchestrator
+    parent: endo
+    kind: app
+    name: Root Orchestrator
+    summary: Global planner; ingests C4 architecture & macro repo map; delegates to area leads
+    tech: Python + LLM
+    status: future
+
+  - id: repo_engine
+    parent: endo
+    kind: app
+    name: Repo Map Engine
+    summary: Tree-sitter AST extraction, symbol PageRank, and multi-tier skeleton builder
+    tech: Tree-sitter + Python
+    status: future
+
+  - id: area_lead
+    parent: endo
+    kind: app
+    name: Area Lead Agent
+    summary: Subsystem specialist; localizes faults in target directory and packages work-packets
+    tech: Python + LLM
+    status: future
+
+  - id: coder
+    parent: endo
+    kind: app
+    name: Surgical Coder Agent
+    summary: Micro-agent restricted to 1-2 files; applies code patches with minimal context
+    tech: Python + LLM
+    status: future
+
+  - id: verifier
+    parent: endo
+    kind: app
+    name: Verifier & Test Runner
+    summary: Executes test suites, linters, and regression checks before approving patches
+    tech: Python + Sandbox
+    status: future
+
+  - id: store
+    parent: endo
+    kind: store
+    name: State & Cache Store
+    summary: SQLite task queues, session memory, AST cache, and audit trail
+    tech: SQLite
+    status: future
+
+  - id: fs
+    kind: system
+    name: Target Codebase
+    summary: Source code repository, test files, and project directory
+
+  - id: llm
+    kind: system
+    name: Frontier LLM
+    summary: Model inference APIs (Claude, Gemini, OpenAI)
+
+links:
+  - id: u_chat
+    from: user
+    to: chat
+    name: WS prompt
+    summary: User sends task prompt via chat interface
+
+  - id: chat_orch
+    from: chat
+    to: orchestrator
+    name: IPC task
+    summary: Stream task to Root Orchestrator
+
+  - id: orch_repo
+    from: orchestrator
+    to: repo_engine
+    name: import macro map
+    summary: Request high-level repo map of critical interfaces
+
+  - id: repo_fs
+    from: repo_engine
+    to: fs
+    name: file AST scan
+    summary: Fast Tree-sitter parsing across source files
+
+  - id: orch_area
+    from: orchestrator
+    to: area_lead
+    name: IPC delegation
+    summary: Delegate subsystem scope to Area Lead
+
+  - id: area_repo
+    from: area_lead
+    to: repo_engine
+    name: import local map
+    summary: Request localized AST skeleton for designated module
+
+  - id: area_coder
+    from: area_lead
+    to: coder
+    name: IPC work packet
+    summary: Hand over mini-context (<2k tokens) and exact acceptance criteria
+
+  - id: area_ver
+    from: area_lead
+    to: verifier
+    name: IPC verify request
+    summary: Trigger test suites on candidate patch before accepting
+
+  - id: coder_fs
+    from: coder
+    to: fs
+    name: file patch
+    summary: Surgical read and write restricted to target files
+
+  - id: ver_fs
+    from: verifier
+    to: fs
+    name: subprocess test
+    summary: Run test runner (pytest/cargo test) against patched codebase
+
+  - id: orch_llm
+    from: orchestrator
+    to: llm
+    name: HTTPS inference
+    summary: High-level architectural reasoning and plan breakdown
+
+  - id: orch_store
+    from: orchestrator
+    to: store
+    name: SQL query
+    summary: Persist task state, audit logs, and session checkpoints
