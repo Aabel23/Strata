@@ -391,7 +391,7 @@ function docReader(box,p,id,docs){
 }
 
 /* ---------- task board (read-only): status columns, detail pane. Filters live in the hash query. ---------- */
-const COLS=["proposed","approved","doing","review"], FOLD=["done","open","rejected"];
+const COLS=["open","proposed","approved","doing","review"], FOLD=["done","rejected"], COLLBL={open:"To do"};
 const PRI_TAG={p0:"P0",p1:"P1",p2:"P2",p3:"P3"};
 const BKIND=["task","step"];
 const DAY=864e5;
@@ -444,7 +444,7 @@ async function boardView(box,p,id){
   const main=el("div","tmain"), board=el("div","tboard"), mk=x=>itemCard(x,p,qs,id);
   COLS.forEach(st=>{
     const its=vis.filter(x=>x.status===st), col=el("section","tcol"), h=el("h3");
-    h.append(statusIcon(st),st+" · "+its.length);col.append(h);
+    h.append(statusIcon(st),(COLLBL[st]||st)+" · "+its.length);col.append(h);
     const c=el("div","cards");its.forEach(x=>c.append(mk(x)));if(!its.length)c.append(el("p","muted tnone","Empty"));col.append(c);board.append(col);
   });
   const folds=el("div","tfolds");

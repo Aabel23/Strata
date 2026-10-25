@@ -314,8 +314,9 @@ article.doc table{width:100%}
 .mono{font-family:var(--mono);font-size:11px;color:var(--faint)}
 .tmain{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,340px);gap:16px;align-items:start}
 .tleft{min-width:0;display:flex;flex-direction:column;gap:12px}
-.tboard{display:grid;grid-template-columns:repeat(4,minmax(124px,1fr));gap:10px;overflow-x:auto;padding-bottom:4px}
-.tcol,.tfold{min-width:0;border:1px solid color-mix(in srgb,var(--accent) 16%,transparent);background:transparent;border-radius:var(--r-lg);padding:10px}
+.tboard{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:10px;overflow-x:auto;padding-bottom:4px}
+.tcol,.tfold,.tbar2{min-width:0;background:var(--bg)}
+.tcol,.tfold{min-width:0;border:1px solid color-mix(in srgb,var(--accent) 16%,transparent);border-radius:var(--r-lg);padding:10px}
 .tcol{display:flex;flex-direction:column;max-height:max(320px,calc(100vh - 220px))}
 .tcol .cards,.tfold .cards{overflow-y:auto;max-height:max(280px,calc(100vh - 260px));min-height:0;scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--accent) 25%,transparent) transparent}
 .tcol .cards::-webkit-scrollbar,.tfold .cards::-webkit-scrollbar{width:6px}
