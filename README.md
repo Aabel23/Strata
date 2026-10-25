@@ -1,208 +1,97 @@
+# Strata
+
 ## Quickstart
 
-Needs Python 3.9+ and PyYAML.
+Requirements: Python 3.9+ and PyYAML. The installer adds a `strata` command under `~/.local/bin`; it does not require `sudo`.
 
-```
-git clone https://github.com/Aabel23/Strata.git ~/strata && cd ~/strata
-bash scripts/install.sh              # puts `strata` on your PATH (no sudo)
-cd ~/your-project && strata init     # project, docs, starter C4 map, code map
-strata serve                         # terminal 1: the viewer, http://127.0.0.1:8740
-strata open                          # terminal 2: opens your project in the browser
-```
+```sh
+git clone https://github.com/Aabel23/Strata.git ~/strata
+cd ~/strata
+bash scripts/install.sh
 
-(`strata open` waits a few seconds for the viewer. Or run the viewer as a service: `systemctl --user start strata`.)
-Then add a task from the board, or `strata item add --project <id> --kind task --title "My first task"`.
-Open the Code map tab to see your code as a graph. Run `strata --help` for everything else.
-
----
-
-## Tham chiếu (tiếng Việt)
-
-# ⛰ Strata
-
-Kiến trúc C4 viết dưới dạng code. Bạn mô tả hệ thống trong một thư mục YAML (`map.yaml` + `contracts/` + `behavior/` + `flows/`), rồi xem nó qua một viewer có thể zoom qua các tầng.
-Ý tưởng lấy từ IcePanel: **model trước, sơ đồ sau**.
-
-Tài liệu viết bằng YAML thuần nội dung, đặt trong `docs_dir`; server tự quét và vẽ (xem `docs/architect/doc-format.yaml`). Ngoài ra: [docs/architect/ARCHITECTURE.md](docs/architect/ARCHITECTURE.md) (kiến trúc, dữ liệu, server, cách mở rộng) · [docs/AGENT_C4.md](docs/AGENT_C4.md) (agent vẽ/sửa map).
-
-## Dùng Strata với agent
-
-Strata cung cấp công cụ; sổ tay agent dùng CLI/MCP nằm tại [`agent/skills/strata/SKILL.md`](agent/skills/strata/SKILL.md). Luật, quy trình, vai agent và hook dùng chung nằm ngay trong `agent/`: [`agent/BOOTSTRAP.md`](agent/BOOTSTRAP.md), [`agent/HIEN_PHAP.md`](agent/HIEN_PHAP.md).
-
-Dữ liệu nằm trong SQLite (`$STRATA_DB`, hoặc `--db FILE`). Thư mục C4 là nguồn chuẩn của map; DB chỉ là bản đọc.
-
-```
-python3 strata.py c4 validate docs/c4                          # kiểm tra thư mục map
-python3 strata.py c4 import docs/c4 --project strata           # nạp vào DB (upsert, xóa phần đã bỏ)
-python3 strata.py serve --project strata             # http://127.0.0.1:8740
+cd ~/your-project
+strata init
 ```
 
-Viewer cần server (`/api/c4`), không mở trực tiếp file HTML được nữa. Gốc code lấy từ `project.root` trong `map.yaml`, đổi thành đường dẫn tuyệt đối lúc import.
-Map C4 chỉ hiện trong tab Kiến trúc của app shell (`/#/p/P/c4`); mở `/c4?project=P` trực tiếp sẽ chuyển về đó.
+`strata init` registers the current folder, creates `docs/research`, `docs/architect`, `docs/plan`, and `docs/review`, and writes a starter Architecture map at `docs/c4/map.yaml`. It attempts to build a Code map when source code is present and GitNexus is available. You can rerun `strata init` safely.
 
-## App shell nhiều project
+Start the viewer in one terminal, then open the project from another:
 
-`serve` mở `/` là app shell (chỉ đọc): sidebar cây project, tab Tổng quan / Task / Issue / Thảo luận / Tài liệu / Kiến trúc / Nhật ký, hash route `#/p/<project>/<tab>[/<id>]`, `Ctrl+K` tìm kiếm toàn văn (item, page, doc). Mọi ghi dữ liệu đi qua CLI và để lại một dòng `audit`.
-
-```
-python3 strata.py project add ID --name N [--root DIR --docs-dir DIR --parent P --description T]   # docs-dir tương đối tính từ root
-python3 strata.py project list
-python3 strata.py doc scan --project P                  # quét docs_dir/*.html (bỏ assets/, plan/archive/, thư mục ẩn); file mất -> status missing
-python3 strata.py doc set --project P PATH [--feature X --status current|draft|outdated|missing --ord N]
-python3 strata.py item add --project P --kind task|issue --title T [--body --priority --status]
-python3 strata.py item set ID [--status S --priority X]
+```sh
+strata serve
 ```
 
-`doc.kind` lấy từ thư mục đầu (`research|architect|review|plan`, còn lại `other`). Tiêu đề lấy từ `<title>` hoặc `<h1>`.
-
-Route (GET): `/` shell, `/c4` viewer C4, `/pages`, `/page/<p>/<slug>`, `/api/projects` (kèm số đếm), `/api/items?project=&kind=&status=&id=`,
-`/api/docs?project=`, `/api/audit?project=&limit=`, `/api/search?q=&project=` (FTS, bm25, tối đa 30),
-`/api/code/files?project=&object=`, `/api/code/symbols?project=&path=`, `/api/code/src?project=&id=` (tầng Code, chỉ đọc),
-`/docs/<project>/<path>` (phục vụ cả cây `docs_dir`; chặn `..`, dotfile, `.db`). Giá trị lọc ngoài whitelist trả 400.
-
-Tầng Code (chỉ đọc): trong tab Architect, chọn một component rồi bấm Code (hoặc double-click component không có con) để xem các file nó sở hữu (theo `owns`), mở file thành class và method (chỉ Python), xem source (tối đa 200 dòng). Cần đặt `owns` cho component; `c4 coverage` và `C4-OWNS-EMPTY` tìm chỗ thiếu. Không lưu gì vào YAML.
-
-Server HTTP chỉ đọc, trừ một route duy nhất `POST /api/c4/edit` (trình sửa Architect, xem dưới). Map C4 cũng có thể sửa trong thư mục rồi `c4 import`; mọi ghi khác đi qua CLI/MCP (service có audit).
-
-### Liên kết object với task, context cho agent
-
-```
-python3 strata.py c4 link --project P --object X --item ID        # unlink cùng cú pháp
-python3 strata.py c4 links --project P --object X                  # liệt kê item đã gắn
-python3 strata.py c4 context --project P [--object X] [--max-tokens 2000]   # văn bản gọn cho agent
-python3 strata.py c4 flow --project P [--id F]                              # trace từng bước của flow
-python3 strata.py c4 contract ID --project P                                # chi tiết một contract
+```sh
+cd ~/your-project
+strata open
 ```
 
-Agent thiết kế/sửa map: đọc [docs/AGENT_C4.md](docs/AGENT_C4.md) trước.
+The viewer runs at <http://127.0.0.1:8740>. `strata open` uses the project containing the current folder and expects a viewer running with the same database. To use a different port, pass `--port` to both commands.
 
-`link/unlink` có audit (`c4.link`/`c4.unlink`); link trùng không ghi thêm. `context` không có `--object` thì in tổng quan cả map (kèm số issue mở); có `--object` thì in object, chuỗi cha, con, connection đã gộp, item liên quan, flow; quá `--max-tokens` (ước len/4) thì cắt từ flow ngược lên, phần cắt ghi `... (cắt: <phần>)`.
-`/api/c4` trả `meta`, `objects`, `connections` (link), `flows`, `contracts`, `behavior`, `links` và `open_issues`; viewer viền đỏ object có issue mở và có ô tìm object. Project chưa import map thì `/api/c4` trả 404 và viewer ghi "No C4 map (layered format) for this project".
+Strata keeps project tasks, notes, and architecture maps in a local SQLite database. Its browser viewer shows a task board, project Docs, an Architecture map, and an optional Code map.
 
-## Hướng dẫn dùng bản đồ C4
+The installer checks only `~/.local/bin/strata`. If a file or symlink is already there, it leaves it alone unless you pass `--force`; it does not check for other `strata` commands elsewhere on your `PATH`. If `~/.local/bin` is not on your `PATH`, add it as the installer suggests, then open a new terminal.
 
-**Chuẩn bị**
-- `python3 strata.py c4 import DIR --project P` nạp thư mục map vào DB.
-- `python3 strata.py serve --project P` rồi mở tab Kiến trúc trong app shell (`/#/p/P/c4`).
+## Use the viewer
 
-**Đọc một ô**: icon, tên, nhãn loại (Người dùng / Hệ thống / Ứng dụng / Kho dữ liệu / Thành phần), technology và 1–2 dòng mô tả. Rê chuột vào ô để xem mô tả đầy đủ. Ô có chồng thẻ phía sau và dòng "N thành phần bên trong ›" ở chân là ô mở ra được. Ô nét đứt ghi "Bên ngoài tầng này". Hộp "Chú giải" ở góc phải trên canvas giải thích các ký hiệu, gập/mở được (nhớ lựa chọn).
+- **Task**: view work in status columns, including **To do**. Use the filters and search above the board; select a card to open its details popup. The popup includes Edit and Delete actions. Use **+ Task** to add work.
+- **Add project**: choose **+ Add project** in the viewer. Provide a name and project ID; set a code folder to enable project setup. Setup creates the docs folders and starter Architecture map, then builds the Code map in the background when possible.
+- **Docs**: browse project documents from its docs folder. Add YAML files under `research/`, `architect/`, `plan/`, or `review/`; Strata scans the folder and displays the documents. See the [document format guide](docs/architect/doc-format.yaml) for the supported content blocks.
+- **Architecture**: explore the project's C4 map. The starter map is `docs/c4/map.yaml`. Files in `docs/c4` are the source of truth; the database contains the imported view used by the viewer. Edit the map files, validate them, and import them with the commands below. See the [C4 guide](docs/AGENT_C4.md) for the map format and modeling rules.
+- **Code map**: browse the code graph generated by GitNexus. Code map builds require GitNexus, which is optional and is not bundled in a fresh Strata checkout. GitNexus requires Node.js `^22.18.0` or `>=24.11.0` and npm. Install the pinned CLI with `npm install -g gitnexus@1.6.12`; see the upstream [installation guide](https://github.com/abhigyanpatwari/GitNexus#quick-start) and Strata's [GitNexus setup notes](tools/gitnexus/UPSTREAM.md). Strata looks for `STRATA_GITNEXUS`, a local `tools/gitnexus/node_modules` install, or `gitnexus` on `PATH`. Without GitNexus, project/docs/Architecture setup still works, and the Code map step reports the issue separately.
 
-**Các tầng và zoom vào/ra**
-- Tầng 1 Context (actor, system), tầng 2 Container (app, store), tầng 3 Component. Mỗi lần chỉ vẽ con trực tiếp của object đang zoom. Thanh breadcrumb ghi rõ tầng, vd "Tầng 2 · Bên trong Cloud server".
-- Bấm một ô: chọn ô, làm nổi connection của nó và các ô nối với nó, làm mờ phần còn lại, mở panel chi tiết. Bấm nền hoặc `Esc` để bỏ chọn.
-- Đi vào: bấm "… bên trong ›" ở chân ô, double-click, `Enter` khi đang chọn ô, hoặc nút "Zoom vào" ở panel. Camera bay vào ô rồi tầng con nở ra từ chính vị trí ô đó.
-- Đi ra: nút Up, `Esc` khi không chọn gì, hoặc breadcrumb; tầng con thu lại vào ô của nó. ← → / Back / Forward của trình duyệt cũng chạy cùng hiệu ứng. Hiệu ứng tắt khi hệ điều hành bật "giảm chuyển động".
-- Đi lui/tới theo lịch sử: nút ← → cạnh breadcrumb, `Alt+←` / `Alt+→`, hoặc nút Back/Forward của trình duyệt. Mỗi lần đổi tầng là một bước lịch sử.
-- Cuộn chuột để phóng/thu, kéo nền để di chuyển, nút Fit để vừa khung.
+GitNexus is licensed under PolyForm Noncommercial 1.0.0 (noncommercial use only). Review the [license](tools/gitnexus/LICENSE) before using GitNexus.
 
-**Tìm object**: gõ vào ô "Tìm object…" ở thanh dưới (gợi ý theo id/tên), Enter hoặc chọn gợi ý. Viewer nhảy tới tầng chứa object, chọn và căn giữa nó. Không khớp thì hiện "Không tìm thấy".
+## Common commands
 
-**Lọc tag**: ô "Tags" ở thanh dưới; object không có tag đó bị làm mờ.
+```sh
+# Register or set up a project in any folder
+strata init /path/to/project --id my-project --name "My project"
 
-**Flow từng bước**: panel phải, tab "Diagram flows", chọn flow. Dùng « Previous / Next » hoặc bấm một step; connection của step đang chọn được tô sáng. Khi đã chọn flow, phím `←` / `→` đổi step.
+# Skip the optional code-map build
+strata init /path/to/project --no-codemap
 
-**Panel chi tiết** (bấm một object):
-- Code: link tới file code thật (mở tab mới); link http(s) mở nguyên văn.
-- Vấn đề: lý do object có huy hiệu "!".
-- Liên quan: task/issue đã gắn bằng `c4 link`.
-- Bấm một connection để xem mô tả, technology, status.
+# Add, list, inspect, and update tasks
+strata item add --project my-project --kind task --title "Write the first guide"
+strata item list --project my-project
+# Replace 42 with the ID printed by `strata item add`
+task_id=42
+strata item show "$task_id"
+strata item set "$task_id" --status doing
 
-**Huy hiệu "!"** (góc trên phải object): object có vấn đề chất lượng model: link code chết (`dead_link`), không có link (`no_link`), thiếu mô tả (`no_desc`). Rê chuột để xem lý do. **Viền đỏ**: object có issue mở gắn vào.
+# Validate and import Architecture map edits
+strata c4 validate /path/to/project/docs/c4
+strata c4 import /path/to/project/docs/c4 --project my-project
 
+# Rebuild a project's Code map
+strata code snapshot --project my-project --reindex
 
-Trong tab Kiến trúc: map, chú giải, tag/tìm object và panel Chi tiết/Flow; lên tầng bằng `Esc`, vào trong bằng bấm đúp.
-
-**Phím tắt** (không có tác dụng khi đang gõ trong ô nhập hoặc select):
-
-| Phím | Tác dụng |
-|---|---|
-| `Esc` | Bỏ chọn ô; nếu không chọn gì thì lên một tầng |
-| `Enter` | Đi vào bên trong ô đang chọn |
-| `Alt+←` / `Alt+→` | Lùi / tới trong lịch sử các tầng |
-| `←` / `→` | Step trước / sau (khi đã chọn flow) |
-| `f` | Vừa khung |
-| `+` hoặc `=` | Phóng to |
-| `-` | Thu nhỏ |
-| `Ctrl+K` | Tìm toàn văn (chỉ trong app shell) |
-
-**Cho agent** (xem thêm mục "Liên kết object với task"):
-- `c4 link --project P --object X --item ID` gắn; `unlink` gỡ.
-- `c4 links --project P --object X` liệt kê cái đã gắn.
-- `c4 context --project P [--object X] [--max-tokens N]` in văn bản gọn để đưa vào prompt.
-
-## Tầng C4
-
-| kind | Tầng | Được nằm trong |
-|---|---|---|
-| `actor`, `system` | 1 Context | top level, `group` |
-| `app`, `store` | 2 Container | `system` |
-| `component` | 3 Component | `app` |
-| `group` | gom nhóm (domain) | bất kỳ |
-
-Code không là object: contract có `start`/`end` trỏ `path::Qual.name`, object có `owns` (glob). `c4 validate` cảnh báo symbol không resolve được.
-
-## Model
-
-```yaml
-# map.yaml
-project: {id: strata, name: strata, root: ../..}
-objects:
-  - {id, kind, name, parent?, summary?, status?, tags?, owns?, behavior?}
-links:
-  - {id, from, to, name?, summary?, detail?: <contract id>, status?}
-# contracts/<file>.yaml: [{id, transport?, body?, start, end}]   behavior/<module>.yaml   flows/<id>.yaml: {name, steps: [{link, reverse?} | {at, transition?}, text?, values?]}
+# Search indexed items and documents
+strata search "first guide" --project my-project
 ```
 
-Chi tiết và ví dụ: [docs/AGENT_C4.md](docs/AGENT_C4.md).
+`strata item add` prints the new item's ID (for example, `ok: item 42`); set `task_id` to that number before running the commands.
 
-## Viewer
+Task statuses include `proposed`, `open`, `approved`, `doing`, `review`, `done`, and `rejected`. The item commands also support issues, priorities, editing, dependencies, and review transitions. Run `strata --help` or `strata item --help` for the full command list.
 
-- **Zoom:** bấm đúp vào object có dấu ⊕ để zoom vào. Breadcrumb hoặc phím `Esc` để đi lên.
-- **Lower connection:** connection ở tầng sâu tự hiện lên tầng trên, nối giữa hai object cha. Nhiều connection trùng hướng được gộp thành "N kết nối".
-- **Object bên ngoài:** object ngoài phạm vi đang xem có viền nét đứt.
-- **Status:** `future` vẽ nét đứt, `deprecated` màu cam, `removed` màu đỏ chấm.
-- **Tag:** làm mờ những object không có tag đang chọn.
-- **Flow:** tab *Diagram flows* ở panel phải; Previous/Next, bấm vào bước, hoặc phím mũi tên.
-- **Canvas:** kéo để pan, lăn chuột để zoom, `F` vừa khung, `+`/`-` zoom. Nút ◐ đổi sáng/tối.
+## Where data lives
 
-Thư viện bên thứ ba nằm trong `viewer/vendor/` (không dùng CDN): `dagre.min.js` 0.8.5, `mermaid.min.js` 10.9.1 (UMD, tải từ cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/).
+- **Database**: the default is `database/strata.db` in the Strata checkout (or the legacy `strata.db` there if present). Set `STRATA_DB` to choose another SQLite file; the same setting must be used by `strata`, `strata serve`, and `strata open`.
+- **Project documents and Architecture map**: each project has a docs folder, normally `<project>/docs`. These files can be kept in the project repository.
+- **Code map snapshot**: stored beside the database in `<database-name>.codemap/<project-id>.json`. GitNexus also keeps its own index data.
 
-### Sửa sơ đồ trong viewer (Architect editor)
+Example for a database outside the checkout:
 
-Mở tab Architect, chuyển từ Select sang Edit. Thanh công cụ cho thêm, sửa, xóa object và link. Mỗi sửa được kiểm tra như `c4 validate`, ghi vào thư mục `docs/c4` rồi import (có dòng audit). Không sửa được contract, flow, behavior, id của object, hay from/to của link; làm các việc đó trong file.
-
-- `strata.py serve --allow-edit` bật, `--no-edit` tắt. Mặc định chỉ bật khi bind loopback.
-- Service thật bind `127.0.0.1` và địa chỉ Tailscale, nên chỉ sửa được qua `http://127.0.0.1:8740`. Muốn sửa qua cả Tailscale: thêm `--allow-edit` vào cuối dòng `ExecStart` trong `~/.config/systemd/user/strata.service`, rồi `systemctl --user daemon-reload && systemctl --user restart strata`.
-
-## Page (tài liệu dạng block)
-
-Page là một dòng trong bảng `page` (project, slug, title, kind `research|note`, blocks JSON). Nội dung chữ được đưa vào FTS (`search`, src=`page`).
-File page là JSON `{project, slug, title, kind, blocks}`; xem `examples/strata-design.page.json`.
-
-8 loại block (đúng 8, không thêm):
-
-| type | trường |
-|---|---|
-| `md` | `text` (đoạn, `#`..`###`, danh sách, ``` code, `code`, **đậm**, link) |
-| `layers` | `rows: [{title, cells: [{name, note?, status: done\|plan}]}]` |
-| `mermaid` | `code` |
-| `table` | `head: [..]`, `rows: [[..]]` |
-| `legend` | `items: [{label, status: done\|plan}]` |
-| `question` | `q`, `options: [{label, note?}]`, `recommend?` (trùng một label) |
-| `c4` | `project?`, `ids: [..]` (nhúng viewer; id thiếu trong DB chỉ cảnh báo) |
-| `query` | `src: item`, `where: {cột: giá trị}` (cột trong whitelist), `limit?` 1..200 |
-
-```
-python3 strata.py page validate FILE.json     # exit 1 nếu lỗi, vd "block[3] type layers: missing 'rows'" (block đánh số từ 0)
-python3 strata.py page put FILE.json          # validate rồi upsert
-python3 strata.py page list [--project P]
+```sh
+export STRATA_DB="$HOME/.local/share/strata/strata.db"
+strata init ~/your-project
+strata serve
 ```
 
-URL khi `serve`: `/pages[?project=P]` (danh sách), `/page/<project>/<slug>`, `/api/pages`, `/api/page/<p>/<s>`, `/api/page/<p>/<s>/version`,
-`/api/query?src=item&project=..&status=..` (cột whitelist, sai cột trả 400), `/vendor/*`. Trang tự cập nhật (hỏi `/version` mỗi 2 giây).
+## Troubleshooting
 
-## Ghép vào workflow
-
-1. Đặt thư mục map trong repo cạnh code, ví dụ `docs/c4/`.
-2. Agent architect cập nhật thư mục này khi thiết kế thay đổi. Diff đọc được trong git.
-3. Chạy `strata.py c4 validate docs/c4` rồi `strata.py c4 import docs/c4 --project P` trong CI hoặc pre-commit để bắt link, contract và flow sai.
+- **`strata: command not found`**: add `~/.local/bin` to `PATH` and start a new terminal. Check with `command -v strata`.
+- **Viewer does not open the project**: start `strata serve`, then run `strata open` from inside the registered project. If you chose a custom database or port, use the same database and port for both commands.
+- **Code map is missing or reports GitNexus unavailable**: install GitNexus using the [upstream guide](https://github.com/abhigyanpatwari/GitNexus#quick-start) and make `gitnexus` available on `PATH`, or configure `STRATA_GITNEXUS` to its CLI file or executable. If it points to a `.js` file, Node.js must also be on `PATH`. Then run `strata code snapshot --project <id> --reindex`. Use `strata init --no-codemap` when you only need project, docs, and Architecture setup.
+- **Architecture changes do not appear**: run `strata c4 validate <docs-dir>/c4`, fix reported errors, and import the folder with `strata c4 import <docs-dir>/c4 --project <id>`.
+- **A Docs page is missing or invalid**: check that its YAML file is under the project's docs folder and validate it with `strata doc validate <file>`.
