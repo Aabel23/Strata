@@ -360,6 +360,52 @@ objects:
   owns:
   - viewer/app.html
   - viewer/index.html
+- id: gitnexus
+  parent: strata
+  kind: app
+  name: GitNexus
+  summary: 'PLANNED: vendored npm gitnexus 1.6.12 (PolyForm Noncommercial, never edited) at tools/gitnexus/; indexes a repository and exports a graph; only ever called as a CLI subprocess, never imported'
+  status: future
+  tech: Node.js, npm gitnexus 1.6.12
+  owns:
+  - tools/gitnexus/**
+- id: gitnexus_index
+  parent: strata
+  kind: store
+  name: GitNexus index
+  summary: 'PLANNED: <repo>/.gitnexus/lbug, the LadybugDB graph index of one indexed repository; owned and written only by gitnexus'
+  status: future
+  tech: LadybugDB
+- id: codemap
+  parent: viewer
+  kind: component
+  name: Code map
+  summary: 'PLANNED: viewer tab, plain JS on canvas with vendored graphology force layout, no build step; proposed files viewer/codemap/ (renderer, graph.schema.json); reads the snapshot over GET only; the old Node bridge is dropped'
+  status: future
+- id: codemap_snap
+  parent: cli
+  kind: component
+  name: Code snapshot
+  summary: 'PLANNED: proposed strata/codemap.py; command `strata.py code snapshot --project P` runs gitnexus and converts its {nodes, relationships} to the Celeste graph format (nodes, edges, communities, kinds, edgeTypes)'
+  status: future
+- id: codemap_store
+  parent: strata
+  kind: store
+  name: Code map snapshot
+  summary: 'PLANNED: proposed <project root>/.strata/codemap/graph.json, a Celeste graph snapshot (contract graph.schema.json); written by the snapshot command, read by the server'
+  status: future
+  tech: JSON file
+- id: agent_gov
+  parent: strata
+  kind: app
+  name: Agent governance
+  summary: 'PLANNED: Endo rules, roles, workflow and skills moved in as real files under agent/ (Markdown); the hook script stays with cc_hooks'
+  status: future
+  tech: Markdown
+  owns:
+  - agent/*.md
+  - agent/agents/*
+  - agent/skills/**
 links:
 - id: u_browse
   from: user
@@ -905,3 +951,63 @@ links:
   name: Edit project
   detail: service.gs_project_ops
   summary: Project write route calls the project service functions; delete backs up first.
+- id: ag_gx
+  from: agent
+  to: gitnexus
+  name: Query code graph (CLI)
+  status: future
+  detail: codemap.ag_gx
+  summary: Agent runs the vendored gitnexus CLI for code questions and graph export.
+- id: cm_cli
+  from: argp
+  to: codemap_snap
+  name: code snapshot command
+  status: future
+  detail: codemap.cm_cli
+  summary: The code snapshot subcommand calls the snapshot module.
+- id: cm_gx
+  from: codemap_snap
+  to: gitnexus
+  name: Run gitnexus (subprocess CLI)
+  status: future
+  detail: codemap.cm_gx
+  summary: Snapshot module shells out to tools/gitnexus to index and export the graph; no import.
+- id: gx_index
+  from: gitnexus
+  to: gitnexus_index
+  name: Write and read index (file)
+  status: future
+  summary: GitNexus builds and queries <repo>/.gitnexus/lbug.
+- id: gx_repo
+  from: gitnexus
+  to: repo
+  name: Read source files
+  status: future
+  summary: GitNexus parses the repository files to build the index.
+- id: cm_write
+  from: codemap_snap
+  to: codemap_store
+  name: Write snapshot (JSON file)
+  status: future
+  detail: codemap.cm_write
+  summary: Converted Celeste graph is written to the snapshot file.
+- id: cm_get
+  from: codemap
+  to: server
+  name: Load snapshot (HTTP GET)
+  status: future
+  detail: codemap.cm_get
+  summary: Code map tab fetches the snapshot; GET only, no new write route.
+- id: cm_read
+  from: handler
+  to: codemap_store
+  name: Read snapshot (JSON file)
+  status: future
+  detail: codemap.cm_read
+  summary: The GET route reads the snapshot file and returns it unchanged.
+- id: a_gov
+  from: agent
+  to: agent_gov
+  name: Read rules, roles and skills (files)
+  status: future
+  summary: Agents load governance Markdown from agent/.

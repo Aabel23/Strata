@@ -1,0 +1,24 @@
+id: view_code_map
+name: Open the Code map tab
+steps:
+- link: u_browse
+  text: open the Code map tab
+- at: codemap
+  text: tab activates, requests the snapshot
+- link: cm_get
+  text: GET /api/codemap?project=P
+- at: handler
+  text: 'do_GET: check Host, route /api/codemap'
+- link: cm_read
+  text: read the snapshot file
+- link: cm_read
+  reverse: true
+  text: graph JSON
+- link: cm_get
+  reverse: true
+  text: graph JSON
+- at: codemap
+  text: force layout with graphology, draw on canvas
+- link: u_browse
+  reverse: true
+  text: the code graph appears

@@ -1,0 +1,57 @@
+# All contracts here are PLANNED (status future). Paths marked "proposed" do not exist yet.
+- id: ag_gx
+  transport: CLI subprocess
+  body:
+    signature: node tools/gitnexus/<entry> <command> [args] (entry path proposed, fixed when vendored)
+    purpose: Agent queries or exports the code graph of a repository; gitnexus is vendored and never edited
+    errors:
+    - non-zero exit when the repository is not indexed
+  start: agent/skills/strata/SKILL.md::gitnexus
+  end: tools/gitnexus/package.json::gitnexus
+- id: cm_cli
+  transport: in-process
+  body:
+    signature: 'strata.py code snapshot --project P [--out FILE] (command name proposed)'
+    purpose: Route the subcommand to the snapshot module
+  start: strata.py::main
+  end: strata/codemap.py::snapshot
+- id: cm_gx
+  transport: CLI subprocess
+  body:
+    signature: subprocess.run([node, tools/gitnexus/<entry>, ...], cwd=project root) -> {nodes, relationships}
+    purpose: Index the project root and export the graph; Strata Python never imports gitnexus
+    errors:
+    - RuntimeError when node or tools/gitnexus is missing
+    - RuntimeError on non-zero exit
+  start: strata/codemap.py::run_gitnexus
+  end: tools/gitnexus/package.json::gitnexus
+- id: cm_write
+  transport: file write
+  body:
+    signature: to_celeste(gitnexus_graph) -> graph; write_snapshot(project, graph)
+    purpose: Convert GitNexus {nodes, relationships} to the Celeste format and write it to .strata/codemap/graph.json (path proposed)
+    response: '{nodes, edges, communities, kinds, edgeTypes} validated against graph.schema.json'
+    errors:
+    - ValueError when the converted graph breaks the schema
+  start: strata/codemap.py::snapshot
+  end: strata/codemap.py::write_snapshot
+- id: cm_get
+  transport: HTTP
+  body:
+    signature: GET /api/codemap?project=P (route proposed)
+    purpose: Return the stored snapshot to the Code map tab; read-only, no write route
+    response: Celeste graph JSON (nodes, edges, communities, kinds, edgeTypes)
+    errors:
+    - 403 unknown Host
+    - 404 no snapshot for the project (run `strata.py code snapshot`)
+  start: viewer/codemap/codemap.js::load
+  end: strata/server.py::make_server
+- id: cm_read
+  transport: file read
+  body:
+    signature: load_snapshot(project) -> dict
+    purpose: Read the snapshot file for the GET route (function proposed)
+    errors:
+    - FileNotFoundError becomes 404
+  start: strata/server.py::make_server
+  end: strata/codemap.py::load_snapshot
