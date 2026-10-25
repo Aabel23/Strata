@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Strata: project knowledge in SQLite, with a C4 viewer and block pages.
 
-  strata.py init [--db]
+  strata.py init [PATH] [--id --name --docs-dir --no-codemap --db-only] [--db]   set up PATH (default cwd): project, docs folders, C4 map, code map
   strata.py serve [--db] [--project P] [--port] [--host A,B] [--allow-host NAME]... [--allow-edit|--no-edit] viewer on http://127.0.0.1:PORT
   strata.py page put|validate FILE | list [--project]
   strata.py project add ID --name N [--root --docs-dir --parent --description] | delete ID --yes | list
@@ -192,7 +192,7 @@ def main(argv=None):
         p = sub.add_parser(name); p.add_argument("--db")
         for x in args: p.add_argument(*x[0], **x[1])
         return p
-    add("init")
+    add("init", (["path"], {"nargs": "?", "default": "."}), (["--id"], {}), (["--name"], {}), (["--docs-dir"], {}), (["--no-codemap"], {"action": "store_true"}), (["--db-only"], {"action": "store_true"}))
     add("serve", (["--project"], {}), (["--port"], {"type": int, "default": 8740}), (["--host"], {"default": "127.0.0.1"}), (["--allow-host"], {"action": "append", "default": []}), (["--allow-edit"], {"dest": "allow_edit", "action": "store_const", "const": True, "default": None}), (["--no-edit"], {"dest": "allow_edit", "action": "store_const", "const": False, "default": None}))
     pg = sub.add_parser("page"); ps = pg.add_subparsers(dest="action", required=True)
     for n in ("put", "validate"):
@@ -250,7 +250,14 @@ def main(argv=None):
         from strata import mcp
         return mcp.serve(a.role, a.db)
     if a.cmd == "init":
-        db.init(a.db).close(); print("ok:", db.db_path(a.db)); return 0
+        c = db.init(a.db)
+        if a.db_only: c.close(); print("ok:", db.db_path(a.db)); return 0
+        try: res = service.setup_project(c, db.db_path(a.db), a.path, a.id, a.name, a.docs_dir, not a.no_codemap)
+        except ValueError as e: print("ERROR", e); return 1
+        for r in res: print(f"  {r['status']:<8} {r['step']:<8} {r['detail']}")
+        rp = str(pathlib.Path(a.path).expanduser().resolve())
+        pid = next(r["id"] for r in c.execute("SELECT id,root FROM project WHERE root IS NOT NULL") if str(pathlib.Path(r["root"]).resolve()) == rp)
+        print("Open: http://127.0.0.1:8740/#/p/" + pid); return 0
     if a.cmd == "page": return cmd_page(a)
     from strata import server
     hosts = a.host.split(",")  # vd "127.0.0.1,100.107.55.40": nghe nhiều địa chỉ

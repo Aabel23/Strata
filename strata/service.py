@@ -1,6 +1,6 @@
 """Write/read layer shared by CLI and MCP: role checks, audit on every write."""
-import json, pathlib, re
-from strata import db
+import json, os, pathlib, re
+from strata import c4_layered, codemap, db
 
 ROLES = ("main", "coder", "reviewer")
 
@@ -30,6 +30,53 @@ def add_project(c, id, name, root=None, docs_dir=None, parent=None, description=
     root, docs_dir, description = (x.strip() or None if isinstance(x, str) else None for x in (root, docs_dir, description))
     root, docs_dir = _paths(c, root, docs_dir, parent)
     db.add_project(c, id, name, root, docs_dir, parent or None, description)
+
+
+def _slug(name): return re.sub(r"-+", "-", re.sub(r"[^a-z0-9_-]", "-", name.lower())).strip("-")[:40].strip("-")
+
+
+def _has_code(root):
+    for dp, dns, fns in os.walk(root):
+        dns[:] = [d for d in dns if not c4_layered._skip([d])]
+        if any(pathlib.Path(f).suffix in c4_layered.CODE_EXT for f in fns): return True
+    return False
+
+
+def setup_project(c, db_path, root, id=None, name=None, docs_dir=None, codemap=True, snapshot=codemap.snapshot):
+    """One-step project setup (project, docs folders, starter C4 map, code map). Returns [{step, status, detail}]; idempotent. ValueError from the project step."""
+    root = pathlib.Path(root).expanduser().resolve(); out = []
+    step = lambda s, st, d: out.append({"step": s, "status": st, "detail": d})
+    ex = next((dict(r) for r in c.execute("SELECT * FROM project WHERE root IS NOT NULL") if os.path.realpath(r["root"]) == str(root)), None)
+    if ex: id = ex["id"]; step("project", "skipped", f"already registered as {id}")
+    else:
+        id = id or _slug(root.name)
+        if not PROJECT_ID.match(id): raise ValueError(f"cannot derive a project id from {root.name!r}; pass --id")
+        if db.project_exists(c, id): raise ValueError(f"project {id} already exists with a different root ({db.get_project(c, id)['root']})")
+        add_project(c, id, name or root.name, str(root)); step("project", "done", f"registered {id}")
+    pr = db.get_project(c, id)
+    dd = pathlib.Path(docs_dir and (root / docs_dir) or pr["docs_dir"] or root / "docs")
+    made = [n for n in ("research", "architect", "plan", "review") if not (dd / n).is_dir()]
+    for n in made: (dd / n).mkdir(parents=True, exist_ok=True)
+    if not pr["docs_dir"]: db.set_project(c, id, docs_dir=str(dd))
+    step("docs", "done" if made else "skipped", ("created " + ", ".join(made)) if made else f"{dd} already set up")
+    m, imp = dd / "c4" / "map.yaml", c.execute("SELECT 1 FROM c4_meta WHERE project=?", (id,)).fetchone() is None
+    try:
+        wrote = not m.exists()
+        if wrote:
+            m.parent.mkdir(parents=True, exist_ok=True)
+            c4_layered.dump(m, {"project": {"id": id, "name": pr["name"], "root": pathlib.Path(os.path.relpath(root, m.parent)).as_posix()},
+                                "objects": [{"id": "system", "kind": "system", "name": pr["name"], "summary": "Describe your system here in one plain sentence."}]})
+        if imp: c4_layered.import_dir(c, m.parent, id)
+        step("c4", "done" if wrote or imp else "skipped", ("wrote starter map" if wrote else "") + (", " if wrote and imp else "") + ("imported" if imp else "") or "map already imported")
+    except (ValueError, OSError) as e: step("c4", "failed", str(e))
+    if not codemap: step("codemap", "skipped", "disabled")
+    elif not _has_code(root): step("codemap", "skipped", "no code found")
+    else:
+        try: p, g = snapshot(c, db_path, id, reindex=True); step("codemap", "done", f"{len(g['nodes'])} nodes -> {p}")
+        except (RuntimeError, OSError, ValueError) as e:
+            h = "; install GitNexus" if "gitnexus" in str(e).lower() and ("not found" in str(e).lower() or isinstance(e, FileNotFoundError)) else ""
+            step("codemap", "failed", f"{e}{h}")
+    return out
 
 
 def _paths(c, root, docs_dir, parent):
