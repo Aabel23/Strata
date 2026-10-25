@@ -24,7 +24,7 @@ Principles:
 |---|---|
 | `strata.py` | CLI entry point (argparse), calls into the modules in `strata/` |
 | `strata/schema.sql` | The whole schema: tables, append-only triggers, FTS5 |
-| `strata/db.py` | Connection, `init` + migrate, CRUD for project/doc/item/page/link, audit, `fold` for search |
+| `strata/db/` | Package: connection, init + migrate, repository CRUD for project/doc/item/page/link/search, audit |
 | `strata/c4_layered.py` | The only C4 format (folder `map.yaml` + `contracts/` + `behavior/` + `flows/`): load, validate, import/export, `read_model`, `context`, flow trace, contract text, `write_model` (atomic write of a loaded model back to the folder) |
 | `strata/blocks.py` | Validates the 8 block types of a page |
 | `strata/c4_edit.py` | Architect editor back end: `apply(c, project, op, yes)` runs one of six ops (`add_object`, `update_object`, `delete_object`, `add_link`, `update_link`, `delete_link`) on the C4 folder |
@@ -128,8 +128,8 @@ The Code level below components is derived data; nothing is stored in the C4 YAM
 
 ## 6. Extending
 
-- **New CLI command:** add a subparser in `strata.py`, put the logic in `strata/db.py` or `strata/c4_layered.py`, and write `audit` if it writes.
-- **New C4 field:** `KEYS` + validation in `c4_layered.py`, a column in `schema.sql` + `ADDED` in `db.py`, `import_dir`/`export_dir`/`read_model`, then the viewer.
+- **New CLI command:** add a subparser in `strata.py`, put the logic in `strata/db/` or `strata/c4_layered.py`, and write `audit` if it writes.
+- **New C4 field:** `KEYS` + validation in `c4_layered.py`, a column in `schema.sql` + `ADDED` in `strata/db/`, `import_dir`/`export_dir`/`read_model`, then the viewer.
 - **New API:** hold `lock` when reading or writing the shared DB connection, and filter inputs with a whitelist. The write routes are `POST /api/c4/edit`, `POST /api/item` and `POST /api/project`; a new one needs the same guards and an audited service function. For anything else, edit C4 in the folder and import with the CLI.
 - **Page blocks:** fixed at exactly 8 types; adding one requires agreement from the project owner first.
 

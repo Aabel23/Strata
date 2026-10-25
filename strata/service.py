@@ -26,7 +26,7 @@ def add_project(c, id, name, root=None, docs_dir=None, parent=None, description=
     id, name = (id or "").strip(), (name or "").strip()
     if not PROJECT_ID.match(id): raise ValueError("id: 1-40 chars, lowercase letters, digits, - or _, starting with a letter or digit")
     if not name: raise ValueError("name is required")
-    if c.execute("SELECT 1 FROM project WHERE id=?", (id,)).fetchone(): raise ValueError(f"project {id} already exists")
+    if db.project_exists(c, id): raise ValueError(f"project {id} already exists")
     root, docs_dir, description = (x.strip() or None if isinstance(x, str) else None for x in (root, docs_dir, description))
     root, docs_dir = _paths(c, root, docs_dir, parent)
     db.add_project(c, id, name, root, docs_dir, parent or None, description)
@@ -34,7 +34,7 @@ def add_project(c, id, name, root=None, docs_dir=None, parent=None, description=
 
 def _paths(c, root, docs_dir, parent):
     """Shared add/edit validation; returns normalised (root, docs_dir)."""
-    if parent and not c.execute("SELECT 1 FROM project WHERE id=?", (parent,)).fetchone(): raise ValueError(f"parent {parent} does not exist")
+    if parent and not db.project_exists(c, parent): raise ValueError(f"parent {parent} does not exist")
     if root and not pathlib.Path(root).expanduser().is_absolute(): raise ValueError("root must be an absolute path")
     if root and not pathlib.Path(root).expanduser().is_dir(): raise ValueError(f"root {root} is not a folder")
     if docs_dir and root and not pathlib.Path(docs_dir).is_absolute(): docs_dir = str(pathlib.Path(root) / docs_dir)
@@ -44,7 +44,7 @@ def _paths(c, root, docs_dir, parent):
 
 def edit_project(c, id, name=None, root=None, docs_dir=None, parent=None, description=None):
     """Edit a project. None = keep; "" clears root/docs_dir/parent/description. Same checks as add_project, plus no parent cycle."""
-    old = c.execute("SELECT * FROM project WHERE id=?", (id,)).fetchone()
+    old = db.get_project(c, id)
     if old is None: raise KeyError(f"no project {id}")
     new = {k: (v.strip() or None) for k, v in (("name", name), ("root", root), ("docs_dir", docs_dir), ("parent", parent), ("description", description)) if isinstance(v, str)}
     if "name" in new and not new["name"]: raise ValueError("name is required")
@@ -53,8 +53,7 @@ def edit_project(c, id, name=None, root=None, docs_dir=None, parent=None, descri
         x = new["parent"]
         while x:  # walk up from the new parent; reaching id means a cycle (or self)
             if x == id: raise ValueError("parent would create a cycle")
-            r = c.execute("SELECT parent FROM project WHERE id=?", (x,)).fetchone()
-            x = r and r["parent"]
+            x = db.get_project_parent(c, x)
     d = new.get("docs_dir")
     if d and not pathlib.Path(d).is_absolute() and not new.get("root") and old["root"]: d = str(pathlib.Path(old["root"]) / d)  # relative to the current root
     r, d = _paths(c, new.get("root"), d, new.get("parent"))
@@ -67,7 +66,7 @@ def edit_project(c, id, name=None, root=None, docs_dir=None, parent=None, descri
 def delete_project(c, id, confirm):
     """Delete only when `confirm` repeats the project id (the viewer asks the user to type it)."""
     if confirm != id: raise ValueError("confirmation does not match the project id")
-    if c.execute("SELECT 1 FROM project WHERE id=?", (id,)).fetchone(): db.backup(c)  # no backup, no delete
+    if db.project_exists(c, id): db.backup(c)  # no backup, no delete
     db.delete_project(c, id)
 
 
@@ -103,7 +102,7 @@ def _gate(spec):
 
 def transition(c, role, id, to, actor=None, note=None, _commit=True):
     """The one place that moves an item between statuses (CLI and MCP). Compare-and-swap on status+version; every denial is audited."""
-    r = c.execute("SELECT * FROM item WHERE id=?", (id,)).fetchone()
+    r = db.get_item(c, id)
     if not r: raise KeyError(f"no item {id}")
     actor = actor or role
     d = lambda msg: _deny(c, role, "item.transition", r["project"], f"item:{id}", {"id": id, "from": r["status"], "to": to, "actor": actor}, msg)
@@ -116,22 +115,20 @@ def transition(c, role, id, to, actor=None, note=None, _commit=True):
     if need_note and not (note or "").strip(): d(f"{frm} -> {to} needs a note")
     owner, claimed = r["owner"], r["claimed_at"]
     if to == "doing" and frm in ("approved", "open"):  # claim
-        undone = [x["depends_on"] for x in c.execute("SELECT depends_on FROM item_dep d JOIN item i ON i.id=d.depends_on WHERE d.item_id=? AND i.status!='done'", (id,))]
+        undone = db.get_undone_deps(c, id)
         if undone: d(f"blocked by unfinished dependencies {undone}")
         if _spec(r).get("blocked"): d("spec.blocked is set")
         owner, claimed = actor, db.now()
     elif frm == "doing" and to == "review" and actor != owner: d(f"only the owner ({owner}) may submit")
     elif frm == "review" and to == "done":
         if actor == owner: d("owner may not approve own work")
-        sub = c.execute("SELECT json_extract(after,'$.version') v FROM audit WHERE target=? AND tool='item.transition' "
-                        "AND json_extract(after,'$.status')='review' ORDER BY id DESC LIMIT 1", (f"item:{id}",)).fetchone()
-        if not sub or sub["v"] != r["version"]: d("item changed since submit")
+        sub_v = db.get_item_last_audit_version(c, id, "review")
+        if sub_v is None or sub_v != r["version"]: d("item changed since submit")
     elif to == "approved" and frm == "proposed" and r["kind"] == "task" and (miss := _gate(_spec(r))):
         d("spec incomplete: " + ", ".join(miss))
     elif frm == "doing" and to == "approved": owner = claimed = None  # release
     elif frm == "rejected": owner = claimed = None
-    n = c.execute("UPDATE item SET status=?,owner=?,claimed_at=?,updated_at=?,version=version+1 WHERE id=? AND status=? AND version=?",
-                  (to, owner, claimed, db.now(), id, frm, r["version"])).rowcount
+    n = db.update_item_transition(c, id, frm, to, owner, claimed, r["version"])
     if not n: d("item changed concurrently, reload and retry")
     db.audit(c, r["project"], "item.transition", f"item:{id}", {"status": frm, "owner": r["owner"]},
              {"status": to, "actor": actor, "note": note, "version": r["version"] + 1}, role)
@@ -139,7 +136,7 @@ def transition(c, role, id, to, actor=None, note=None, _commit=True):
 
 
 def set_item(c, role, id, status=None, priority=None):
-    r = c.execute("SELECT project FROM item WHERE id=?", (id,)).fetchone()
+    r = db.get_item_project(c, id)
     if role not in ROLES or (priority is not None and role != "main"):
         _deny(c, role, "item.set", r and r["project"], f"item:{id}", {"id": id, "status": status, "priority": priority}, f"{role} may not set priority" if role in ROLES else f"unknown role {role!r}")
     if not r: raise KeyError(f"no item {id}")
@@ -151,41 +148,37 @@ def set_item(c, role, id, status=None, priority=None):
 
 
 def edit_item(c, role, id, title=None, body=None, spec=None, priority=None):
-    r = c.execute("SELECT project,version FROM item WHERE id=?", (id,)).fetchone()
+    r = db.get_item_project(c, id)
     if role != "main": _deny(c, role, "item.edit", r and r["project"], f"item:{id}", {"id": id}, f"{role} may not edit items")
     if not r: raise KeyError(f"no item {id}")
     if spec is not None and not isinstance(spec, dict): raise ValueError("spec must be a JSON object")
     new = {k: v for k, v in (("title", title), ("body", body), ("priority", priority),
-                             ("spec", None if spec is None else json.dumps(spec, ensure_ascii=False))) if v is not None}
+                             ("spec", spec)) if v is not None}
     if not new: raise ValueError("nothing to edit")
-    sets = ",".join(f"{k}=?" for k in new)
-    if not c.execute(f"UPDATE item SET {sets},updated_at=?,version=version+1 WHERE id=? AND version=?", (*new.values(), db.now(), id, r["version"])).rowcount:
+    if not db.update_item_fields(c, id, r["version"], new):
         raise RuntimeError("item changed concurrently, reload and retry")
     db.audit(c, r["project"], "item.edit", f"item:{id}", None, {"fields": sorted(new)}, role); c.commit()
 
 
 def delete_item(c, role, id):
     """Hard delete: the row, its deps in both directions and its C4 links. The audit row keeps what was removed."""
-    r = c.execute("SELECT * FROM item WHERE id=?", (id,)).fetchone()
+    r = db.get_item(c, id)
     if role != "main": _deny(c, role, "item.delete", r and r["project"], f"item:{id}", {"id": id}, f"{role} may not delete items")
     if not r: raise KeyError(f"no item {id}")
     try:
-        deps = [[x[0], x[1]] for x in c.execute("SELECT item_id,depends_on FROM item_dep WHERE item_id=? OR depends_on=?", (id, id))]
-        links = c.execute("DELETE FROM c4_link WHERE project=? AND ref_kind='item' AND ref_id=?", (r["project"], id)).rowcount
-        c.execute("DELETE FROM item_dep WHERE item_id=? OR depends_on=?", (id, id))  # explicit; FK cascade also covers it
-        c.execute("DELETE FROM item WHERE id=?", (id,))
-        db.audit(c, r["project"], "item.delete", f"item:{id}", {k: r[k] for k in r.keys()}, {"deps": deps, "c4_links": links}, role)
+        cascade = db.delete_item_cascade(c, id, r["project"])
+        db.audit(c, r["project"], "item.delete", f"item:{id}", {k: r[k] for k in r.keys()}, cascade, role)
         c.commit()
     except BaseException: c.rollback(); raise
 
 
 def dep(c, role, id, depends_on, add=True):
-    r = c.execute("SELECT project FROM item WHERE id=?", (id,)).fetchone()
+    r = db.get_item_project(c, id)
     if role != "main": _deny(c, role, "item.dep", r and r["project"], f"item:{id}", {"id": id, "depends_on": depends_on}, f"{role} may not change dependencies")
     for i in (id, depends_on):
-        if not c.execute("SELECT 1 FROM item WHERE id=?", (i,)).fetchone(): raise KeyError(f"no item {i}")
+        if not db.get_item_project(c, i): raise KeyError(f"no item {i}")
     if not add:
-        n = c.execute("DELETE FROM item_dep WHERE item_id=? AND depends_on=?", (id, depends_on)).rowcount
+        n = db.remove_item_dep(c, id, depends_on)
     else:
         if id == depends_on: raise ValueError("an item cannot depend on itself")
         c.execute("BEGIN IMMEDIATE")  # cycle check and insert under one write lock
@@ -193,8 +186,8 @@ def dep(c, role, id, depends_on, add=True):
         while todo:  # does depends_on already reach id?
             x = todo.pop()
             if x == id: c.rollback(); raise ValueError(f"dependency cycle: {depends_on} already depends on {id}")
-            if x not in seen: seen.add(x); todo += [y[0] for y in c.execute("SELECT depends_on FROM item_dep WHERE item_id=?", (x,))]
-        n = c.execute("INSERT OR IGNORE INTO item_dep VALUES(?,?)", (id, depends_on)).rowcount
+            if x not in seen: seen.add(x); todo += [y["id"] for y in db.get_item_deps(c, x, "depends_on")]
+        n = db.add_item_dep(c, id, depends_on)
     if n: db.audit(c, r["project"], "item.dep", f"item:{id}", None, {"depends_on": depends_on, "op": "add" if add else "rm"}, role)
     c.commit()
     return bool(n)
@@ -212,15 +205,14 @@ def list_items(c, project=None, kind=None, status=None, owner=None, ready=False,
         if v: w.append(f"{col}=?"); a.append(v)
     if ready:
         w.append("kind IN ('task','step') AND status='approved' AND NOT EXISTS(SELECT 1 FROM item_dep d JOIN item i ON i.id=d.depends_on WHERE d.item_id=item.id AND i.status!='done')")
-    rows = [_out(r) for r in c.execute(f"SELECT * FROM item {'WHERE ' + ' AND '.join(w) if w else ''} ORDER BY {db.ITEM_ORDER}", a)]
+    rows = [_out(r) for r in db.list_items(c, where_clauses=w, args=a)]
     return [r for r in rows if not (ready and (r["spec"] or {}).get("blocked"))]
 
 
 def get_item(c, id):
-    r = c.execute("SELECT * FROM item WHERE id=?", (id,)).fetchone()
+    r = db.get_item(c, id)
     if not r: raise KeyError(f"no item {id}")
-    q = lambda a, b: [dict(x) for x in c.execute(f"SELECT i.id,i.title,i.status FROM item_dep d JOIN item i ON i.id=d.{a} WHERE d.{b}=? ORDER BY i.id", (id,))]
-    return {**_out(r), "depends_on": q("depends_on", "item_id"), "blocks": q("item_id", "depends_on")}
+    return {**_out(r), "depends_on": db.get_item_deps(c, id, "depends_on"), "blocks": db.get_item_deps(c, id, "blocks")}
 
 
 SRC_TABLE = {"item": "item", "page": "page", "doc": "doc"}

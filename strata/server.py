@@ -1,5 +1,5 @@
 """HTTP server: C4 viewer, pages and their JSON APIs. All data comes from the DB."""
-import hmac, http.server, json, mimetypes, pathlib, re, secrets, socket, sqlite3, threading
+import hmac, http.server, json, mimetypes, pathlib, re, secrets, socket, threading
 from urllib.parse import parse_qs, unquote, urlsplit
 from strata import blocks, c4_edit, c4_layered, codemap, db, service, symbols
 
@@ -21,6 +21,11 @@ SHOW = {"item": "id,project,kind,label,title,status,priority,owner"}
 ITEM_KINDS = ("rule", "task", "issue", "knowledge", "draft", "note", "step", "gate")
 ITEM_STATUS = ("proposed", "approved", "open", "doing", "review", "done", "rejected")
 CLOSED = "('done','rejected')"
+def _open_issues(conn, project):
+    return [r[0] for r in conn.execute(
+        "SELECT DISTINCT l.object_id FROM c4_link l JOIN item t ON t.id=l.ref_id WHERE l.project=? AND l.ref_kind='item' "
+        f"AND t.project=? AND t.label='issue' AND t.status NOT IN {CLOSED} ORDER BY l.object_id", (project, project))]
+db.get_open_issues_objects = _open_issues
 LOOPBACK = ("127.0.0.1", "::1", "localhost")
 EDIT_PATH = "/api/c4/edit"
 PROJECT_PATH = "/api/project"
@@ -37,21 +42,20 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
     bound = [h.lower() for h in (bound_hosts or [host])]
     extra = {h.lower() for h in allow_hosts}
     db.init(db_path).close()
-    conn = sqlite3.connect(db.db_path(db_path), check_same_thread=False)  # one long-lived conn: data_version needs it
-    conn.row_factory = sqlite3.Row
+    conn = db.connect(db_path, check_same_thread=False)  # one long-lived conn: data_version needs it
     lock = threading.RLock()
     token = secrets.token_urlsafe(32)  # per start: a restart invalidates old pages; served by GET /api/session
     symc = []  # symbol cache conn, opened lazily on first /api/code/ call (derived data)
 
     def rows(sql, args=()):
-        with lock: return [dict(r) for r in conn.execute(sql, args)]
+        with lock: return db.query_rows(conn, sql, args)
 
     stamps = {}  # project -> docs_dir fingerprint at last scan
 
     def autoscan():
         """Re-scan any project whose docs_dir changed, so new or edited docs show up without `doc scan`."""
         with lock:
-            for r in conn.execute("SELECT id,docs_dir FROM project WHERE docs_dir IS NOT NULL").fetchall():
+            for r in db.list_projects_with_docs(conn):
                 base = pathlib.Path(r["docs_dir"])
                 if not base.is_dir(): continue
                 st = db.docs_stamp(base)
@@ -173,7 +177,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             if p == "/api/session": return self.json({"token": token}, **{"Cache-Control": "no-store"})
             if p == "/api/version":  # viewer polls this; any CLI/MCP commit or docs edit changes it
                 autoscan()
-                with lock: dv = conn.execute("PRAGMA data_version").fetchone()[0]; ds = hash(repr(sorted(stamps.items(), key=str)))
+                with lock: dv = db.get_data_version(conn); ds = hash(repr(sorted(stamps.items(), key=str)))
                 return self.json({"version": f"{dv}:{ds}"})
             if p == "/api/doc": return self.doc(q)
             if p == "/api/projects": return self.json(self.projects())
@@ -201,9 +205,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                     m = c4_layered.read_model(conn, proj)
                     extra = c4_layered.viewer_extra(conn, proj) if m else {}
                     links = db.links_for(conn, proj) if m else {}
-                    open_issues = [r["object_id"] for r in conn.execute(
-                        "SELECT DISTINCT l.object_id FROM c4_link l JOIN item t ON t.id=l.ref_id WHERE l.project=? AND l.ref_kind='item' "
-                        f"AND t.project=? AND t.label='issue' AND t.status NOT IN {CLOSED} ORDER BY l.object_id", (proj, proj))] if m else []
+                    open_issues = db.get_open_issues_objects(conn, proj) if m else []
                 if not m: return self.send_error(404)
                 m.pop("root")
                 meta = {"name": m.pop("name")}
@@ -228,7 +230,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 if not pg: return self.send_error(404)
                 if len(parts) == 5: return self.json(pg)
                 if parts[5] == "version":
-                    with lock: dv = conn.execute("PRAGMA data_version").fetchone()[0]
+                    with lock: dv = db.get_data_version(conn)
                     return self.json({"version": f"{pg['updated_at']}:{dv}"})
             if p == "/api/query": return self.query(q)
             self.send_error(404)
@@ -285,9 +287,9 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
         def detail(self, it):
             """deps both ways, C4 objects linked to them, audit history for one item."""
             d = service.get_item(conn, it["id"])
-            objs = [r["object_id"] for r in conn.execute("SELECT object_id FROM c4_link WHERE project=? AND ref_kind='item' AND ref_id=? ORDER BY object_id", (it["project"], it["id"]))]
+            objs = db.get_item_c4_objects(conn, it["project"], it["id"])
             hist = []
-            for r in conn.execute("SELECT ts,actor_role,tool,before,after FROM audit WHERE target=? ORDER BY id DESC", (f"item:{it['id']}",)):
+            for r in db.get_item_audit(conn, it["id"]):
                 b, a = (json.loads(r[k]) if r[k] else None for k in ("before", "after"))
                 b, a = b if isinstance(b, dict) else {}, a if isinstance(a, dict) else {}
                 hist.append({"time": r["ts"], "actor": a.get("actor") or r["actor_role"], "tool": r["tool"], "from": b.get("status"), "to": a.get("status"), "note": a.get("note")})
@@ -329,14 +331,14 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             try:
                 with lock:
                     if p == "/api/code/files": return self.json(c4_layered.component_files(conn, q["project"], q["object"]))
-                    r = conn.execute("SELECT coalesce(p.root, m.root) FROM project p LEFT JOIN c4_meta m ON m.project=p.id WHERE p.id=?", (q["project"],)).fetchone()
-                    if not r or not r[0]: raise KeyError("project has no root")
+                    root = db.get_project_root_or_c4_root(conn, q["project"])
+                    if not root: raise KeyError("project has no root")
                     if not symc:
-                        c = sqlite3.connect(symbols.cache_path(db.db_path(db_path)), check_same_thread=False); c.row_factory = sqlite3.Row
+                        c = db.connect(symbols.cache_path(db.db_path(db_path)), check_same_thread=False)
                         c.executescript(symbols.SCHEMA); symc.append(c)  # like symbols.connect, but shared across handler threads under `lock`
                     sc = symc[0]
-                    if p == "/api/code/symbols": return self.json(symbols.file_outline(sc, q["project"], r[0], q["path"]))
-                    return self.json(symbols.source_of(sc, q["project"], r[0], q["id"]))
+                    if p == "/api/code/symbols": return self.json(symbols.file_outline(sc, q["project"], root, q["path"]))
+                    return self.json(symbols.source_of(sc, q["project"], root, q["id"]))
             except ValueError as e: return self.json({"error": str(e)}, 400)
             except KeyError as e: return self.json({"error": str(e.args[0]) if e.args else "not found"}, 404)
             except FileNotFoundError as e: return self.json({"error": f"not found: {e.args[0] if e.args else ''}"}, 404)

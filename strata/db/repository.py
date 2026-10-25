@@ -1,202 +1,26 @@
-import datetime, html.parser, json, os, pathlib, re, shutil, sqlite3, time
-
-DEFAULT_DB = str(pathlib.Path(__file__).resolve().parent.parent / "strata.db")
-SCHEMA = pathlib.Path(__file__).with_name("schema.sql")
-
-def db_path(path=None):
-    return str(path or os.environ.get("STRATA_DB") or DEFAULT_DB)
-
-def connect(path=None):
-    c = sqlite3.connect(db_path(path), timeout=30)
-    c.row_factory = sqlite3.Row
-    c.execute("PRAGMA busy_timeout=30000")  # concurrent writers (MCP/CLI/server) wait instead of 'database is locked'
-    c.execute("PRAGMA journal_mode=WAL")
-    c.execute("PRAGMA foreign_keys=ON")
-    return c
-
-def _item_rebuild_due(c):
-    return not c.execute("SELECT 1 FROM sqlite_master WHERE name='item_old'").fetchone() and bool(c.execute("SELECT 1 FROM sqlite_master WHERE name='item'").fetchone()) \
-        and "spec" not in [r[1] for r in c.execute("PRAGMA table_info(item)")]
-
-def _page_rebuild_due(c):
-    r = c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='page'").fetchone()
-    return bool(r) and "'plan'" not in r[0] and not c.execute("SELECT 1 FROM sqlite_master WHERE name='page_old'").fetchone()  # CHECK predates kind 'plan'
-
-def _item_phase_due(c):
-    cols = [r[1] for r in c.execute("PRAGMA table_info(item)")]
-    return bool(cols) and not {"phase", "label"} <= set(cols)  # ALTER ADD COLUMN: back up first like the rebuilds
-
-def _issue_kind_due(c):
-    r = c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='item'").fetchone()
-    return bool(r) and "'issue'" in r[0]  # CHECK predates label: issues are tasks labelled 'issue' (#203)
-
-def _backup_if_rebuild(path):
-    """Copy the DB file to <dir>/backups/strata-YYYYmmdd-HHMMSS.db before a destructive item/page rebuild (one backup for both) (before connect() flips it to WAL, so bytes match)."""
-    p = db_path(path)
-    if p == ":memory:" or not os.path.exists(p): return
-    k = sqlite3.connect(p)
-    try: due = _item_rebuild_due(k) or _page_rebuild_due(k) or _item_phase_due(k) or _issue_kind_due(k)
-    finally: k.close()
-    if due:
-        d = pathlib.Path(p).parent / "backups"; d.mkdir(exist_ok=True)
-        shutil.copy2(p, d / datetime.datetime.now().strftime("strata-%Y%m%d-%H%M%S.db"))
-
-def _old_c4_due(c):
-    return bool(c.execute("SELECT 1 FROM sqlite_master WHERE name IN ('c4_port','c4_interface')").fetchone())
-
-def _backup_old_c4(path):
-    """Before dropping the old single-file C4 format: backups/strata-pre-old-c4-drop-<timestamp>.db via the sqlite backup API."""
-    p = db_path(path)
-    if p == ":memory:" or not os.path.exists(p): return
-    k = sqlite3.connect(p)
-    try:
-        if not _old_c4_due(k): return
-        d = pathlib.Path(p).parent / "backups"; d.mkdir(exist_ok=True)
-        dst = sqlite3.connect(d / datetime.datetime.now().strftime("strata-pre-old-c4-drop-%Y%m%d-%H%M%S.db"))
-        try: k.backup(dst)
-        finally: dst.close()
-    finally: k.close()
-
-def _drop_old_c4(c):
-    """One-off: C4 rows of projects not imported as a layered folder, orphan c4_link rows, then tables c4_port/c4_interface
-    (c4_connection is rebuilt first: its FKs point at c4_port). Layered = c4_meta.source is a folder, not a .yaml file."""
-    if not _old_c4_due(c): return
-    c.commit(); c.execute("PRAGMA foreign_keys=OFF")
-    try:
-        keep = "SELECT project FROM c4_meta WHERE source IS NOT NULL AND lower(source) NOT LIKE '%.yaml' AND lower(source) NOT LIKE '%.yml'"
-        c.executescript(f"""BEGIN;
-            DELETE FROM c4_link WHERE project NOT IN ({keep});
-            DELETE FROM c4_connection WHERE project NOT IN ({keep});
-            DELETE FROM c4_flow WHERE project NOT IN ({keep});
-            DELETE FROM c4_contract WHERE project NOT IN ({keep});
-            DELETE FROM c4_behavior WHERE project NOT IN ({keep});
-            DELETE FROM c4_object WHERE project NOT IN ({keep});
-            DELETE FROM c4_meta WHERE project NOT IN ({keep});
-            DELETE FROM c4_link WHERE NOT EXISTS (SELECT 1 FROM c4_object o WHERE o.project=c4_link.project AND o.id=c4_link.object_id);
-            CREATE TABLE c4_connection_new(
-              id TEXT NOT NULL, project TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL,
-              name TEXT, status TEXT, description TEXT, detail TEXT, PRIMARY KEY(project,id));
-            INSERT INTO c4_connection_new SELECT id,project,from_id,to_id,name,status,description,detail FROM c4_connection;
-            DROP TABLE c4_connection; ALTER TABLE c4_connection_new RENAME TO c4_connection;
-            DROP TABLE IF EXISTS c4_port; DROP TABLE IF EXISTS c4_interface;
-            COMMIT;""")
-    except BaseException:
-        c.rollback(); raise
-    finally: c.execute("PRAGMA foreign_keys=ON")
-
-def init(path=None):
-    _backup_if_rebuild(path)
-    _backup_old_c4(path)
-    c = connect(path)
-    if c.execute("SELECT 1 FROM sqlite_master WHERE name='research'").fetchone() and c.execute("SELECT 1 FROM research").fetchone():
-        raise RuntimeError("table research is not empty: move rows to page(kind='research') first")
-    rebuild = _migrate(c)
-    items, pages = _item_rebuild_due(c), _page_rebuild_due(c)
-    if items or pages:  # one transaction: rename + new schema + copy; any error rolls back to the old tables
-        c.execute("PRAGMA foreign_keys=OFF")  # no-op inside a transaction, so set it first
-        try:
-            c.executescript("BEGIN;" + ("DROP TRIGGER IF EXISTS item_ai;DROP TRIGGER IF EXISTS item_au;DROP TRIGGER IF EXISTS item_ad;"
-                                        "ALTER TABLE item RENAME TO item_old;" if items else "")
-                            + ("DROP TRIGGER IF EXISTS page_ai;DROP TRIGGER IF EXISTS page_au;DROP TRIGGER IF EXISTS page_ad;"
-                               "ALTER TABLE page RENAME TO page_old;" if pages else "") + SCHEMA.read_text())
-            _finish_item(c); _finish_page(c)
-        except BaseException:
-            c.rollback(); raise
-        finally: c.execute("PRAGMA foreign_keys=ON")
-    c.executescript(SCHEMA.read_text())
-    _finish_item(c)
-    _finish_page(c)
-    _drop_issue_kind(c)
-    if rebuild:  # copy rows from the old-CHECK table into the new one
-        cols = ",".join(r["name"] for r in c.execute("PRAGMA table_info(c4_object_old)"))
-        c.execute(f"INSERT INTO c4_object({cols}) SELECT {cols} FROM c4_object_old")
-        c.execute("DROP TABLE c4_object_old")
-    _drop_old_c4(c)
-    c.commit()
-    return c
-
-def _finish_item(c):
-    """Copy item_old into the rebuilt item table (old `scope` text becomes spec.scope), reindex, integrity-check."""
-    if not c.execute("SELECT 1 FROM sqlite_master WHERE name='item_old'").fetchone(): return
-    cols = ",".join(r["name"] for r in c.execute("PRAGMA table_info(item_old)") if r["name"] != "scope")
-    c.execute("DELETE FROM search WHERE src='item'")  # item_ai refills it row by row
-    c.execute(f"INSERT INTO item({cols},spec) SELECT {cols}, CASE WHEN scope IS NULL THEN NULL "
-              "WHEN json_valid(scope) THEN json_object('scope',json(scope)) ELSE json_object('scope',scope) END FROM item_old")
-    c.execute("DROP TABLE item_old")
-    if (r := c.execute("PRAGMA integrity_check").fetchone()[0]) != "ok": raise RuntimeError(f"integrity_check: {r}")
-    c.commit()
-
-def _drop_issue_kind(c):
-    """Issues become tasks with label 'issue' (open -> approved), then item is rebuilt without 'issue' in its kind CHECK
-    (new table, same ids; item_dep keeps pointing at the name `item`). Idempotent."""
-    if not _issue_kind_due(c): return
-    c.commit()
-    c.execute("UPDATE item SET label='issue', kind='task', status=CASE status WHEN 'open' THEN 'approved' ELSE status END WHERE kind='issue'")
-    c.commit()
-    ddl = re.search(r"CREATE TABLE IF NOT EXISTS item\(.*?\);", SCHEMA.read_text(), re.S).group(0).replace("IF NOT EXISTS item(", "item_new(", 1)
-    cols = ",".join(r["name"] for r in c.execute("PRAGMA table_info(item)"))
-    c.execute("PRAGMA foreign_keys=OFF")  # no-op inside a transaction, so set it first
-    try:
-        c.executescript(f"BEGIN;{ddl}INSERT INTO item_new({cols}) SELECT {cols} FROM item;DROP TABLE item;ALTER TABLE item_new RENAME TO item;COMMIT;")
-        c.executescript(SCHEMA.read_text())  # index and FTS triggers died with the old table
-        if (r := c.execute("PRAGMA integrity_check").fetchone()[0]) != "ok": raise RuntimeError(f"integrity_check: {r}")
-        if c.execute("PRAGMA foreign_key_check").fetchone(): raise RuntimeError("foreign_key_check failed after item rebuild")
-    except BaseException:
-        c.rollback(); raise
-    finally: c.execute("PRAGMA foreign_keys=ON")
-
-def _finish_page(c):
-    """Copy page_old (CHECK predates kind 'plan') into the rebuilt page table keeping rowids, so FTS refs stay valid."""
-    if not c.execute("SELECT 1 FROM sqlite_master WHERE name='page_old'").fetchone(): return
-    cols = ",".join(r[1] for r in c.execute("PRAGMA table_info(page_old)"))
-    c.execute("DELETE FROM search WHERE src='page'")  # page_ai refills it row by row
-    c.execute(f"INSERT INTO page(rowid,{cols}) SELECT rowid,{cols} FROM page_old")
-    c.execute("DROP TABLE page_old"); c.commit()
-    if (r := c.execute("PRAGMA integrity_check").fetchone()[0]) != "ok": raise RuntimeError(f"integrity_check: {r}")
-
-# columns added after a table was first created: (table, column, type)
-ADDED = [("c4_connection", "description", "TEXT"),
-         ("c4_object", "kind", "TEXT"), ("c4_object", "owns", "JSON"), ("c4_object", "behavior", "TEXT"), ("c4_connection", "detail", "TEXT"),
-         ("c4_object", "responsibilities", "JSON"), ("c4_object", "state", "TEXT"),
-         ("item", "phase", "INT"), ("item", "roadmap", "TEXT"), ("item", "label", "TEXT"), ("doc", "prev_status", "TEXT"), ("doc", "summary", "TEXT"), ("doc", "code", "JSON"), ("c4_meta", "positions", "JSON"), ("c4_meta", "source", "TEXT")]
-
-def _migrate(c):
-    """ALTER old tables up to the current schema. Returns True if c4_object was renamed to c4_object_old
-    (its type CHECK predates 'file'/'function' and SQLite cannot alter a CHECK) for init to copy back."""
-    c.execute("DROP TABLE IF EXISTS object_layout")  # stored layout removed (#185): renderer lays out
-    for t, col, typ in ADDED:
-        cols = [r["name"] for r in c.execute(f"PRAGMA table_info({t})")]
-        if cols and col not in cols: c.execute(f"ALTER TABLE {t} ADD COLUMN {col} {typ}")
-    if c.execute("SELECT 1 FROM sqlite_master WHERE name='decision'").fetchone():  # decisions removed (#211): drop table, triggers, index rows, links
-        c.execute("DELETE FROM search WHERE src='decision'")
-        for t in ("decision_ai", "decision_no_replace", "decision_no_delete", "decision_status_only"): c.execute(f"DROP TRIGGER IF EXISTS {t}")
-        c.execute("DROP TABLE decision")
-    l = c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='c4_link'").fetchone()
-    if l and "'decision'" in l["sql"]:  # SQLite cannot alter the old CHECK: rebuild with item rows only
-        c.execute("CREATE TABLE c4_link_new(project TEXT NOT NULL, object_id TEXT NOT NULL, ref_kind TEXT NOT NULL CHECK(ref_kind IN ('item')), "
-                  "ref_id INTEGER NOT NULL, PRIMARY KEY(project,object_id,ref_kind,ref_id))")
-        c.execute("INSERT INTO c4_link_new SELECT project,object_id,ref_kind,ref_id FROM c4_link WHERE ref_kind='item'")
-        c.execute("DROP TABLE c4_link"); c.execute("ALTER TABLE c4_link_new RENAME TO c4_link")
-    r = c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='c4_object'").fetchone()
-    if r and "'function'" not in r["sql"]:
-        c.execute("ALTER TABLE c4_object RENAME TO c4_object_old"); return True
-    return False
+import datetime
+import html.parser
+import json
+import os
+import pathlib
+import re
+import sqlite3
+import time
 
 def fold(q):
     """Fold đ/Đ in an FTS query the same way the triggers fold indexed text."""
     return q.replace("đ", "d").replace("Đ", "D")
 
-
 def put_page(c, project, slug, title, kind, blocks):
     """Insert or replace one page; `text` (for FTS) is derived from blocks."""
     from strata.blocks import page_text
-    now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="microseconds")
+    now_str = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="microseconds")
     existed = c.execute("SELECT 1 FROM page WHERE project=? AND slug=?", (project, slug)).fetchone()
     audit(c, project, "page.put", f"{project}/{slug}", after={"action": "update" if existed else "create"})  # never the body
     c.execute("INSERT INTO page(project,slug,title,kind,blocks,text,updated_at) VALUES(?,?,?,?,?,?,?) "
               "ON CONFLICT(project,slug) DO UPDATE SET title=excluded.title,kind=excluded.kind,"
               "blocks=excluded.blocks,text=excluded.text,updated_at=excluded.updated_at",
-              (project, slug, title, kind, json.dumps(blocks, ensure_ascii=False), page_text(blocks), now))
+              (project, slug, title, kind, json.dumps(blocks, ensure_ascii=False), page_text(blocks), now_str))
     c.commit()
 
 def get_page(c, project, slug):
@@ -206,7 +30,6 @@ def get_page(c, project, slug):
 def list_pages(c, project=None):
     q = "SELECT project,slug,title,kind,updated_at FROM page" + (" WHERE project=?" if project else "") + " ORDER BY project,slug"
     return [dict(r) for r in c.execute(q, (project,) if project else ())]
-
 
 # ---- project / doc / item writes (CLI only; every write leaves an audit row) ----
 def now():
@@ -357,7 +180,6 @@ def set_doc(c, project, path, feature=None, status=None, ord=None):
     c.execute("UPDATE doc SET feature=?,status=?,ord=? WHERE project=? AND path=?", (new["feature"], new["status"], new["ord"], project, path))
     audit(c, project, "doc.set", f"doc:{path}", dict(r), new); c.commit()
 
-
 # ---- C4 object <-> item links ----
 def _link_target(c, project, object, item, decision, must_exist=True):
     if decision is not None or item is None: raise ValueError("give --item")
@@ -388,3 +210,154 @@ def links_for(c, project, object=None):
                        (project, project, *([object] if object else []))):
         d = dict(r); out.setdefault(d.pop("oid"), {"items": []})["items"].append(d)
     return out.get(object, {"items": []}) if object else out
+
+
+# ---- Project queries ----
+def get_project(c, id):
+    """Return dict or None for SELECT * FROM project WHERE id=?"""
+    r = c.execute("SELECT * FROM project WHERE id=?", (id,)).fetchone()
+    return dict(r) if r else None
+
+
+def project_exists(c, id):
+    """Return bool SELECT 1 FROM project WHERE id=?"""
+    return c.execute("SELECT 1 FROM project WHERE id=?", (id,)).fetchone() is not None
+
+
+def get_project_parent(c, id):
+    """Return parent id or None SELECT parent FROM project WHERE id=?"""
+    r = c.execute("SELECT parent FROM project WHERE id=?", (id,)).fetchone()
+    return r[0] if r else None
+
+
+def get_project_root_or_c4_root(c, project_id):
+    """Return root string from SELECT coalesce(p.root, m.root) FROM project p LEFT JOIN c4_meta m ON m.project=p.id WHERE p.id=?"""
+    r = c.execute("SELECT coalesce(p.root, m.root) FROM project p LEFT JOIN c4_meta m ON m.project=p.id WHERE p.id=?", (project_id,)).fetchone()
+    return r[0] if r else None
+
+
+def list_projects_with_docs(c):
+    """Return list of rows/dicts SELECT id,docs_dir FROM project WHERE docs_dir IS NOT NULL"""
+    return [dict(r) for r in c.execute("SELECT id,docs_dir FROM project WHERE docs_dir IS NOT NULL")]
+
+
+# ---- Item queries & updates ----
+def get_item(c, id):
+    """Return Row/dict or None for SELECT * FROM item WHERE id=?"""
+    r = c.execute("SELECT * FROM item WHERE id=?", (id,)).fetchone()
+    return dict(r) if r else None
+
+
+def get_item_project(c, id):
+    """Return dict with project, version or None"""
+    r = c.execute("SELECT project,version FROM item WHERE id=?", (id,)).fetchone()
+    return dict(r) if r else None
+
+
+def get_item_deps(c, id, kind="depends_on"):
+    """Returns dependency info for item id (kind='depends_on' or 'blocks')."""
+    if kind == "blocks":
+        sql = "SELECT i.id,i.title,i.status FROM item_dep d JOIN item i ON i.id=d.item_id WHERE d.depends_on=? ORDER BY i.id"
+    else:
+        sql = "SELECT i.id,i.title,i.status FROM item_dep d JOIN item i ON i.id=d.depends_on WHERE d.item_id=? ORDER BY i.id"
+    return [dict(x) for x in c.execute(sql, (id,))]
+
+
+def get_undone_deps(c, id):
+    """List of depends_on ids where status != 'done'"""
+    return [x[0] for x in c.execute("SELECT depends_on FROM item_dep d JOIN item i ON i.id=d.depends_on WHERE d.item_id=? AND i.status!='done'", (id,))]
+
+
+def get_item_last_audit_version(c, id, status="review"):
+    """Get audit transition version check (default status='review')."""
+    target = id if str(id).startswith("item:") else f"item:{id}"
+    r = c.execute("SELECT json_extract(after,'$.version') FROM audit WHERE target=? AND tool='item.transition' AND json_extract(after,'$.status')=? ORDER BY id DESC LIMIT 1", (target, status)).fetchone()
+    return r[0] if r else None
+
+
+def update_item_transition(c, id, from_status, to_status, owner, claimed_at, version):
+    cur = c.execute(
+        "UPDATE item SET status=?,owner=?,claimed_at=?,updated_at=?,version=version+1 WHERE id=? AND status=? AND version=?",
+        (to_status, owner, claimed_at, now(), id, from_status, version)
+    )
+    return cur.rowcount
+
+
+def update_item_fields(c, id, version, fields):
+    if not fields:
+        return 0
+    vals = [json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v for v in fields.values()]
+    sets = ", ".join(f"{k}=?" for k in fields.keys())
+    cur = c.execute(f"UPDATE item SET {sets},updated_at=?,version=version+1 WHERE id=? AND version=?", (*vals, now(), id, version))
+    return cur.rowcount
+
+
+def delete_item_cascade(c, id, project):
+    deps = [[x[0], x[1]] for x in c.execute("SELECT item_id,depends_on FROM item_dep WHERE item_id=? OR depends_on=?", (id, id))]
+    links = c.execute("DELETE FROM c4_link WHERE project=? AND ref_kind='item' AND ref_id=?", (project, id)).rowcount
+    c.execute("DELETE FROM item_dep WHERE item_id=? OR depends_on=?", (id, id))
+    c.execute("DELETE FROM item WHERE id=?", (id,))
+    return {"deps": deps, "c4_links": links}
+
+
+def remove_item_dep(c, id, depends_on):
+    return c.execute("DELETE FROM item_dep WHERE item_id=? AND depends_on=?", (id, depends_on)).rowcount
+
+
+def add_item_dep(c, id, depends_on):
+    return c.execute("INSERT OR IGNORE INTO item_dep VALUES(?,?)", (id, depends_on)).rowcount
+
+
+def list_items(c, where_clauses=None, args=None, order_by=None):
+    sql = "SELECT * FROM item"
+    if where_clauses:
+        sql += " WHERE " + " AND ".join(where_clauses)
+    ob = ITEM_ORDER if order_by is None else order_by
+    if ob:
+        sql += f" ORDER BY {ob}"
+    return [dict(r) for r in c.execute(sql, tuple(args or ()))]
+
+
+def get_item_c4_objects(c, project, item_id):
+    return [r[0] for r in c.execute("SELECT object_id FROM c4_link WHERE project=? AND ref_kind='item' AND ref_id=? ORDER BY object_id", (project, item_id))]
+
+
+def get_item_audit(c, item_id):
+    target = item_id if str(item_id).startswith("item:") else f"item:{item_id}"
+    return [dict(r) for r in c.execute("SELECT ts,actor_role,tool,before,after FROM audit WHERE target=? ORDER BY id DESC", (target,))]
+
+
+def get_open_issues_objects(c, project):
+    return [r[0] for r in c.execute("SELECT DISTINCT l.object_id FROM c4_link l JOIN item i ON i.id=l.ref_id AND l.ref_kind='item' WHERE l.project=? AND i.status IN ('open','doing','approved') ORDER BY l.object_id", (project,))]
+
+
+# ---- Search and Pragma ----
+def search_fts(c, terms, project=None, limit=20):
+    if isinstance(terms, str):
+        term_list = re.findall(r"\w+", fold(terms))
+    else:
+        term_list = [w for t in terms for w in (re.findall(r"\w+", fold(str(t))) or [fold(str(t))]) if w]
+    if not term_list:
+        return []
+    match = " ".join(f'"{t}"' for t in term_list) + "*"
+    sql = "SELECT src,ref,project,snippet(search,1,'','','…',12) snippet FROM search WHERE search MATCH ?"
+    args = [match]
+    if project:
+        sql += " AND project=?"
+        args.append(project)
+    sql += " ORDER BY bm25(search,10.0,1.0) LIMIT ?"
+    args.append(limit)
+    return [dict(r) for r in c.execute(sql, args)]
+
+
+def get_data_version(c):
+    r = c.execute("PRAGMA data_version").fetchone()
+    return int(r[0]) if r else 0
+
+
+def query_rows(c, sql, args=()):
+    cur = c.execute(sql, args)
+    rows = c.fetchall() if hasattr(c, "fetchall") else cur.fetchall()
+    return [dict(r) for r in rows]
+
+

@@ -22,7 +22,7 @@
   strata.py item list [--project --kind --label --status --owner --ready] | show ID | edit ID [--title --body --spec FILE|- --priority] | ready [--project]
   strata.py item claim ID --as NAME | submit ID --note N [--as NAME] | rework ID --note N | close ID --note N (open -> done) | approve ID [--note --as] | reject ID --note N | release ID | dep add|rm ID DEP   (all: --json)
 """
-import argparse, json, pathlib, sqlite3, sys, threading, webbrowser
+import argparse, json, pathlib, sys, threading, webbrowser
 from strata import blocks, c4_layered, codemap, db, service, symbols
 
 
@@ -80,7 +80,7 @@ def cmd_item(c, a):
     elif act == "dep":
         ch = service.dep(c, "main", a.id, a.dep, a.op == "add"); out({"changed": ch}, "ok" if ch else "no change")
     else:  # status verbs
-        cur = c.execute("SELECT status FROM item WHERE id=?", (a.id,)).fetchone()
+        cur = db.get_item(c, a.id)
         if not cur: raise KeyError(f"no item {a.id}")
         if act == "approve" and cur["status"] not in ("proposed", "review"): raise ValueError(f"approve only from proposed or review, item {a.id} is {cur['status']}")
         if act == "rework" and cur["status"] != "review": raise ValueError(f"rework only from review, item {a.id} is {cur['status']}")
@@ -100,9 +100,9 @@ def cmd_code(a):
 
 def cmd_sym(a):
     c = db.init(a.db)
-    r = c.execute("SELECT coalesce(p.root, m.root) FROM project p LEFT JOIN c4_meta m ON m.project=p.id WHERE p.id=?", (a.project,)).fetchone()
-    if not r or not r[0]: print(f"ERROR project {a.project!r} chưa có root"); return 1
-    root, sc = r[0], symbols.connect(symbols.cache_path(db.db_path(a.db)))
+    r = db.get_project_root_or_c4_root(c, a.project)
+    if not r: print(f"ERROR project {a.project!r} chưa có root"); return 1
+    root, sc = r, symbols.connect(symbols.cache_path(db.db_path(a.db)))
     if a.action == "index": print("indexed {}: {} file đổi, {} nguyên, {} xoá".format(a.project, *symbols.index(sc, a.project, root)))
     elif a.action == "ls":
         last = None
@@ -133,7 +133,7 @@ def cmd_write(a):
         elif a.cmd == "project" and a.action == "delete":
             service.delete_project(c, a.id, a.id if a.yes else None); print("ok: deleted", a.id)
         elif a.cmd == "project":
-            for r in c.execute("SELECT id,name,parent,status FROM project ORDER BY id"): print(f"{r['id']}  {r['name']}  parent={r['parent'] or '-'}  [{r['status']}]")
+            for r in db.query_rows(c, "SELECT id,name,parent,status FROM project ORDER BY id"): print(f"{r['id']}  {r['name']}  parent={r['parent'] or '-'}  [{r['status']}]")
         elif a.cmd == "doc" and a.action == "scan":
             print("scanned {}: {} found, {} missing".format(a.project, *db.scan_docs(c, a.project)))
         elif a.cmd == "search":
@@ -144,10 +144,10 @@ def cmd_write(a):
         elif a.cmd == "c4" and a.action == "context":
             print(c4_layered.context_text(c, a.project, a.object, a.max_tokens))
         elif a.cmd == "c4" and a.action == "coverage":
-            r = c.execute("SELECT coalesce(p.root, m.root) FROM project p LEFT JOIN c4_meta m ON m.project=p.id WHERE p.id=?", (a.project,)).fetchone()
-            if not r or not r[0]: raise ValueError(f"project {a.project!r} chưa có root")
+            root = db.get_project_root_or_c4_root(c, a.project)
+            if not root: raise ValueError(f"project {a.project!r} chưa có root")
             owns = {o["id"]: json.loads(o["owns"] or "[]") for o in c.execute("SELECT id, owns FROM c4_object WHERE project=?", (a.project,))}
-            cov = c4_layered.coverage(owns, r[0])
+            cov = c4_layered.coverage(owns, root)
             if a.json: print(json.dumps(cov, ensure_ascii=False, indent=1))
             else:
                 for d, fs in cov.items(): print(f"{d}/"); [print(f"  {f}") for f in fs]
@@ -177,7 +177,7 @@ def cmd_write(a):
             db.set_doc(c, a.project, a.path, a.feature, a.status, a.ord); print("ok")
         else:
             cmd_item(c, a)
-    except (sqlite3.DatabaseError, ValueError, KeyError, PermissionError) as e:
+    except (db.DatabaseError, ValueError, KeyError, PermissionError) as e:
         print("ERROR", e.args[0] if isinstance(e, KeyError) else e); return 1
     return 0
 

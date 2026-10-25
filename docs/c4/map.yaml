@@ -157,7 +157,7 @@ objects:
   name: db
   summary: SQLite access and migration
   owns:
-  - strata/db.py
+  - strata/db/*
 - id: handler
   parent: server
   kind: component
