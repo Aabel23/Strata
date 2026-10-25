@@ -465,6 +465,11 @@ a.dep:hover{text-decoration:underline}
 .pfield input:focus-visible,.pfield select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .pinfo{margin:0;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
 .perr{margin:0;font-size:12.5px;color:var(--st-block,#c0583c)}
+.pcheck{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;align-items:center;font-size:13px}
+.pcheck small{grid-column:2;color:var(--muted);font-size:12px}
+.pcheck input:disabled+span{color:var(--muted)}
+.psteps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:13.5px;overflow-wrap:anywhere}
+.pstep.failed{color:var(--st-block,#c0583c)}.pstep.skipped,.pstep.started{color:var(--muted)}
 .pfoot{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
 .pfoot button.primary{background:var(--accent-soft);border-color:var(--accent)}
 .pfoot button.danger{border-color:var(--st-block,#c0583c);color:var(--st-block,#c0583c)}

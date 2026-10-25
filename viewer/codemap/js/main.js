@@ -84,10 +84,10 @@ function select(i) {
   show(); refreshMarks(); schedule();
 }
 
-async function load(name) {
+async function load(name, poll) {
   const my = ++token, t0 = performance.now();
   scene = null; hover = sel = -1; refreshOverlayOff(); // drops the previous graph from canvases + overlay
-  panel.message('Loading', name, 'Reading code map…');
+  if (!poll) panel.message('Loading', name, 'Reading code map…');
   controls.setEdgeTypes([]); controls.resetGravity(); sky.setGlow(0);
   try {
     const raw = await loadRaw(name); const t1 = performance.now();
@@ -109,6 +109,9 @@ async function load(name) {
     });
   } catch (err) {
     if (my !== token) return;
+    // calm states from /api/codemap: building polls every 3 s, a failed build shows its reason
+    if (err.building) { panel.message('Code map', 'Building code map…', 'This can take a minute. The map appears here when it is ready.'); setTimeout(() => my === token && load(name, true), 3000); return; }
+    if (err.buildState) return panel.message('Code map', 'The build did not finish', "Couldn't build the code map. Make sure GitNexus is installed and the folder is a git repository, then run `strata init` in that folder.", err.message);
     console.error('[celeste] load failed', err);
     panel.message('Error', 'Could not load', `${name}: ${err.message}`);
   }

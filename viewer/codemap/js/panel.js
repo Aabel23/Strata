@@ -9,9 +9,10 @@ export function createPanel({ onPick, onClose }) {
   const dash = (...els) => els.forEach((e) => { e.textContent = '—'; });
   const clearList = () => { f.list.replaceChildren(); f.label.hidden = true; };
 
-  function message(kicker, title, note) { // loading / error notice, pinned top-left
+  function message(kicker, title, note, raw) { // loading / error notice, pinned top-left
     box.hidden = false; box.classList.add('notice'); box.style.left = box.style.top = '';
     f.kicker.textContent = kicker; f.title.textContent = title; f.note.textContent = note;
+    if (raw) { const m = document.createElement('small'); m.className = 'raw'; m.textContent = raw; f.note.append(document.createElement('br'), m); }
     dash(f.kind, f.degree, f.community, f.file); clearList();
   }
   // node: adapt() node; neighbours: [{index, name, degree}]

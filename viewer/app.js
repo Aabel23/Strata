@@ -120,11 +120,27 @@ function addProject(){
   const ni=name.lastChild, ii=pid.lastChild;let touched=false;
   ii.addEventListener("input",()=>{touched=true});
   ni.addEventListener("input",()=>{if(!touched)ii.value=ni.value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/đ/g,"d").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,40)});
-  const d=dialog("Add project",[name,pid,root,docs,par,desc],(d,fail)=>{
+  const setup=el("input");setup.type="checkbox";setup.id="psetup";setup.checked=false;setup.disabled=true;
+  const sl=el("label","pcheck");sl.htmlFor="psetup";const hint=el("small","","Enter a code folder to turn this on.");sl.append(setup,el("span","","Set up docs, architecture map and code map"),hint);
+  const sync=()=>{const has=!!root.lastChild.value.trim();if(has&&setup.disabled)setup.checked=true;if(!has)setup.checked=false;setup.disabled=!has;hint.hidden=has};
+  ["input","change","paste"].forEach(ev=>root.lastChild.addEventListener(ev,()=>setTimeout(sync)));sync();
+  const STEP={project:["Project registered","Could not register the project"],docs:["Docs folders created","Docs folders failed"],c4:["Starter architecture map created","Architecture map failed"],codemap:["Code map is ready","Code map failed"]};
+  const line=s=>{const t=STEP[s.step]||[s.step,s.step],d=s.detail?": "+s.detail:"";
+    if(s.status==="done")return["✓ "+t[0]];
+    if(s.status==="started")return["… "+(s.step==="codemap"?"Code map is building in the background":t[0]+" (in progress)")];
+    if(s.status==="skipped")return["– "+(s.step==="codemap"?"No code found, code map skipped":s.step==="project"?"Already set up as "+((s.detail||"").match(/registered as (\S+)/)||[0,"an existing project"])[1]:t[0].replace(/ created| registered/,"")+" skipped"+d)];
+    return["✗ "+t[1]+d]};
+  const d=dialog("Add project",[name,pid,root,docs,par,desc,sl],(d,fail)=>{
     const ok=el("button","primary","Add project");ok.type="submit";
     d.firstChild.onsubmit=async e=>{e.preventDefault();ok.disabled=true;fail("");
-      try{await projectPost({op:"add",id:ii.value,name:ni.value,root:root.lastChild.value,docs_dir:docs.lastChild.value,parent:sel.value,description:desc.lastChild.value});
-        d.close();location.hash=hashFor(ii.value.trim(),"task");await render()}
+      try{const id=ii.value.trim(),body={op:"add",id,name:ni.value,root:root.lastChild.value,docs_dir:docs.lastChild.value,parent:sel.value,description:desc.lastChild.value};
+        if(setup.checked)body.setup=true;
+        const r=await projectPost(body),go=()=>{d.close();location.hash=hashFor(r.id||id,"task");render()};
+        if(!setup.checked||!r.steps)return go();
+        const f=d.firstChild,ul=el("ul","psteps");r.steps.forEach(s=>{const li=el("li","pstep "+s.status,line(s)[0]);ul.append(li)});
+        d.querySelector("h2").textContent=r.steps.some(s=>s.step==="project"&&s.status==="skipped")?"Project ready":"Project added";
+        const open=el("button","primary","Open project");open.type="button";open.onclick=go;
+        f.replaceChildren(f.querySelector("h2"),ul,f.querySelector(".perr"),el("div","pfoot"));f.lastChild.append(open);open.focus();await render(true)}
       catch(x){fail(x.message);ok.disabled=false}};
     return [ok]});
   ni.focus();return d;
