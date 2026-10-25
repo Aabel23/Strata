@@ -1,5 +1,5 @@
 """Code map snapshot: raw GitNexus graph ({nodes, relationships}) stored next to the DB; gitnexus is only ever a subprocess."""
-import json, os, pathlib, shutil, socket, subprocess, time, urllib.request
+import json, os, pathlib, shutil, socket, subprocess, tempfile, time, urllib.request
 
 HERE = pathlib.Path(__file__).resolve().parent.parent
 HOST = "127.0.0.1"
@@ -37,29 +37,43 @@ def http_get(url):
 def same_path(a, b): return os.path.realpath(a) == os.path.realpath(b)
 
 
+def _failure(message, log):
+    log.flush(); end = log.seek(0, os.SEEK_END); log.seek(max(0, end - 4096))
+    tail = log.read(4096).decode("utf-8", errors="replace").strip()
+    return f"{message}\nGitNexus output (last 4 KiB):\n{tail}" if tail else message
+
+
 def run_gitnexus(root, reindex=False, spawn=subprocess.Popen, run=subprocess.run, fetch=http_get, wait=30):
     """Raw bytes of GitNexus's /api/graph for the repo at `root`. Never runs plain `analyze` (it writes AGENTS.md/CLAUDE.md into the repo)."""
     cmd = gitnexus_cmd()
-    if reindex and run([*cmd, "analyze", "--index-only", str(root)]).returncode: raise RuntimeError("gitnexus analyze --index-only failed")
-    port = free_port(); base = f"http://{HOST}:{port}/api"
-    child = spawn([*cmd, "serve", "--port", str(port), "--host", HOST])
-    try:
-        end = time.monotonic() + wait
-        while True:
-            try: fetch(base + "/health"); break
-            except OSError:
-                if child.poll() is not None: raise RuntimeError("gitnexus serve exited during startup")
-                if time.monotonic() > end: raise RuntimeError(f"gitnexus serve not healthy in {wait}s")
-                time.sleep(0.25)
-        repos = json.loads(fetch(base + "/repos"))
-        repos = repos.get("repos", []) if isinstance(repos, dict) else repos
-        name = next((r["name"] for r in repos if same_path(r.get("path", ""), root)), None)
-        if not name: raise RuntimeError(f"no gitnexus index for {root}; pass --reindex")
-        return fetch(base + "/graph?repo=" + urllib.request.quote(name))
-    finally:
-        child.terminate()
-        try: child.wait(10)
-        except Exception: child.kill()
+    with tempfile.TemporaryFile() as log:
+        if reindex:
+            result = run([*cmd, "analyze", "--index-only", str(root)], stdout=log, stderr=subprocess.STDOUT)
+            if result.returncode: raise RuntimeError(_failure("gitnexus analyze --index-only failed", log))
+        port = free_port(); base = f"http://{HOST}:{port}/api"
+        child = spawn([*cmd, "serve", "--port", str(port), "--host", HOST], stdout=log, stderr=subprocess.STDOUT)
+        failure = None
+        try:
+            end = time.monotonic() + wait
+            while True:
+                try: fetch(base + "/health"); break
+                except OSError:
+                    if child.poll() is not None: raise RuntimeError("gitnexus serve exited during startup")
+                    if time.monotonic() > end: raise RuntimeError(f"gitnexus serve not healthy in {wait}s")
+                    time.sleep(0.25)
+            repos = json.loads(fetch(base + "/repos"))
+            repos = repos.get("repos", []) if isinstance(repos, dict) else repos
+            name = next((r["name"] for r in repos if same_path(r.get("path", ""), root)), None)
+            if not name: raise RuntimeError(f"no gitnexus index for {root}; pass --reindex")
+            return fetch(base + "/graph?repo=" + urllib.request.quote(name))
+        except Exception as exc:
+            failure = exc
+        finally:
+            child.terminate()
+            try: child.wait(10)
+            except Exception:
+                child.kill(); child.wait(10)
+        if failure is not None: raise RuntimeError(_failure(str(failure), log)) from failure
 
 
 def write_snapshot(path, body):
