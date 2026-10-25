@@ -39,11 +39,23 @@ def test_add_edit_status_audit(srv):
     c = db.connect(p); row = c.execute("SELECT * FROM item WHERE id=?", (i,)).fetchone()
     assert row["label"] == "issue" and row["status"] == "approved" and row["priority"] == "high" and json.loads(row["spec"]) == {"goal": "g"}
     assert call(hp, {"op": "edit", "id": i, "title": "bug2", "body": "bb", "spec": {"goal": "g2", "scope": {"touch": ["x"]}}})[0] == 200
-    assert call(hp, {"op": "edit", "id": i, "status": "doing"})[0] == 200
+    assert call(hp, {"op": "edit", "id": i, "status": "doing", "spec": {"goal": "g2", "scope": {"touch": ["x"]}}})[0] == 200
     row = c.execute("SELECT * FROM item WHERE id=?", (i,)).fetchone()
     assert (row["title"], row["body"], row["status"]) == ("bug2", "bb", "doing") and json.loads(row["spec"])["goal"] == "g2"
     assert {"item.add", "item.edit", "item.transition"} <= {x[0] for x in c.execute("SELECT tool FROM audit")}
     assert call(hp, {"op": "edit", "id": i, "status": "proposed"})[0] == 403  # illegal transition is denied by the service
+
+
+def test_edit_rejects_bad_scope_before_status_write(srv):
+    hp, p = srv
+    i = call(hp, {"op": "add", "kind": "task", "title": "t"})[1]["id"]
+    c = db.connect(p)
+    before = tuple(c.execute("SELECT status,version,spec FROM item WHERE id=?", (i,)).fetchone())
+    audits = c.execute("SELECT count(*) FROM audit WHERE target=?", (f"item:{i}",)).fetchone()[0]
+    status, result = call(hp, {"op": "edit", "id": i, "status": "doing", "spec": {"goal": "g", "scope": []}})
+    assert status == 400 and result["error"] == "spec.scope must be a JSON object"
+    assert tuple(c.execute("SELECT status,version,spec FROM item WHERE id=?", (i,)).fetchone()) == before
+    assert c.execute("SELECT count(*) FROM audit WHERE target=?", (f"item:{i}",)).fetchone()[0] == audits
 
 
 def test_validation(srv):

@@ -182,6 +182,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                             if opt("title", str) is not None and not op["title"].strip(): raise ValueError("title required")
                             f = {k: opt(k, t) for k, t in (("title", str), ("body", str), ("priority", str), ("spec", dict))}
                             if op.get("status") is None and all(v is None for v in f.values()): raise ValueError("nothing to edit")
+                            if f["spec"] is not None and "scope" in f["spec"] and not isinstance(f["spec"]["scope"], dict): raise ValueError("spec.scope must be a JSON object")
                             if op.get("status") is not None: service.set_item(conn, "main", id, status=op["status"])  # first: transition rules are the likeliest failure
                             if any(v is not None for v in f.values()): service.edit_item(conn, "main", id, **f)
                         elif o == "delete": service.delete_item(conn, "main", need("id", int))
