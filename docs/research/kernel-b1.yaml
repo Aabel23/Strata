@@ -1,0 +1,85 @@
+title: "Kernel B1: run registry, run exec and Gate"
+summary: Research for Phase B slice B1. How Strata runs one CLI coding agent per ticket in its own worktree, records the run, and checks the result deterministically before submitting.
+code: [strata/service.py, strata/context.py, strata/schema.sql, agent/agents/coder.md, docs/c4/contracts/runs.yaml, docs/c4/behavior/runs.yaml]
+
+blocks:
+  - md: |
+      ## Status
+      Research for decisions. The binding Stage 1 decisions are: Strata is the Kernel; agents run as supervised CLI subprocesses; the Kernel may write run records and submit a ticket after the Gate passes; approve and done stay with the main chat.
+
+      Evidence labels: **[O]** observed on this machine or in the repo, **[I]** inference, **[P]** proposal.
+
+  - md: |
+      ## Decisions (user, 2026-10-25)
+      - **D3 isolation:** `--safe-mode`. The coder role goes in through `--append-system-prompt`; acceptEdits plus an allowlist plus `--permission-prompts none`; `--max-turns` only as best effort.
+      - **D4 role:** a new `kernel` role that may claim (approved→doing), submit (doing→review) and release (doing→approved). Approve and done stay main-only.
+      - **D5 verify:** a new `spec.verify_cmd` field holding argv lists, with no shell. Approval refuses a ticket meant for run exec when the field is missing.
+      - **D1, D2, D6, D7, D8:** accepted as recommended below.
+
+  - md: |
+      ## Key findings
+      - **Existing `spec.verify` is not runnable [O].** Ticket 146 stores one command string. Ticket 162 stores a list of prose sentences plus one command. `service._gate` (service.py:97-101) only checks that the field is non-empty. The Gate needs an explicit runnable field.
+      - **`scope.touch` mixes globs, folders and files [O].** `scope.forbid` sometimes holds prose. The Gate needs a defined matcher, and it ignores forbid entries that are not paths.
+      - **Submit goes through the existing rules [O].** `service.transition(c, role, id, "review", actor, note)` requires a note and `actor == owner`, and uses compare-and-swap on status and version. The review→done freshness check already exists.
+      - **`claude -p` can be isolated from the global startup [O].** With no flags, the agent saw `~/.claude/CLAUDE.md` ("Endo agent startup") and the Obsidian MCP. With `--setting-sources project` or `--safe-mode`, it saw neither.
+      - **`--max-turns` is undocumented [O].** It works but is not in `--help`. The supported caps are `--max-budget-usd` and the Kernel's own wall-clock timeout.
+      - **`claude -p --output-format json` reports usage [O]:** `session_id`, `total_cost_usd`, `num_turns`, `usage`, `terminal_reason`, `is_error`. stdin must be closed, or the CLI waits for input.
+      - **codex is not installed [O].** Its flags are unverified.
+
+  - md: |
+      ## Proposed run lifecycle [P]
+      1. `run exec --item N --as NAME` checks the ticket is approved (or already doing and owned by NAME), claims it as NAME, then registers the run.
+      2. It creates the worktree `run/<id>` from HEAD (recorded as `base_sha`). It warns about uncommitted files in the main tree and refuses if any of the ticket's touch paths are dirty there.
+      3. It launches `claude -p` in its own process group, with stdin closed, the packet as the prompt and the coder role as the appended system prompt, JSON output to the run log, and a budget plus timeout.
+      4. On exit, the Kernel runs `git add -A` and commits the candidate on `run/<id>` with a fixed Kernel identity, hooks disabled.
+      5. The Gate checks the diff `base..candidate` against the scope, then runs the verify commands in a detached clean worktree.
+      6. If the Gate passes, the ticket is submitted (doing → review) with a note naming the run. If it fails, the run becomes `gate_failed` with a reason and the ticket stays doing.
+      7. The main chat reviews `git diff base..head`, approves, and merges `run/<id>` itself. `run clean <id>` removes the worktree; nothing is deleted automatically.
+
+  - table:
+      head: [Gate scope rule, Behaviour]
+      rows:
+        - ["Matching", "touch entries are repo-relative globs; ** crosses folders; a trailing / means the whole subtree; a bare path is exact"]
+        - ["Forbid", "checked first and wins; entries that are not paths are ignored with a note"]
+        - ["Always forbidden", "strata.db, .git/**, .claude/**, hook configs"]
+        - ["Renames and deletes", "diffed with --no-renames, so both paths must be in scope; deleting an out-of-scope file is a violation"]
+        - ["Empty diff", "fails (no changes)"]
+
+  - table:
+      head: [Run column, Purpose]
+      rows:
+        - ["id, project, item_id, agent, harness", "identity; agent = --as NAME"]
+        - ["state", "registered, launched, exited, gating, submitted, gate_failed, aborted"]
+        - ["pid, exit_code, usage, session_id", "supervision and cost"]
+        - ["branch, base_sha, head_sha, worktree", "workspace and review diff"]
+        - ["log_path, reason, started, ended", "evidence"]
+
+  - md: |
+      Every state change writes an audit row `run.<event>` in the same transaction. A partial unique index allows only one live run per ticket. A manual `run reap` marks dead runs as aborted. Automatic reconciliation is deferred.
+
+  - question:
+      q: "D3. How isolated should a Kernel-launched agent be?"
+      options:
+        - {label: "--safe-mode", note: "no CLAUDE.md, skills, plugins, hooks or MCP; the packet is self-contained"}
+        - {label: "--setting-sources project", note: "keeps the worktree's project settings and CLAUDE.md"}
+      recommend: "--safe-mode"
+  - question:
+      q: "D4. Which role does the Kernel use for its writes?"
+      options:
+        - {label: "New kernel role", note: "may claim, submit and release; audit clearly shows the Kernel"}
+        - {label: "coder role with actor NAME", note: "smallest change; release after a failed launch needs main"}
+        - {label: "main role", note: "broadest"}
+      recommend: "New kernel role"
+  - question:
+      q: "D5. How are verify commands written?"
+      options:
+        - {label: "New spec.verify_cmd as argv lists", note: "no shell; approval refuses run-exec tickets without it"}
+        - {label: "Run marked entries of spec.verify"}
+        - {label: "Run every spec.verify string in a shell", note: "breaks on prose"}
+      recommend: "New spec.verify_cmd as argv lists"
+  - question:
+      q: "D1, D2, D6, D7, D8. Accept the remaining defaults?"
+      options:
+        - {label: "Accept", note: "worktrees in ../.strata-worktrees/<project>/run-<id> from HEAD; the main chat merges by hand; clean checkout via a detached worktree; claude only (codex later); scope rules as in the table"}
+        - {label: "Change some"}
+      recommend: "Accept"
