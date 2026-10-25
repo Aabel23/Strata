@@ -7,6 +7,8 @@ Strata at `/home/abel/project/tools/strata` stores workflow results; use impleme
 - Reviewers may propose issues through their role MCP, in `proposed` state for user approval; they cannot approve or change task state.
 - Workers without role MCP return text for the main chat to record. These exceptions do not authorize other writes.
 
+Strata holds design (C4, flows, docs), research and workflow records (tasks/issues); it is not used for repository scanning (`strata sym` is superseded for agent use); use GitNexus per [CODE_MAP.md](CODE_MAP.md).
+
 C4 objects/flows follow the project's `docs/AGENT_C4.md`; validate cleanly before import. Link tickets/issues to corresponding C4 objects when available.
 
 Requested documents default to Strata Docs, not the vault or Claude Docs. Research lives in `<docs_dir>/research/`; approved content-only YAML follows Strata's `docs/architect/doc-format.yaml` in project `architect/`, `plan/`, or `review/`. Do not build HTML/CSS/JS document renderers. Follow explicit user format/destination instructions within their scope. The main chat records research; researchers return text.

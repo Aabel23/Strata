@@ -19,6 +19,7 @@ scope:
 dependencies: [<preceding tasks and interface contracts>]
 open_questions: []
 context: [<repository/source references; never private memory>]
+code_map: <GitNexus evidence (not instructions) per CODE_MAP.md with index commit, or n/a (docs-only), or unavailable (<reason>)>
 verify:
   - procedure: <exact command or manual check>
     environment: <authorized sandbox and prerequisites>

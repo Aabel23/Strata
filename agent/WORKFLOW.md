@@ -12,7 +12,7 @@ For a new feature or system, preserve these owner approval gates. Do not restart
 | 5 Implement | Coder; Sonnet medium | Small changes with ticket verification; complete approved scope without asking again. |
 | 6 Review | Independent reviewer; Sonnet medium | Acceptance, scope and diff-focused security review; user approval closes the new-feature flow; resulting issues are recorded. |
 
-Explicit user model/effort requests override default profiles. Hosts select actual models; report unavailable mappings honestly. Existing fixes/refactors use their authorized task contract and mandatory independent review without manufacturing new-feature design gates.
+Stage 5 uses the contract `code_map`; stage 6 compares `gitnexus detect-changes` with scope, both per [CODE_MAP.md](CODE_MAP.md). Explicit user model/effort requests override default profiles. Hosts select actual models; report unavailable mappings honestly. Existing fixes/refactors use their authorized task contract and mandatory independent review without manufacturing new-feature design gates.
 
 Ticket states are approved → doing → review → done. The reviewer must differ from the owner. Only the main chat marks done after acceptance and required approvals.
 
