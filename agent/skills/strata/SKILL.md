@@ -77,7 +77,7 @@ Ba server cùng `strata.py mcp --role ...`, khác nhau ở tập tool theo vai:
 - `strata` (`--role main`): chat chính.
 - `strata-coder` (`--role coder`): coder claim/submit.
 - `strata-reviewer` (`--role reviewer`): reviewer đọc, thêm issue (`proposed`).
-Cài đặt MCP: `claude mcp add --scope user strata -- python3 /home/abel/project/tools/strata/strata.py mcp --role main` (Codex: thay `claude` bằng `codex`, bỏ `--scope user`). Quyền từng role do server thực thi; quy trình agent thuộc Endo, không thuộc công cụ Strata.
+Cài đặt MCP: `claude mcp add --scope user strata -- python3 /home/abel/project/tools/strata/strata.py mcp --role main` (Codex: thay `claude` bằng `codex`, bỏ `--scope user`). Quyền từng role do server thực thi; quy trình agent thuộc `agent/` của Strata, không thuộc công cụ Strata.
 
 ## Lỗi hay gặp (thư mục C4)
 - Chuỗi có `:` `?` `{` `}` `,` `#` phải bọc `"..."`; dấu phẩy không bọc cắt chuỗi, `c4 validate` báo `key lạ`.

@@ -16,7 +16,7 @@ There is no `memory/` folder (cleared 2026-10-18). Do not create one. Long-term 
 ## Closing a session
 1. Update `RAM.md`: add or modify current work, remove finished items. Keep it a short tree.
 2. Update `OPEN.md`: add new unresolved issues, delete resolved ones.
-3. Do not promote transient notes, lessons or inferred preferences to permanent policy. Only when the user explicitly requests a policy change, delegate the scoped edit to the relevant layer under `/home/abel/project/tools/endo/agent/`, obtain independent review, and follow its local commit policy. Session-saving authorization alone does not authorize a rule change.
+3. Do not promote transient notes, lessons or inferred preferences to permanent policy. Only when the user explicitly requests a policy change, delegate the scoped edit to the relevant layer under `/home/abel/project/tools/strata/agent/`, obtain independent review, and follow its local commit policy. Session-saving authorization alone does not authorize a rule change.
 4. Decisions that matter beyond this session go into RAM.md as one line each (under the task they belong to). Do not write session logs.
 5. Report briefly what changed. The session-saving request authorizes the continuity writes above; separate policy changes retain their own authorization.
 

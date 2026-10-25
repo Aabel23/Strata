@@ -1,6 +1,6 @@
 # Strata: tài liệu kỹ thuật và sử dụng cho agent
 
-Strata là công cụ quản lý task, issue, tài liệu và C4. Luật và quy trình agent dùng chung thuộc Endo: [`../endo/agent/BOOTSTRAP.md`](../endo/agent/BOOTSTRAP.md), [`../endo/agent/HIEN_PHAP.md`](../endo/agent/HIEN_PHAP.md). Sổ tay dùng công cụ là [`agent/skills/strata/SKILL.md`](agent/skills/strata/SKILL.md).
+Strata là công cụ quản lý task, issue, tài liệu và C4. Luật và quy trình agent dùng chung nằm trong `agent/`: [`agent/BOOTSTRAP.md`](agent/BOOTSTRAP.md), [`agent/HIEN_PHAP.md`](agent/HIEN_PHAP.md). Sổ tay dùng công cụ là [`agent/skills/strata/SKILL.md`](agent/skills/strata/SKILL.md).
 
 ## Tài liệu tham chiếu
 
@@ -21,4 +21,4 @@ Strata là công cụ quản lý task, issue, tài liệu và C4. Luật và quy
 
 ## Thư mục `agent/`
 
-Chỉ [`agent/skills/strata/SKILL.md`](agent/skills/strata/SKILL.md) là sổ tay công cụ được giữ tại Strata. Các đường dẫn luật, vai agent và hook cũ trong `agent/` là symlink tương thích về `../endo/agent/`; nguồn chuẩn và nơi sửa chính sách là Endo.
+`agent/` chứa luật, vai agent, quy trình, hook và skill dưới dạng file thật (đã gộp từ Endo); đây là nguồn chuẩn và nơi sửa chính sách. [`agent/skills/strata/SKILL.md`](agent/skills/strata/SKILL.md) là sổ tay công cụ. `agent/skills/schematic/` là skill bên thứ ba, cố ý nằm ngoài git.

@@ -1,10 +1,10 @@
 # Agent governance ownership
 
-Endo owns `BOOTSTRAP.md`, `HIEN_PHAP.md`, agent roles, hooks, and maintained skills in this directory. Change governance here. Strata is a tool; its canonical usage manual remains `/home/abel/project/tools/strata/agent/skills/strata/SKILL.md`. Endo references that manual without copying it. Tool commands, data formats and server role permissions remain Strata documentation; workflow policy belongs to Endo.
+Strata's `agent/` folder owns `BOOTSTRAP.md`, `HIEN_PHAP.md`, agent roles, hooks, and maintained skills in this directory. Change governance here. Strata is a tool; its canonical usage manual remains `/home/abel/project/tools/strata/agent/skills/strata/SKILL.md`. This directory references that manual without copying it. Tool commands, data formats and server role permissions remain Strata documentation; workflow policy belongs to this directory.
 
-The previous paths under `/home/abel/project/tools/strata/agent/` are compatibility symlinks to Endo for bootstrap, constitution, roles, hooks and maintained skills. They contain no duplicate rule text. Existing installed links in `~/.claude` and `~/.codex` can continue resolving through them; this migration does not modify those installations. New installations should link directly to Endo as described in this maintainer reference. Keep the compatibility links until all installations have been updated.
+Governance was merged from the Endo repository into `/home/abel/project/tools/strata/agent/` as real files; the old symlinks are gone. Installed links in `~/.claude` and `~/.codex` should point at this directory; this migration does not modify those installations.
 
-`skills/schematic` is an external clone, excluded from Strata's git repository. Its existing directory is preserved in place; Endo links to it rather than copying its dependency tree or treating it as maintained governance. External pack skills remain in `~/.claude/packs/`.
+`skills/schematic` is an external clone, excluded from Strata's git repository. Its existing directory is preserved in place; it is not copied here, and its dependency tree is not treated as maintained governance. External pack skills remain in `~/.claude/packs/`.
 
 Both repositories must be available at their documented paths for compatibility links and the external skill link to resolve. Strata executable, database and format-document paths remain in the Strata repository.
 
@@ -16,11 +16,11 @@ Loading map: BOOTSTRAP → shared HIEN_PHAP + coordinator; feature/delivery → 
 
 ## User-owned setup
 
-Maintainers do not change `~/.claude` or `~/.codex` as part of a repository refactor. The user manages installed links and host configuration. New links should point to Endo; retain old Strata compatibility links until all installations migrate.
+Maintainers do not change `~/.claude` or `~/.codex` as part of a repository refactor. The user manages installed links and host configuration. New links should point to `/home/abel/project/tools/strata/agent/`.
 
 ```bash
 mkdir -p ~/.claude/agents
-ln -s /home/abel/project/tools/endo/agent/agents/*.md ~/.claude/agents/
+ln -s /home/abel/project/tools/strata/agent/agents/*.md ~/.claude/agents/
 claude mcp add --scope user strata -- python3 /home/abel/project/tools/strata/strata.py mcp --role main
 codex mcp add strata -- python3 /home/abel/project/tools/strata/strata.py mcp --role main
 ```
