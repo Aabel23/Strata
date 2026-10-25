@@ -31,11 +31,15 @@ EDIT_PATH = "/api/c4/edit"
 PROJECT_PATH = "/api/project"
 ITEM_PATH = "/api/item"
 MAX_BODY = 65536
+_CODEMAP_BUILD_SLOT = threading.Semaphore(1)
+_CODEMAP_BUILD_LOCK = threading.Lock()
+_CODEMAP_BUILDS = set()
+_CODEMAP_FAILURES = {}
 
 
 def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_hosts=(), bound_hosts=None, allow_edit=None, build=codemap.run_gitnexus):
     """allow_hosts: extra Host names (with or without port). bound_hosts: every address strata binds (default just host).
-    allow_edit: enable POST /api/c4/edit; None = only when host is loopback. build: code-map builder (root, reindex=) -> graph bytes, injectable for tests."""
+    allow_edit: enable POST /api/c4/edit; None = only when host is loopback. build: cancellable code-map builder (root, reindex=, cancel=) -> graph bytes."""
     if allow_edit is None: allow_edit = host in LOOPBACK
     if host in ("0.0.0.0", "::") and not allow_hosts:
         raise ValueError(f"binding {host} needs at least one --allow-host NAME")
@@ -50,20 +54,43 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
     def rows(sql, args=()):
         with lock: return db.query_rows(conn, sql, args)
 
-    bl = threading.Lock(); building = set(); failed = {}  # background code-map builds: running projects, project -> last failure reason
+    bl = threading.Lock(); build_threads = set()
+    stopping = threading.Event(); lifecycle = threading.Lock()
 
-    def build_codemap(pid):
+    def code_key(pid):
+        path = db.db_path(db_path)
+        return (str(pathlib.Path(path).resolve()) if path != ":memory:" else f":memory:{id(conn)}", pid)
+
+    def build_codemap(pid, key):
+        acquired = False
         try:
+            while not stopping.is_set():
+                acquired = _CODEMAP_BUILD_SLOT.acquire(timeout=0.1)
+                if acquired: break
+            if not acquired or stopping.is_set(): return
             with lock: root = codemap.project_root(conn, pid)
-            body = build(root, reindex=True)  # slow: no lock held
+            body = build(root, reindex=True, cancel=stopping)  # slow: no DB lock held
             g = json.loads(body)
             if not isinstance(g, dict) or "nodes" not in g or "relationships" not in g: raise RuntimeError("unexpected gitnexus graph shape")
-            codemap.write_snapshot(codemap.snapshot_path(db.db_path(db_path), pid), body)
-            with bl: failed.pop(pid, None)
+            with lifecycle:
+                if stopping.is_set(): return
+                codemap.write_snapshot(codemap.snapshot_path(db.db_path(db_path), pid), body)
+            with _CODEMAP_BUILD_LOCK: _CODEMAP_FAILURES.pop(key, None)
         except Exception as e:
-            with bl: failed[pid] = str(e) or type(e).__name__
+            if not stopping.is_set():
+                with _CODEMAP_BUILD_LOCK: _CODEMAP_FAILURES[key] = str(e) or type(e).__name__
         finally:
-            with bl: building.discard(pid)
+            if acquired: _CODEMAP_BUILD_SLOT.release()
+            with _CODEMAP_BUILD_LOCK: _CODEMAP_BUILDS.discard(key)
+            with bl:
+                build_threads.discard(threading.current_thread())
+
+    def stop_builds():
+        with lifecycle: stopping.set()
+
+    def wait_builds():
+        with bl: workers = list(build_threads)
+        for worker in workers: worker.join()
 
     stamps = {}  # project -> docs_dir fingerprint at last scan
 
@@ -126,7 +153,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
 
         def project_op(self, op):
             """POST /api/project {op: add|edit|delete, ...}: project create/edit/delete through the service (audited)."""
-            steps = pid = None
+            steps = pid = scan_root = None
             try:
                 with lock:
                     try:
@@ -138,10 +165,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                         if op.get("op") == "add" and op.get("setup"):
                             steps = service.setup_project(conn, db.db_path(db_path), op["root"], op.get("id"), op.get("name"), op.get("docs_dir"), codemap=False, confine_docs=True)
                             pid = steps[0]["id"]
-                            if service.has_code(pathlib.Path(op["root"]).expanduser().resolve()):
-                                steps[-1] = {"step": "codemap", "status": "started", "detail": "building in the background"}
-                                with bl: failed.pop(pid, None); fresh = pid not in building; building.add(pid)
-                                if fresh: threading.Thread(target=build_codemap, args=(pid,), daemon=True).start()
+                            scan_root = pathlib.Path(op["root"]).expanduser().resolve()
                         elif op.get("op") == "add":
                             service.add_project(conn, op.get("id"), op.get("name"), op.get("root"), op.get("docs_dir"), op.get("parent"), op.get("description"))
                         elif op.get("op") == "edit":
@@ -152,6 +176,18 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                             service.delete_project(conn, op["id"], op.get("confirm"))
                         else: raise ValueError("op must be add, edit or delete")
                     except BaseException: conn.rollback(); raise
+                if scan_root is not None and service.has_code(scan_root):
+                    key = code_key(pid)
+                    with bl:
+                        if not stopping.is_set():
+                            steps[-1] = {"step": "codemap", "status": "started", "detail": "building in the background"}
+                            with _CODEMAP_BUILD_LOCK:
+                                _CODEMAP_FAILURES.pop(key, None)
+                                fresh = key not in _CODEMAP_BUILDS
+                                if fresh: _CODEMAP_BUILDS.add(key)
+                            if fresh:
+                                worker = threading.Thread(target=build_codemap, args=(pid, key), daemon=True)
+                                build_threads.add(worker); worker.start()
                 return self.json({"ok": True, "id": pid, "steps": steps} if steps else {"ok": True})
             except ValueError as e: return self.json({"error": str(e)}, 400)
             except KeyError as e: return self.json({"error": str(e.args[0]) if e.args else "not found"}, 404)
@@ -350,14 +386,14 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             if not q.get("project"): return self.json({"error": "missing project"}, 400)
             with lock:
                 if not conn.execute("SELECT 1 FROM project WHERE id=?", (q["project"],)).fetchone(): return self.json({"error": "unknown project"}, 400)
-            with bl: busy = q["project"] in building
+            try: return self.json(codemap.load_snapshot(db.db_path(db_path), q["project"]))
+            except FileNotFoundError: pass
+            key = code_key(q["project"])
+            with _CODEMAP_BUILD_LOCK: busy, why = key in _CODEMAP_BUILDS, _CODEMAP_FAILURES.get(key)
             if busy: return self.json({"error": "building", "building": True}, 404)
-            try: r = self.json(codemap.load_snapshot(db.db_path(db_path), q["project"])); failed.pop(q["project"], None); return r
-            except FileNotFoundError:
-                with bl: why = failed.get(q["project"])
-                if why: return self.json({"error": why, "building": False}, 404)
-                with lock: row = conn.execute("SELECT root FROM project WHERE id=?", (q["project"],)).fetchone()
-                return self.json({"error": "no code map", "empty": True, "root": (row and row[0]) or None}, 404)
+            if why: return self.json({"error": why, "building": False}, 404)
+            with lock: row = conn.execute("SELECT root FROM project WHERE id=?", (q["project"],)).fetchone()
+            return self.json({"error": "no code map", "empty": True, "root": (row and row[0]) or None}, 404)
 
         def code(self, p, q):
             need = {"/api/code/files": ("project", "object"), "/api/code/symbols": ("project", "path"), "/api/code/src": ("project", "id")}.get(p)
@@ -401,4 +437,14 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
 
     class S(http.server.ThreadingHTTPServer):
         address_family = socket.AF_INET6 if ":" in host else socket.AF_INET
+        def serve_forever(self, *args, **kwargs):
+            try: return super().serve_forever(*args, **kwargs)
+            finally: stop_builds(); wait_builds()
+        def shutdown(self):
+            stop_builds()
+            return super().shutdown()
+        def server_close(self):
+            stop_builds()
+            super().server_close()
+            wait_builds()
     return S((host, port), H)
