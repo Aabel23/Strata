@@ -10,10 +10,8 @@
 </head>
 <body>
   <main class="app" id="app" aria-label="Code graph rendered as a celestial chart">
-    <header class="masthead"><h1>Celeste</h1><span>Code graph chart</span></header>
     <svg id="sky" class="layer" viewBox="0 0 2400 1200" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
       <defs>
-        <clipPath id="plot-clip"><rect x="76" y="78" width="2248" height="1044"></rect></clipPath>
         <radialGradient id="core-gradient">
           <stop offset="0%" stop-color="#ffe6ae" stop-opacity=".56"></stop>
           <stop offset="23%" stop-color="#e6ae65" stop-opacity=".22"></stop>
@@ -21,33 +19,31 @@
           <stop offset="100%" stop-color="#a9773e" stop-opacity="0"></stop>
         </radialGradient>
       </defs>
-      <g id="rulers"></g>
-      <g clip-path="url(#plot-clip)"><g id="sky-world"><g id="grid"></g>
+      <g id="sky-world"><g id="grid"></g>
         <ellipse id="core-glow" cx="1200" cy="600" rx="8" ry="5" fill="url(#core-gradient)" opacity="0"></ellipse>
-      </g></g>
+      </g>
     </svg>
     <canvas id="edges" class="layer"></canvas>
     <canvas id="stars" class="layer"></canvas>
     <svg id="overlay" class="layer map-svg" viewBox="0 0 2400 1200" preserveAspectRatio="xMidYMid meet" role="application" aria-label="Code graph. Drag to pan, scroll or plus/minus to zoom, click a star to pin it, Escape to clear.">
-      <g clip-path="url(#plot-clip)"><g id="overlay-world">
+      <g id="overlay-world">
         <circle id="selection-ring" class="selection-ring" r="11"></circle>
         <path id="selection-cross" class="selection-cross" d="M-20 0h7M13 0h7M0-20v7M0 13v7"></path>
         <text id="hover-label" class="hover-label" visibility="hidden"></text>
-      </g></g>
+      </g>
     </svg>
     <div class="controls" aria-label="Map controls">
-      <span class="control-hint">Scroll to navigate</span>
       <div class="gravity-control">
         <label for="gravity">Center gravity</label><output id="gravity-value" for="gravity">0.00</output>
         <input id="gravity" type="range" min="0" max="0.8" step="0.01" value="0">
-        <small>0 keeps the force layout; higher pulls stars toward a denser core.</small>
       </div>
       <details class="edges-menu" id="edges-menu" hidden><summary>Edges</summary><div class="filters" id="filters" aria-label="Edge types"></div></details>
       <button id="zoom-in" type="button" aria-label="Zoom in" title="Zoom in (+)">+</button>
       <button id="zoom-out" type="button" aria-label="Zoom out" title="Zoom out (−)">−</button>
       <button id="reset" type="button" aria-label="Reset view" title="Reset view (0)">Reset</button>
     </div>
-    <aside class="detail" aria-label="Node details">
+    <aside class="detail" id="detail" aria-label="Node details" hidden>
+      <button class="detail-close" id="detail-close" type="button" aria-label="Close details" title="Close (Esc)">×</button>
       <p class="eyebrow" id="detail-kicker">Selected object</p>
       <h2 id="detail-title">Explore the field</h2>
       <div class="detail-grid">
@@ -58,9 +54,8 @@
       </div>
       <p class="detail-label neighbours-label" id="neighbours-label" hidden>Neighbours</p>
       <ul class="neighbours" id="neighbours"></ul>
-      <p class="detail-note" id="detail-note">Hover a star to inspect it; click to pin.</p>
+      <p class="detail-note" id="detail-note"></p>
     </aside>
-    <footer class="footnote"><span><strong id="node-count">0</strong> nodes</span><span><strong id="edge-count">0</strong> edges</span><span id="source-note">GitNexus</span><span>Drag · scroll · + − 0 · Esc</span></footer>
   </main>
   <script type="module" src="js/main.js"></script>
 </body>

@@ -1,17 +1,18 @@
 // One camera for SVG + canvases. Chart space is 2400x1200 (the SVG viewBox); the view is
 // translate(tx,ty) scale(scale) in chart units, fitted into the element with a "meet" scale s0.
-export const BOUNDS = { left: 76, right: 2324, top: 78, bottom: 1122 };
+export const BOUNDS = { left: 76, right: 2324, top: 78, bottom: 1122 }; // where nodes are laid out
+const PAN = { left: 0, right: 2400, top: 0, bottom: 1200 }; // what the camera may show
 
 export function createCamera(el, { onChange, onIdle, onTap, onHover }) {
-  const cam = { scale: 1, tx: 0, ty: 0, W: 1, H: 1, s0: 1, ox: 0, oy: 0, left: 0, top: 0, vl: BOUNDS.left, vr: BOUNDS.right,
+  const cam = { scale: 1, tx: 0, ty: 0, W: 1, H: 1, s0: 1, ox: 0, oy: 0, left: 0, top: 0, vl: PAN.left, vr: PAN.right,
     vis: { x0: 0, y0: 0, x1: 0, y1: 0 }, busy: false, narrow: false };
   let idle = 0;
   let drag = null;
 
   function clamp() {
     const s = cam.scale;
-    cam.tx = Math.max(cam.vr - BOUNDS.right * s, Math.min(cam.vl - BOUNDS.left * s, cam.tx));
-    cam.ty = Math.max(BOUNDS.bottom - BOUNDS.bottom * s, Math.min(BOUNDS.top - BOUNDS.top * s, cam.ty));
+    cam.tx = Math.max(cam.vr - PAN.right * s, Math.min(cam.vl - PAN.left * s, cam.tx));
+    cam.ty = Math.max(PAN.bottom - PAN.bottom * s, Math.min(PAN.top - PAN.top * s, cam.ty));
   }
   // busy = camera moved in the last 140ms: renderers may draw reduced detail, then onIdle repaints in full
   const changed = () => {
@@ -32,9 +33,10 @@ export function createCamera(el, { onChange, onIdle, onTap, onHover }) {
     cam.narrow = window.innerWidth <= 700;
     cam.s0 = cam.narrow ? cam.H / 1200 : Math.min(cam.W / 2400, cam.H / 1200);
     cam.ox = (cam.W - 2400 * cam.s0) / 2; cam.oy = (cam.H - 1200 * cam.s0) / 2;
-    const w = cam.W / cam.s0, left = (2400 - w) / 2;
-    cam.vl = cam.narrow ? left : BOUNDS.left; cam.vr = cam.narrow ? left + w : BOUNDS.right;
-    for (const svg of document.querySelectorAll('svg.layer')) svg.setAttribute('viewBox', cam.narrow ? `${left} 0 ${w} 1200` : '0 0 2400 1200');
+    const w = cam.W / cam.s0, h = cam.H / cam.s0, left = -cam.ox / cam.s0, top = -cam.oy / cam.s0;
+    cam.vl = cam.narrow ? left : PAN.left; cam.vr = cam.narrow ? left + w : PAN.right;
+    // viewBox == the whole element, so the SVG layers are never letterboxed
+    for (const svg of document.querySelectorAll('svg.layer')) svg.setAttribute('viewBox', `${left} ${top} ${w} ${h}`);
     changed();
   };
   cam.zoomAt = (factor, cx, cy) => {

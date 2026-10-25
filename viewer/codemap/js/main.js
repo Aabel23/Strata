@@ -20,7 +20,7 @@ const perf = params.get('perf') === '1', frames = (window.__celesteFrames = []);
 
 const sky = buildSky();
 const overlay = createOverlay();
-const panel = createPanel({ onPick: (i) => { select(i); cam.focus(scene.x[i], scene.y[i]); } });
+const panel = createPanel({ onPick: (i) => { select(i); cam.focus(scene.x[i], scene.y[i]); }, onClose: () => select(-1) });
 
 function frame() {
   raf = 0;
@@ -36,12 +36,13 @@ function onCamera() {
   const t = `translate(${cam.tx} ${cam.ty}) scale(${cam.scale})`;
   sky.world.setAttribute('transform', t);
   overlay.setCamera(cam);
+  if (sel >= 0) placePanel();
   schedule();
 }
 const cam = createCamera(overlay.svg, {
   onChange: onCamera,
   onIdle: () => schedule(),
-  onTap: (e) => { const i = pick(e); if (i >= 0) select(i); },
+  onTap: (e) => select(pick(e)), // empty space clears
   onHover: (e) => setHover(e ? pick(e) : -1),
 });
 const controls = createControls({
@@ -57,11 +58,14 @@ function pick(e) {
   return hit(scene, cx, cy, 9 / (cam.s0 * cam.scale));
 }
 
-function show() { // panel follows hover, else the pinned node, else idle
-  const i = hover >= 0 ? hover : sel;
-  if (i < 0) return panel.message('Selected object', 'Explore the field', 'Hover a star to inspect it; click to pin.');
+function placePanel() { // card sits beside the selected node and follows pan/zoom
+  panel.place((cam.ox + (cam.tx + scene.x[sel] * cam.scale) * cam.s0), cam.oy + (cam.ty + scene.y[sel] * cam.scale) * cam.s0, cam.W, cam.H);
+}
+function show() { // popup only while a node is selected; hover just shows the label
+  const i = sel;
+  if (i < 0) return panel.hide();
   const nb = neighbours(scene, i).map((j) => ({ index: j, name: scene.graph.nodes[j].name, degree: scene.graph.nodes[j].degree }));
-  panel.showNode(scene.graph.nodes[i], nb, i === sel);
+  panel.showNode(scene.graph.nodes[i], nb); placePanel();
 }
 function refreshMarks() {
   const i = hover >= 0 ? hover : sel;
@@ -71,7 +75,7 @@ function refreshMarks() {
 function setHover(i) {
   if (i === hover) return;
   hover = i; overlay.svg.classList.toggle('hovering', i >= 0);
-  show(); refreshMarks(); schedule();
+  refreshMarks(); schedule();
 }
 function select(i) {
   nbr.fill(0);
@@ -83,8 +87,6 @@ function select(i) {
 async function load(name) {
   const my = ++token, t0 = performance.now();
   scene = null; hover = sel = -1; refreshOverlayOff(); // drops the previous graph from canvases + overlay
-  $('source-note').textContent = `GitNexus ${name}`;
-  $('node-count').textContent = $('edge-count').textContent = '0';
   panel.message('Loading', name, 'Reading code map…');
   controls.setEdgeTypes([]); controls.resetGravity(); sky.setGlow(0);
   try {
@@ -98,8 +100,6 @@ async function load(name) {
     scene = buildScene(graph, pos);
     enabled = new Uint8Array(graph.edgeTypes.length).fill(1);
     nbr = new Uint8Array(scene.n);
-    $('node-count').textContent = scene.n.toLocaleString('en-US');
-    $('edge-count').textContent = graph.edges.length.toLocaleString('en-US');
     controls.setEdgeTypes(graph.edgeTypes);
     cam.reset(); show();
     requestAnimationFrame(() => {
