@@ -1,3 +1,23 @@
+## Quickstart
+
+Needs Python 3.9+ and PyYAML.
+
+```
+git clone https://github.com/Aabel23/Strata.git ~/strata && cd ~/strata
+bash scripts/install.sh              # puts `strata` on your PATH (no sudo)
+cd ~/your-project && strata init     # project, docs, starter C4 map, code map
+strata serve                         # terminal 1: the viewer, http://127.0.0.1:8740
+strata open                          # terminal 2: opens your project in the browser
+```
+
+(`strata open` waits a few seconds for the viewer. Or run the viewer as a service: `systemctl --user start strata`.)
+Then add a task from the board, or `strata item add --project <id> --kind task --title "My first task"`.
+Open the Code map tab to see your code as a graph. Run `strata --help` for everything else.
+
+---
+
+## Tham chiếu (tiếng Việt)
+
 # ⛰ Strata
 
 Kiến trúc C4 viết dưới dạng code. Bạn mô tả hệ thống trong một thư mục YAML (`map.yaml` + `contracts/` + `behavior/` + `flows/`), rồi xem nó qua một viewer có thể zoom qua các tầng.

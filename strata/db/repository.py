@@ -236,6 +236,16 @@ def get_project_root_or_c4_root(c, project_id):
     return r[0] if r else None
 
 
+def project_for_path(c, path):
+    """Id of the project whose root is `path` or its deepest ancestor (realpath compare), else None."""
+    import os
+    path, best = os.path.realpath(path), (0, None)
+    for pid, root in c.execute("SELECT id, root FROM project WHERE root IS NOT NULL AND root != ''"):
+        r = os.path.realpath(root)
+        if (path == r or path.startswith(r.rstrip("/") + "/")) and len(r) > best[0]: best = (len(r), pid)
+    return best[1]
+
+
 def list_projects_with_docs(c):
     """Return list of rows/dicts SELECT id,docs_dir FROM project WHERE docs_dir IS NOT NULL"""
     return [dict(r) for r in c.execute("SELECT id,docs_dir FROM project WHERE docs_dir IS NOT NULL")]

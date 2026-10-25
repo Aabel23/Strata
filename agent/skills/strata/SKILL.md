@@ -23,6 +23,8 @@ Hiện có: `internproj`; `project1_app` (cha internproj, root `/home/abel/proje
 ## Muốn làm X → lệnh
 | Muốn | Lệnh |
 |---|---|
+| Dựng project | `strata init [PATH] [--id --name --docs-dir --no-codemap --db-only]` (project, docs, map C4 mẫu, code map; chạy lại không hỏng) |
+| Mở viewer | `strata open [PATH] [--port 8740]` (tìm project chứa PATH, mở trình duyệt; báo lỗi nếu chưa init hoặc viewer chưa chạy) |
 | Danh sách project | `curl -s localhost:8740/api/projects` (Host phải là `127.0.0.1:8740` hoặc `localhost:8740`) |
 | Task/issue | `curl -s 'localhost:8740/api/items?project=P'` (lọc thêm `&kind=task\|issue`, `&status=...`, `&id=N`) |
 | Doc | `curl -s 'localhost:8740/api/docs?project=P'`; một doc: `/api/doc?project=P&path=research/x.yaml` (kèm `errors`) |

@@ -1,28 +1,29 @@
 #!/usr/bin/env python3
 """Strata: project knowledge in SQLite, with a C4 viewer and block pages.
 
-  strata.py init [PATH] [--id --name --docs-dir --no-codemap --db-only] [--db]   set up PATH (default cwd): project, docs folders, C4 map, code map
-  strata.py serve [--db] [--project P] [--port] [--host A,B] [--allow-host NAME]... [--allow-edit|--no-edit] viewer on http://127.0.0.1:PORT
-  strata.py page put|validate FILE | list [--project]
-  strata.py project add ID --name N [--root --docs-dir --parent --description] | delete ID --yes | list
-  strata.py doc validate FILE                     check a doc YAML (no DB)
-  strata.py doc scan --project P | set --project P PATH [--feature --status --ord]
-  strata.py c4 link|unlink|links --project P --object X --item ID   (links: list only)
-  strata.py c4 import DIR --project P [--force] [--dry-run] [--yes] | diff DIR --project P [--json] | export DIR --project P | validate DIR [--json] [--strict]   layered folder (map.yaml + contracts/ behavior/ flows/)
-  strata.py c4 context --project P [--object X] [--max-tokens N]
-  strata.py c4 coverage --project P [--json]      code files owned by no object, by directory
-  strata.py c4 flow --project P [--id F]          numbered step trace (no --id: list flows)
-  strata.py c4 contract ID --project P            one contract of a layered project
-  strata.py sym index --project P | ls PATH|DIR --project P [--public] | show ID --project P [--sig-only --ctx N] | find PATTERN --project P   Python symbol index (cache next to the DB)
-  strata.py code snapshot --project P [--reindex]   code graph via GitNexus -> <db>.codemap/P.json (--reindex: gitnexus analyze --index-only first)
-  strata.py search Q [--project P --src item|page|doc --limit N]
-  strata.py mcp --role main|coder|reviewer [--db]   MCP server on stdio
-  strata.py task context ID [--budget N] [--db]   ticket + rules + c4 + paths in one budgeted text
-  strata.py item add --project P --kind task|issue --title T [--label L --body --priority --status --spec FILE|-] | set ID [--status --priority]
-  strata.py item list [--project --kind --label --status --owner --ready] | show ID | edit ID [--title --body --spec FILE|- --priority] | ready [--project]
-  strata.py item claim ID --as NAME | submit ID --note N [--as NAME] | rework ID --note N | close ID --note N (open -> done) | approve ID [--note --as] | reject ID --note N | release ID | dep add|rm ID DEP   (all: --json)
+  strata init [PATH] [--id --name --docs-dir --no-codemap --db-only] [--db]   set up PATH (default cwd): project, docs folders, C4 map, code map
+  strata open [PATH] [--port 8740] [--db]   open the browser on the project containing PATH (default cwd)
+  strata serve [--db] [--project P] [--port] [--host A,B] [--allow-host NAME]... [--allow-edit|--no-edit] viewer on http://127.0.0.1:PORT
+  strata page put|validate FILE | list [--project]
+  strata project add ID --name N [--root --docs-dir --parent --description] | delete ID --yes | list
+  strata doc validate FILE                     check a doc YAML (no DB)
+  strata doc scan --project P | set --project P PATH [--feature --status --ord]
+  strata c4 link|unlink|links --project P --object X --item ID   (links: list only)
+  strata c4 import DIR --project P [--force] [--dry-run] [--yes] | diff DIR --project P [--json] | export DIR --project P | validate DIR [--json] [--strict]   layered folder (map.yaml + contracts/ behavior/ flows/)
+  strata c4 context --project P [--object X] [--max-tokens N]
+  strata c4 coverage --project P [--json]      code files owned by no object, by directory
+  strata c4 flow --project P [--id F]          numbered step trace (no --id: list flows)
+  strata c4 contract ID --project P            one contract of a layered project
+  strata sym index --project P | ls PATH|DIR --project P [--public] | show ID --project P [--sig-only --ctx N] | find PATTERN --project P   Python symbol index (cache next to the DB)
+  strata code snapshot --project P [--reindex]   code graph via GitNexus -> <db>.codemap/P.json (--reindex: gitnexus analyze --index-only first)
+  strata search Q [--project P --src item|page|doc --limit N]
+  strata mcp --role main|coder|reviewer [--db]   MCP server on stdio
+  strata task context ID [--budget N] [--db]   ticket + rules + c4 + paths in one budgeted text
+  strata item add --project P --kind task|issue --title T [--label L --body --priority --status --spec FILE|-] | set ID [--status --priority]
+  strata item list [--project --kind --label --status --owner --ready] | show ID | edit ID [--title --body --spec FILE|- --priority] | ready [--project]
+  strata item claim ID --as NAME | submit ID --note N [--as NAME] | rework ID --note N | close ID --note N (open -> done) | approve ID [--note --as] | reject ID --note N | release ID | dep add|rm ID DEP   (all: --json)
 """
-import argparse, json, pathlib, sys, threading, webbrowser
+import argparse, json, pathlib, sys, threading, time, urllib.request, webbrowser
 from strata import blocks, c4_layered, codemap, db, service, symbols
 
 
@@ -185,6 +186,20 @@ def cmd_write(a):
 ITEM_STATUS = ["proposed", "approved", "open", "doing", "review", "done", "rejected"]
 
 
+def cmd_open(a):
+    pid = db.project_for_path(db.init(a.db), a.path)
+    if not pid: print("Not a Strata project yet. Run: strata init"); return 1
+    ids, end = None, time.monotonic() + 5
+    while ids is None:  # the viewer may still be starting: retry up to 5 s
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{a.port}/api/projects", timeout=2) as r: ids = {p["id"] for p in json.load(r)}
+        except (OSError, ValueError, TypeError, KeyError):  # HTTPError is an OSError; non-JSON is a ValueError
+            if time.monotonic() >= end: print("The viewer isn't running (or isn't a Strata viewer). Start it with: strata serve"); return 1
+            time.sleep(0.25)
+    if pid not in ids: print(f"The viewer on port {a.port} doesn't know project {pid}. Check --db or --port."); return 1
+    url = f"http://127.0.0.1:{a.port}/#/p/{pid}"; print(url); webbrowser.open(url); return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -193,6 +208,7 @@ def main(argv=None):
         for x in args: p.add_argument(*x[0], **x[1])
         return p
     add("init", (["path"], {"nargs": "?", "default": "."}), (["--id"], {}), (["--name"], {}), (["--docs-dir"], {}), (["--no-codemap"], {"action": "store_true"}), (["--db-only"], {"action": "store_true"}))
+    add("open", (["path"], {"nargs": "?", "default": "."}), (["--port"], {"type": int, "default": 8740}))
     add("serve", (["--project"], {}), (["--port"], {"type": int, "default": 8740}), (["--host"], {"default": "127.0.0.1"}), (["--allow-host"], {"action": "append", "default": []}), (["--allow-edit"], {"dest": "allow_edit", "action": "store_const", "const": True, "default": None}), (["--no-edit"], {"dest": "allow_edit", "action": "store_const", "const": False, "default": None}))
     pg = sub.add_parser("page"); ps = pg.add_subparsers(dest="action", required=True)
     for n in ("put", "validate"):
@@ -249,6 +265,7 @@ def main(argv=None):
     if a.cmd == "mcp":
         from strata import mcp
         return mcp.serve(a.role, a.db)
+    if a.cmd == "open": return cmd_open(a)
     if a.cmd == "init":
         c = db.init(a.db)
         if a.db_only: c.close(); print("ok:", db.db_path(a.db)); return 0
