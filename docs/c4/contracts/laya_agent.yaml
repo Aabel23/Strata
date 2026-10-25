@@ -1,4 +1,0 @@
-- id: laya_predict_agent
-  transport: in-process
-  start: ../laya/laya/router.py::Router.predict
-  end: ../laya/laya/agent.py::Agent.predict
