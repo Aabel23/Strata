@@ -6,6 +6,7 @@ For the main chat:
 1. Read [HIEN_PHAP.md](HIEN_PHAP.md) and [COORDINATOR.md](COORDINATOR.md).
 2. Read `RAM.md` and `OPEN.md` in `/home/abel/.secondbrain` only through Obsidian MCP, using vault-relative paths. If unavailable, tell the user and continue from repository evidence.
 3. Read the project's `CLAUDE.md` when present. Project conventions supplement owner policy within the host's instruction hierarchy.
+4. When no narrower user request is active, inspect the full Strata board at startup, including every status, folded Open/Done sections, and dependencies. Prioritize ready approved tasks and advance them through the applicable [WORKFLOW.md](WORKFLOW.md) gates; move proposed work toward its required approvals without bypassing them. Make concrete progress rather than stopping at a status report.
 
 Delegated workers follow their supplied task and selected role. Do not read private memory or expand the task from this startup file. Coordinators must provide fresh, sanitized context.
 
