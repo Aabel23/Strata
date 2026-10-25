@@ -302,6 +302,30 @@ objects:
   - agent/*.md
   - agent/agents/*
   - agent/skills/**
+- id: runs
+  parent: cli
+  kind: component
+  name: Run registry
+  status: future
+  behavior: runs
+  summary: 'B1, proposed strata/runs.py; SQLite tables for agent runs written only by `strata.py run ...` with an audit row; owns the run lifecycle (see behavior)'
+- id: runexec
+  parent: cli
+  kind: component
+  name: Run exec wrapper
+  status: future
+  summary: 'B1, proposed strata/runexec.py; `strata.py run exec --item N --as NAME [-- agent cmd]` registers a run, packs the task context, launches the agent as a supervised subprocess (default `claude -p`), records pid, exit, usage and log path, then calls the gate'
+- id: gate
+  parent: cli
+  kind: component
+  name: Gate
+  status: future
+  summary: 'B1, proposed strata/gate.py; deterministic, no LLM: diff must touch only spec.scope.touch, spec.verify runs on a clean checkout, then submit doing to review; on failure the item stays doing'
+- id: agent_cli
+  kind: system
+  name: Coding agent CLI
+  status: future
+  summary: 'External CLI coding agent (Claude Code `claude -p` by default, Codex `codex exec` possible) run as a supervised subprocess; Strata never calls an LLM API. Later slices (not built): B2 bwrap sandbox, B3 Agents tab, B4 context packer, B5 controller'
 links:
 - id: u_browse
   from: user
@@ -830,3 +854,65 @@ links:
   to: agent_gov
   name: Read rules, roles and skills (files)
   summary: Agents load governance Markdown from agent/.
+- id: run_argp
+  from: argp
+  to: runexec
+  name: Dispatch run exec (in-process)
+  status: future
+  detail: runs.argp
+  summary: Main chat's `run exec` command is routed to the wrapper.
+- id: run_reg
+  from: runexec
+  to: runs
+  name: Register and update run (in-process)
+  status: future
+  detail: runs.reg
+  summary: Wrapper registers the run and records launch, exit and result.
+- id: run_ctx
+  from: runexec
+  to: ctxmod
+  name: Build task packet (in-process)
+  status: future
+  detail: runs.ctx
+  summary: Wrapper reuses `task context` to build the packet for the agent.
+- id: run_launch
+  from: runexec
+  to: agent_cli
+  name: Launch agent (subprocess)
+  status: future
+  detail: runs.launch
+  summary: Wrapper starts the agent with the packet as stdin and waits for exit or timeout.
+- id: run_edit
+  from: agent_cli
+  to: repo
+  name: Edit files (filesystem)
+  status: future
+  summary: Agent edits files in its checkout.
+- id: run_gate
+  from: runexec
+  to: gate
+  name: Run gate (in-process)
+  status: future
+  detail: runs.gate_call
+  summary: After exit the wrapper hands the candidate to the gate.
+- id: run_gate_repo
+  from: gate
+  to: repo
+  name: Diff, clean checkout, verify (git subprocess)
+  status: future
+  detail: runs.gate_repo
+  summary: Gate reads the diff, checks out the candidate clean and runs spec.verify.
+- id: run_gate_svc
+  from: gate
+  to: service
+  name: Submit item (in-process)
+  status: future
+  detail: runs.gate_svc
+  summary: On pass the gate submits doing to review through the service.
+- id: run_db
+  from: runs
+  to: sqlite
+  name: Read/write run rows (sqlite3)
+  status: future
+  detail: runs.runs_db
+  summary: Registry stores runs and appends an audit row.

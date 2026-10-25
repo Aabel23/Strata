@@ -1,0 +1,59 @@
+- id: argp
+  transport: in-process
+  body:
+    signature: run_exec(c, item_id, as_name, agent_cmd=None) -> dict run
+    purpose: Route `strata.py run exec --item N --as NAME [-- cmd]`
+  start: strata.py::main
+  end: strata/runexec.py::run_exec
+- id: reg
+  transport: in-process
+  body:
+    signature: register(c, item_id, as_name) -> run_id; mark(c, run_id, event, **fields)
+    purpose: Create a run row and apply lifecycle events (launched, exited, gating, submitted, gate_failed, aborted) with an audit row each
+    errors: [ValueError on an illegal transition or an item not in doing]
+  start: strata/runexec.py::run_exec
+  end: strata/runs.py::mark
+- id: ctx
+  transport: in-process
+  body:
+    signature: build(c, item_id, budget=12000) -> str
+    purpose: Task packet for the agent
+  start: strata/runexec.py::run_exec
+  end: strata/context.py::build
+- id: launch
+  transport: subprocess
+  body:
+    signature: launch(cmd, packet, timeout, log_path) -> pid, exit code, usage
+    purpose: Start the CLI agent, capture log and usage; kill on timeout or budget
+    errors: [timeout, budget exceeded, killed]
+  start: strata/runexec.py::launch
+  end: strata/runexec.py::launch
+- id: gate_call
+  transport: in-process
+  body:
+    signature: check(c, run_id, workdir) -> {ok, reason}
+    purpose: Gate the candidate after the agent exits
+  start: strata/runexec.py::run_exec
+  end: strata/gate.py::check
+- id: gate_repo
+  transport: git subprocess
+  body:
+    signature: diff_files(workdir) ; verify_clean(workdir, commands)
+    purpose: Diff must touch only spec.scope.touch; spec.verify runs on a clean checkout of the candidate
+    errors: [out-of-scope path, verify command failed]
+  start: strata/gate.py::check
+  end: strata/gate.py::verify_clean
+- id: gate_svc
+  transport: in-process
+  body:
+    signature: transition(c, role, id, to='review', actor=None, note=None)
+    purpose: Gate-submit doing -> review; approve and done stay with the main chat
+  start: strata/gate.py::submit
+  end: strata/service.py::transition
+- id: runs_db
+  transport: sqlite3
+  body:
+    signature: tables run(id, item_id, agent, state, pid, exit_code, usage, log_path, started, ended)
+    purpose: Persist runs; written only via `strata.py run` commands
+  start: strata/runs.py::register
+  end: strata/schema.sql

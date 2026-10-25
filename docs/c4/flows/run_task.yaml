@@ -1,0 +1,88 @@
+id: run_task
+name: Main chat runs a ticket through a supervised agent (B1, future)
+steps:
+- link: a_cli
+  text: main chat runs `strata.py run exec --item N --as NAME`
+- link: run_argp
+  text: route to the wrapper
+- link: run_reg
+  text: register the run
+- link: run_db
+  text: insert the run row and an audit row
+- link: run_db
+  reverse: true
+- at: runs
+  transition: t_register
+  text: run is registered
+- link: run_reg
+  reverse: true
+  text: run id
+- link: run_ctx
+  text: build the task packet
+- link: run_ctx
+  reverse: true
+  text: packet text
+- link: run_reg
+  text: mark launched with log path
+- at: runs
+  transition: t_launch
+  text: run is launched
+- link: run_reg
+  reverse: true
+- link: run_launch
+  text: start the agent subprocess with the packet
+- link: run_edit
+  text: agent edits files in its checkout
+- link: run_edit
+  reverse: true
+- link: run_launch
+  reverse: true
+  text: exit code and usage
+- link: run_reg
+  text: record exit
+- at: runs
+  transition: t_exit
+  text: run has exited
+- link: run_reg
+  reverse: true
+- link: run_reg
+  text: mark gating
+- at: runs
+  transition: t_gate
+  text: run is gating
+- link: run_reg
+  reverse: true
+- link: run_gate
+  text: hand the candidate to the gate
+- link: run_gate_repo
+  text: diff must stay inside spec.scope.touch
+- link: run_gate_repo
+  reverse: true
+- link: run_gate_repo
+  text: run spec.verify on a clean checkout
+- link: run_gate_repo
+  reverse: true
+  text: verify passed
+- link: run_gate_svc
+  text: submit the item, doing to review
+- link: run_gate_svc
+  reverse: true
+- link: run_gate
+  reverse: true
+  text: gate passed
+- link: run_reg
+  text: record submitted
+- at: runs
+  transition: t_pass
+  text: run is submitted
+- link: run_db
+  text: save final state and audit row
+- link: run_db
+  reverse: true
+- link: run_reg
+  reverse: true
+- link: run_argp
+  reverse: true
+- link: a_cli
+  reverse: true
+  text: run id and item in review

@@ -1,0 +1,22 @@
+module: runs
+form: machine
+initial: new
+states:
+  new: {}
+  registered: {}
+  launched: {}
+  exited: {}
+  gating: {}
+  submitted: {}
+  gate_failed: {}
+  aborted: {}
+transitions:
+  - {id: t_register, from: new, on: register, to: registered}
+  - {id: t_launch, from: registered, on: agent_started, to: launched}
+  - {id: t_launch_fail, from: registered, on: launch_error, to: aborted}
+  - {id: t_exit, from: launched, on: agent_exited, to: exited}
+  - {id: t_abort, from: launched, on: timeout_budget_or_kill, to: aborted}
+  - {id: t_gate, from: exited, on: gate_start, to: gating}
+  - {id: t_pass, from: gating, on: gate_pass, to: submitted}
+  - {id: t_fail, from: gating, on: gate_fail, to: gate_failed}
+  - {id: t_gate_abort, from: gating, on: killed, to: aborted}
