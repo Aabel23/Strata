@@ -312,7 +312,7 @@ article.doc table{width:100%}
 .tactive{display:flex;gap:6px;flex-wrap:wrap;padding:6px 0}
 .chipx{height:22px;padding:0 9px;font-size:12px;border-radius:999px}
 .mono{font-family:var(--mono);font-size:11px;color:var(--faint)}
-.tmain{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,340px);gap:16px;align-items:start}
+.tmain{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;align-items:start}
 .tleft{min-width:0;display:flex;flex-direction:column;gap:12px}
 .tboard{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:10px;overflow-x:auto;padding-bottom:4px}
 .tcol,.tfold,.tbar2{min-width:0;background:var(--bg)}
@@ -339,7 +339,11 @@ article.doc table{width:100%}
 .tfold{border:1px solid var(--line-soft);border-radius:var(--r);padding:6px 10px}
 .tfold summary{cursor:pointer;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
 .tfold[open] summary{margin-bottom:8px}
-.tdetail{background:var(--raised);border:1px solid var(--line);border-radius:var(--r-lg);padding:14px 16px;display:flex;flex-direction:column;gap:12px;min-width:0;position:sticky;top:0;max-height:calc(100vh - 60px);overflow:auto}
+.tdetail{position:fixed;z-index:13;width:min(390px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;background:var(--raised);border:1px solid var(--line);border-radius:var(--r-lg);padding:14px 16px;display:flex;flex-direction:column;gap:12px;min-width:0;box-shadow:var(--shadow-pop)}
+.page>.tdetail{position:fixed}
+.tdetail>div:first-of-type{padding-top:20px}
+.tdetail-close{position:absolute;top:7px;right:9px;width:28px;height:28px;border:0;border-radius:var(--r);background:transparent;color:var(--muted);font-size:21px;line-height:1;cursor:pointer}
+.tdetail-close:hover,.tdetail-close:focus-visible{background:var(--hover);color:var(--fg);outline:2px solid var(--accent);outline-offset:1px}
 .tdetail h2{font-family:var(--body);font-size:16px;font-weight:600;margin:2px 0 6px}
 .dsec h4{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin:0 0 4px;font-weight:600}
 .dtxt{margin:0;overflow-wrap:anywhere}
@@ -357,7 +361,8 @@ a.dep:hover{text-decoration:underline}
 .tl>div{display:grid;grid-template-columns:78px 56px minmax(0,1fr);gap:6px;font-variant-numeric:tabular-nums}
 .tl>div>span:last-child{overflow-wrap:anywhere}
 .dbody{max-width:72ch;overflow-wrap:anywhere}
-@media (max-width:900px){.tmain{grid-template-columns:minmax(0,1fr)}.tdetail{position:static;max-height:none}.tbar2 input{margin-left:0;flex:1}}
+@media (max-width:900px){.tbar2 input{margin-left:0;flex:1}}
+@media (max-width:600px){.tdetail{left:8px!important;right:8px;bottom:8px;top:auto!important;width:auto;max-height:78vh;border-radius:var(--r-lg) var(--r-lg) 0 0}}
 
 /* ---------- Lộ trình (roadmap) ---------- */
 .lt{display:flex;flex-direction:column;gap:26px;min-width:0}

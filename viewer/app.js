@@ -406,7 +406,7 @@ function docReader(box,p,id,docs){
   r.append(f);
 }
 
-/* ---------- task board (read-only): status columns, detail pane. Filters live in the hash query. ---------- */
+/* ---------- task board (read-only): status columns, task popup. Filters live in the hash query. ---------- */
 const COLS=["open","proposed","approved","doing","review"], FOLD=["done","rejected"], COLLBL={open:"To do"};
 const PRI_TAG={p0:"P0",p1:"P1",p2:"P2",p3:"P3"};
 const BKIND=["task","step"];
@@ -442,7 +442,7 @@ async function boardView(box,p,id){
   heroArt("mountains").then(x=>mt.append(x.cloneNode(true))).catch(()=>{});
   heroArt("mountains-waves").then(x=>wv.append(x.cloneNode(true))).catch(()=>{});
   const qs=hq(), f={kind:qs.get("kind")||"",status:qs.get("status")||"",owner:qs.get("owner")||"",q:qs.get("q")||""};
-  const go=patch=>{const n=new URLSearchParams(qs);Object.entries(patch).forEach(([k,v])=>v?n.set(k,v):n.delete(k));location.hash=boardHref(p,id,n)};
+  const go=patch=>{const n=new URLSearchParams(qs);Object.entries(patch).forEach(([k,v])=>v?n.set(k,v):n.delete(k));location.hash=boardHref(p,CUR.id?id:"",n)};
   const all=await get("/api/items?project="+enc(p));
   const owners=[...new Set(all.map(x=>x.owner).filter(Boolean))].sort();
   all.sort((a,b)=>(b.label==="issue")-(a.label==="issue")); // stable: issues first, API order otherwise
@@ -464,15 +464,34 @@ async function boardView(box,p,id){
     const c=el("div","cards");its.forEach(x=>c.append(mk(x)));if(!its.length)c.append(el("p","muted tnone","Empty"));col.append(c);board.append(col);
   });
   const folds=el("div","tfolds");
-  FOLD.forEach(st=>{const its=vis.filter(x=>x.status===st);if(its.length)folds.append(fold(st,its,mk))});
+  FOLD.forEach(st=>{const its=vis.filter(x=>x.status===st);if(its.length){const d=fold(st,its,mk);if(its.some(x=>String(x.id)===String(id)))d.open=true;folds.append(d)}});
   const left=el("div","tleft");left.append(board);if(folds.children.length)left.append(folds);
-  const pane=el("aside","tdetail");
-  main.append(left,pane);box.append(main);
+  main.append(left);box.append(main);
   if(!all.length)box.prepend(empty("No work items yet","Add via CLI:","strata.py item add --project "+p+" --kind task --title ..."));
-  if(!id)return pane.append(el("p","muted","Select an item to see details."));
+  if(!id)return;
   const d=(await get("/api/items?id="+enc(id)))[0];
-  if(!d||d.project!==p)return pane.append(el("p","err","Not found #"+id));
-  detailPane(pane,d,p,qs);
+  if(!d||d.project!==p)return;
+  const popup=el("aside","tdetail");popup.setAttribute("role","dialog");popup.setAttribute("aria-label","Task details");
+  const close=el("button","tdetail-close","×");close.type="button";close.setAttribute("aria-label","Close task details");close.onclick=closeTaskPopup;
+  popup.append(close);detailPane(popup,d,p,qs);box.append(popup);
+  requestAnimationFrame(()=>{if(popup.isConnected)placeTaskPopup(popup,box.querySelector(".tcard.sel"))});
+}
+function closeTaskPopup(refresh=false){
+  const r=route();if(r.tab!=="task"||!r.id)return;
+  const s=hq().toString(), base=hashFor(r.p,"task")+(s?"?"+s:"");
+  history.replaceState(null,"",base);
+  if(refresh)return render(true);
+  CUR={...r,id:""};document.querySelector(".tdetail")?.remove();
+  document.querySelectorAll(".tcard.sel").forEach(c=>c.classList.remove("sel"));crumbs(CUR);
+}
+function placeTaskPopup(popup,card){
+  if(matchMedia("(max-width: 600px)").matches)return;
+  const gap=12,m=12,w=popup.offsetWidth,h=popup.offsetHeight,W=innerWidth,H=innerHeight;
+  const r=card&&card.getBoundingClientRect();
+  if(!r||!r.width||!r.height){popup.style.left=Math.max(m,(W-w)/2)+"px";popup.style.top=Math.max(m,(H-h)/2)+"px";return}
+  const left=r.right+gap+w+m<=W?r.right+gap:Math.max(m,r.left-gap-w);
+  popup.style.left=Math.max(m,Math.min(W-w-m,left))+"px";
+  popup.style.top=Math.max(m,Math.min(H-h-m,r.top))+"px";
 }
 /* ---------- task write forms: add / edit / delete ---------- */
 const PRIS=["p0","p1","p2","p3"], KINDS_ADD=["task","issue","step","gate","rule","knowledge","draft","note"];
@@ -637,6 +656,7 @@ document.addEventListener("keydown",e=>{
   if(e.key==="Escape"){
     if(pal)return closePal();if(!$("keys").hidden)return closeKeys();
     if(document.body.classList.contains("menu"))return document.body.classList.remove("menu");
+    if(CUR.tab==="task"&&CUR.id&&!document.querySelector("dialog[open]")){e.preventDefault();return closeTaskPopup()}
     if(typing)return e.target.blur();
     return $("content").querySelectorAll(".row.sel").forEach(r=>r.classList.remove("sel"));
   }
@@ -653,6 +673,18 @@ document.addEventListener("keydown",e=>{
   else if(e.key==="Enter"){const r=$("content").querySelector("a.row.sel");if(r&&document.activeElement!==r){e.preventDefault();location.hash=r.hash}}
   else if(k==="f"){const b=$("content").querySelector(".fbar button,.fbar input");if(b){e.preventDefault();b.focus()}}
   else if(e.key==="["){const c=document.body.classList.toggle("collapsed");store.set("strata-side",c?"1":"")}
+});
+const popupClickHashes=new WeakMap();
+document.addEventListener("click",e=>{
+  const popup=document.querySelector(".tdetail");
+  if(popup&&CUR.id&&!popup.contains(e.target)&&!e.target.closest(".tcard")&&!e.composedPath().some(n=>n.tagName==="DIALOG"))popupClickHashes.set(e,location.hash);
+},true);
+document.addEventListener("click",e=>{
+  const popup=document.querySelector(".tdetail");
+  const before=popupClickHashes.get(e);
+  if(before===undefined||!popup||!CUR.id||popup.contains(e.target)||e.target.closest(".tcard")||e.composedPath().some(n=>n.tagName==="DIALOG"))return;
+  const project=CUR.p;
+  setTimeout(()=>{const r=route();if(r.p===project&&r.tab==="task"&&r.id)closeTaskPopup(location.hash!==before)},0);
 });
 if(store.get("strata-side"))document.body.classList.add("collapsed");
 const shell=$("shell"), resize=$("side-resize");
