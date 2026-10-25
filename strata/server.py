@@ -33,9 +33,9 @@ ITEM_PATH = "/api/item"
 MAX_BODY = 65536
 
 
-def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_hosts=(), bound_hosts=None, allow_edit=None):
+def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_hosts=(), bound_hosts=None, allow_edit=None, build=codemap.run_gitnexus):
     """allow_hosts: extra Host names (with or without port). bound_hosts: every address strata binds (default just host).
-    allow_edit: enable POST /api/c4/edit; None = only when host is loopback."""
+    allow_edit: enable POST /api/c4/edit; None = only when host is loopback. build: code-map builder (root, reindex=) -> graph bytes, injectable for tests."""
     if allow_edit is None: allow_edit = host in LOOPBACK
     if host in ("0.0.0.0", "::") and not allow_hosts:
         raise ValueError(f"binding {host} needs at least one --allow-host NAME")
@@ -49,6 +49,21 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
 
     def rows(sql, args=()):
         with lock: return db.query_rows(conn, sql, args)
+
+    bl = threading.Lock(); building = set(); failed = {}  # background code-map builds: running projects, project -> last failure reason
+
+    def build_codemap(pid):
+        try:
+            with lock: root = codemap.project_root(conn, pid)
+            body = build(root, reindex=True)  # slow: no lock held
+            g = json.loads(body)
+            if not isinstance(g, dict) or "nodes" not in g or "relationships" not in g: raise RuntimeError("unexpected gitnexus graph shape")
+            codemap.write_snapshot(codemap.snapshot_path(db.db_path(db_path), pid), body)
+            with bl: failed.pop(pid, None)
+        except Exception as e:
+            with bl: failed[pid] = str(e) or type(e).__name__
+        finally:
+            with bl: building.discard(pid)
 
     stamps = {}  # project -> docs_dir fingerprint at last scan
 
@@ -111,10 +126,23 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
 
         def project_op(self, op):
             """POST /api/project {op: add|edit|delete, ...}: project create/edit/delete through the service (audited)."""
+            steps = pid = None
             try:
                 with lock:
                     try:
-                        if op.get("op") == "add":
+                        if op.get("op") == "add" and "setup" in op:
+                            if not isinstance(op["setup"], bool): raise ValueError("setup must be boolean")
+                            for k in ("id", "name", "root", "docs_dir"):
+                                if op.get(k) is not None and not isinstance(op[k], str): raise ValueError(f"{k} must be a string")
+                            if op["setup"] and not op.get("root"): raise ValueError("root required")
+                        if op.get("op") == "add" and op.get("setup"):
+                            steps = service.setup_project(conn, db.db_path(db_path), op["root"], op.get("id"), op.get("name"), op.get("docs_dir"), codemap=False, confine_docs=True)
+                            pid = steps[0]["id"]
+                            if service.has_code(pathlib.Path(op["root"]).expanduser().resolve()):
+                                steps[-1] = {"step": "codemap", "status": "started", "detail": "building in the background"}
+                                with bl: failed.pop(pid, None); fresh = pid not in building; building.add(pid)
+                                if fresh: threading.Thread(target=build_codemap, args=(pid,), daemon=True).start()
+                        elif op.get("op") == "add":
                             service.add_project(conn, op.get("id"), op.get("name"), op.get("root"), op.get("docs_dir"), op.get("parent"), op.get("description"))
                         elif op.get("op") == "edit":
                             if not isinstance(op.get("id"), str): raise ValueError("id required")
@@ -124,7 +152,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                             service.delete_project(conn, op["id"], op.get("confirm"))
                         else: raise ValueError("op must be add, edit or delete")
                     except BaseException: conn.rollback(); raise
-                return self.json({"ok": True})
+                return self.json({"ok": True, "id": pid, "steps": steps} if steps else {"ok": True})
             except ValueError as e: return self.json({"error": str(e)}, 400)
             except KeyError as e: return self.json({"error": str(e.args[0]) if e.args else "not found"}, 404)
             except Exception: return self.json({"error": "internal error"}, 500)
@@ -321,8 +349,13 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             if not q.get("project"): return self.json({"error": "missing project"}, 400)
             with lock:
                 if not conn.execute("SELECT 1 FROM project WHERE id=?", (q["project"],)).fetchone(): return self.json({"error": "unknown project"}, 400)
-            try: return self.json(codemap.load_snapshot(db.db_path(db_path), q["project"]))
-            except FileNotFoundError: return self.json({"error": "no snapshot; run `strata.py code snapshot --project " + q["project"] + "`"}, 404)
+            with bl: busy = q["project"] in building
+            if busy: return self.json({"error": "building", "building": True}, 404)
+            try: r = self.json(codemap.load_snapshot(db.db_path(db_path), q["project"])); failed.pop(q["project"], None); return r
+            except FileNotFoundError:
+                with bl: why = failed.get(q["project"])
+                if why: return self.json({"error": why, "building": False}, 404)
+                return self.json({"error": "no snapshot; run `strata.py code snapshot --project " + q["project"] + "`"}, 404)
 
         def code(self, p, q):
             need = {"/api/code/files": ("project", "object"), "/api/code/symbols": ("project", "path"), "/api/code/src": ("project", "id")}.get(p)

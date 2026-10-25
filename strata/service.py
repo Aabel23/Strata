@@ -35,16 +35,20 @@ def add_project(c, id, name, root=None, docs_dir=None, parent=None, description=
 def _slug(name): return re.sub(r"-+", "-", re.sub(r"[^a-z0-9_-]", "-", name.lower())).strip("-")[:40].strip("-")
 
 
-def _has_code(root):
+def has_code(root):
     for dp, dns, fns in os.walk(root):
         dns[:] = [d for d in dns if not c4_layered._skip([d])]
         if any(pathlib.Path(f).suffix in c4_layered.CODE_EXT for f in fns): return True
     return False
 
 
-def setup_project(c, db_path, root, id=None, name=None, docs_dir=None, codemap=True, snapshot=codemap.snapshot):
-    """One-step project setup (project, docs folders, starter C4 map, code map). Returns [{step, status, detail}]; idempotent. ValueError from the project step."""
+def setup_project(c, db_path, root, id=None, name=None, docs_dir=None, codemap=True, snapshot=codemap.snapshot, confine_docs=False):
+    """One-step project setup (project, docs folders, starter C4 map, code map). Returns [{step, status, detail}] (the project step also has "id"); idempotent. ValueError from the project step.
+    docs_dir gets the add_project (_paths) checks; confine_docs=True (the HTTP route) also requires it inside root, the CLI may pick any absolute folder."""
     root = pathlib.Path(root).expanduser().resolve(); out = []
+    if docs_dir:
+        docs_dir = _paths(c, str(root), docs_dir, None)[1]
+        if confine_docs and not pathlib.Path(docs_dir).resolve().is_relative_to(root): raise ValueError("docs dir must be inside the project root")
     step = lambda s, st, d: out.append({"step": s, "status": st, "detail": d})
     ex = next((dict(r) for r in c.execute("SELECT * FROM project WHERE root IS NOT NULL") if os.path.realpath(r["root"]) == str(root)), None)
     if ex: id = ex["id"]; step("project", "skipped", f"already registered as {id}")
@@ -53,8 +57,8 @@ def setup_project(c, db_path, root, id=None, name=None, docs_dir=None, codemap=T
         if not PROJECT_ID.match(id): raise ValueError(f"cannot derive a project id from {root.name!r}; pass --id")
         if db.project_exists(c, id): raise ValueError(f"project {id} already exists with a different root ({db.get_project(c, id)['root']})")
         add_project(c, id, name or root.name, str(root)); step("project", "done", f"registered {id}")
-    pr = db.get_project(c, id)
-    dd = pathlib.Path(docs_dir and (root / docs_dir) or pr["docs_dir"] or root / "docs")
+    out[0]["id"] = id; pr = db.get_project(c, id)
+    dd = pathlib.Path(docs_dir or pr["docs_dir"] or root / "docs")
     made = [n for n in ("research", "architect", "plan", "review") if not (dd / n).is_dir()]
     for n in made: (dd / n).mkdir(parents=True, exist_ok=True)
     if not pr["docs_dir"]: db.set_project(c, id, docs_dir=str(dd))
@@ -70,7 +74,7 @@ def setup_project(c, db_path, root, id=None, name=None, docs_dir=None, codemap=T
         step("c4", "done" if wrote or imp else "skipped", ("wrote starter map" if wrote else "") + (", " if wrote and imp else "") + ("imported" if imp else "") or "map already imported")
     except (ValueError, OSError) as e: step("c4", "failed", str(e))
     if not codemap: step("codemap", "skipped", "disabled")
-    elif not _has_code(root): step("codemap", "skipped", "no code found")
+    elif not has_code(root): step("codemap", "skipped", "no code found")
     else:
         try: p, g = snapshot(c, db_path, id, reindex=True); step("codemap", "done", f"{len(g['nodes'])} nodes -> {p}")
         except (RuntimeError, OSError, ValueError) as e:

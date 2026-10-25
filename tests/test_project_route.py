@@ -1,4 +1,4 @@
-import json, threading, urllib.error, urllib.request
+import json, threading, time, urllib.error, urllib.request
 import pytest
 from strata import db, server
 
@@ -63,3 +63,73 @@ def test_token_and_edit(srv):
     assert call(hp, {"op": "edit", "id": "a", "name": ""})[0] == 400
     assert call(hp, {"op": "edit", "id": "zz", "name": "x"})[0] == 404
     assert call(hp, {"op": "edit", "name": "x"})[0] == 400
+
+
+GRAPH = json.dumps({"nodes": [{"id": 1}], "relationships": []}).encode()
+
+
+@pytest.fixture
+def mk(tmp_path):
+    ss = []
+    def make(build):
+        p = tmp_path / "t.db"; db.init(str(p)).close()
+        s = server.make_server(p, None, 0, build=build); ss.append(s)
+        threading.Thread(target=s.serve_forever, daemon=True).start()
+        return f"127.0.0.1:{s.server_address[1]}", tmp_path
+    yield make
+    for s in ss: s.shutdown(); s.server_close()
+
+
+def get(hp, path):
+    try:
+        with urllib.request.urlopen(f"http://{hp}{path}") as r: return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e: return e.code, json.loads(e.read() or b"{}")
+
+
+def wait_for(f):
+    for _ in range(200):
+        if f(): return
+        time.sleep(0.02)
+    raise AssertionError("timeout")
+
+
+def repo(tmp, name="app"):
+    r = tmp / name; r.mkdir(); (r / "a.py").write_text("x=1\n"); return str(r)
+
+
+def test_setup_background_build(mk):
+    go = threading.Event(); seen = []
+    def build(root, reindex=False): seen.append((root, reindex)); go.wait(5); return GRAPH
+    hp, tmp = mk(build); root = repo(tmp)
+    st, r = call(hp, {"op": "add", "id": "app", "name": "App", "root": root, "setup": True})
+    assert st == 200 and r["id"] == "app" and r["steps"][-1] == {"step": "codemap", "status": "started", "detail": "building in the background"}
+    assert get(hp, "/api/codemap?project=app") == (404, {"error": "building", "building": True})
+    assert get(hp, "/api/projects")[0] == 200 and get(hp, "/api/version")[0] == 200  # server stays responsive while building
+    go.set(); wait_for(lambda: get(hp, "/api/codemap?project=app")[0] == 200)
+    assert seen == [(root, True)]
+
+
+def test_setup_build_failure_remembered(mk):
+    def build(root, reindex=False): raise RuntimeError("gitnexus exploded")
+    hp, tmp = mk(build)
+    assert call(hp, {"op": "add", "id": "app", "name": "App", "root": repo(tmp), "setup": True})[0] == 200
+    wait_for(lambda: get(hp, "/api/codemap?project=app")[1].get("building") is False)
+    assert get(hp, "/api/codemap?project=app") == (404, {"error": "gitnexus exploded", "building": False})
+
+
+def test_setup_bad_graph_and_no_code(mk):
+    hp, tmp = mk(lambda root, reindex=False: b"[]")
+    call(hp, {"op": "add", "id": "app", "name": "App", "root": repo(tmp), "setup": True})
+    wait_for(lambda: get(hp, "/api/codemap?project=app")[1].get("building") is False)
+    assert "graph shape" in get(hp, "/api/codemap?project=app")[1]["error"]
+    empty = tmp / "empty"; empty.mkdir()
+    st, r = call(hp, {"op": "add", "id": "e", "name": "E", "root": str(empty), "setup": True})
+    assert st == 200 and r["steps"][-1]["status"] == "skipped"
+
+
+def test_setup_validation(mk):
+    hp, tmp = mk(lambda root, reindex=False: GRAPH); root = repo(tmp)
+    for bad in ({"setup": "yes"}, {"setup": 1}, {"setup": True}, {"setup": True, "root": root, "docs_dir": "/etc/x"},
+                {"setup": True, "root": root, "docs_dir": "../out"}, {"setup": True, "root": root, "id": 5}):
+        assert call(hp, {"op": "add", "id": "app", "name": "App", **bad})[0] == 400, bad
+    assert call(hp, {"op": "add", "id": "app", "name": "App", "root": root, "docs_dir": "d", "setup": True})[0] == 200

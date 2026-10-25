@@ -255,9 +255,7 @@ def main(argv=None):
         try: res = service.setup_project(c, db.db_path(a.db), a.path, a.id, a.name, a.docs_dir, not a.no_codemap)
         except ValueError as e: print("ERROR", e); return 1
         for r in res: print(f"  {r['status']:<8} {r['step']:<8} {r['detail']}")
-        rp = str(pathlib.Path(a.path).expanduser().resolve())
-        pid = next(r["id"] for r in c.execute("SELECT id,root FROM project WHERE root IS NOT NULL") if str(pathlib.Path(r["root"]).resolve()) == rp)
-        print("Open: http://127.0.0.1:8740/#/p/" + pid); return 0
+        print("Open: http://127.0.0.1:8740/#/p/" + res[0]["id"]); return 0
     if a.cmd == "page": return cmd_page(a)
     from strata import server
     hosts = a.host.split(",")  # vd "127.0.0.1,100.107.55.40": nghe nhiều địa chỉ
