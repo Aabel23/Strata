@@ -15,6 +15,7 @@ Strata là công cụ quản lý task, issue, tài liệu và C4. Luật và quy
    - Bảng `doc` là chỉ mục dẫn xuất từ file; server autoscan được làm mới nó, không ghi audit.
    - Bản đồ C4 là thư mục layered (`docs/c4`); sửa file rồi `c4 import`; sửa từ viewer chỉ đi qua route `POST /api/c4/edit` nói trên. SQLite chỉ là read model của thư mục đó.
 2. **Không phụ thuộc nặng.** Python stdlib + PyYAML; JS thuần, không build, không CDN.
+   - Ngoại lệ có phạm vi: `tools/gitnexus` là công cụ Node vendored cho agent, chỉ gọi qua CLI/subprocess, code Strata không bao giờ import nó; lõi vẫn là Python stdlib + PyYAML và JS thuần.
 3. **Tài liệu chỉ nội dung.** Agent viết YAML theo `doc-format.yaml`; không tự viết HTML/CSS/JS cho tài liệu. Framework lo trình bày.
 4. **Kiểm chứng thay đổi ứng dụng: chạy test, restart, mở viewer.** `systemctl --user restart strata`, cổng 8740. Sửa CSS/JS thì nhắc Ctrl+Shift+R.
 5. Test: `/tmp/claude-1000/v/bin/python -m pytest -q` (venv tạo lại theo `HANDOVER.md` nếu mất). Báo đúng số pass/fail.
