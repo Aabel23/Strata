@@ -948,11 +948,18 @@ async function chatCheckAuth(){
     if(error.status!==409)chatShowError("Could not check provider status. "+error.message);
   }
 }
-function chatOpen(open){
+const CHAT_OPEN_STORE="strata-chat-open-v1";
+function chatOpen(open,persist=true){
   const panel=$("chat-panel"),button=$("chat-toggle");
   panel.hidden=!open;panel.setAttribute("aria-hidden",String(!open));
+  button.textContent="Chat";
   button.setAttribute("aria-expanded",String(open));document.body.classList.toggle("chat-open",open);
+  if(persist)store.set(CHAT_OPEN_STORE,open?"1":"0");
   if(open){chatCheckAuth();renderChatPanel();}
+}
+function chatInitOpenPreference(){
+  const saved=store.get(CHAT_OPEN_STORE);
+  chatOpen(saved!=="0",false);
 }
 async function chatStartSession(){
   const project=CUR.p;if(!project){chatShowError("Choose a project before starting a session.");return}
@@ -1020,6 +1027,7 @@ $("agent-bar-toggle").onclick=()=>{
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&document.body.classList.contains("chat-open"))chatCheckAuth()});
 chatState.selected=chatState.sessions.at(-1)?.session_id||null;
 renderChatCards();renderChatPanel();
+chatInitOpenPreference();
 setInterval(chatPoll,1200);
 $("moon").append(svg(O.moon));
 $("band").append(svg(contours(7,480,120,6)));
