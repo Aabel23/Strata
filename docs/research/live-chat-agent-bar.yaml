@@ -101,12 +101,9 @@ blocks:
 
       `CLAUDE.md` records `/api/chat` as the fourth guarded write-route exception and documents its authenticated read routes.
 
-  - question:
-      q: "Which authentication path should the first real-world validation use?"
-      options:
-        - {label: "Native ChatGPT login", note: "no key to manage; needs the localhost callback and a signed-in Codex account on the server host"}
-        - {label: "OpenRouter or OmniRoute key", note: "server-side key and documented Responses endpoint; Strata integration unverified"}
-      recommend: "Native ChatGPT login"
+  - md: |
+      ## Validation order
+      Exercise native ChatGPT login first when sign-in is available, including its localhost callback and a completed turn. Then exercise the OpenRouter and OmniRoute routes with server-side keys. A configured account or key alone does not verify inference. This order is a test plan, not a prerequisite for the design record.
 
   - md: |
       ## Known gap: live authentication is not validated end to end
@@ -118,5 +115,5 @@ blocks:
       - Provider documentation shows Responses endpoints, but Codex requests through Strata's custom providers have not been tested against either service.
       - The viewer labels a configured gateway "inference not yet verified" but labels a present account "Codex account connected" (`viewer/app.js:938-939`), which can read as working before any turn has run.
 
-      ## Implementation checks before calling this done
+      ## Operational validation after design
       Run a real sign-in with a pinned Codex version, verify which enum spelling it accepts and that a write really raises an approval request instead of running, one turn per provider, one approved and one denied file change, cancel mid-turn, expiry, server restart and worktree cleanup. Decide transcript retention and explicit worktree cleanup (none exists today; worktrees persist). Add pointer and keyboard splitters for the chat panel and bar if the approved resizable intent still stands. Outside this slice: cross-host sessions, attachments, transcript search, automatic diff application and B1 run cards.
