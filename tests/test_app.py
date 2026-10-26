@@ -255,10 +255,59 @@ def test_api_items_board_fields(env):
 
 
 def test_server_has_no_write_routes():
-    """Rule 1: writes are POST /api/c4/edit, /api/project and /api/item only; PUT/DELETE/PATCH are 405 stubs."""
-    src = (ROOT / "strata/server.py").read_text()
-    assert src.count("def do_POST") == 1 and src.count("_PATH = ") == 3 and "do_PUT = do_DELETE = do_PATCH = _no" in src
-    assert "def do_PUT" not in src and "def do_DELETE" not in src and "def do_PATCH" not in src
+    """Exercise the write-method allowlist and the chat GET authentication boundary."""
+    assert {server.EDIT_PATH, server.PROJECT_PATH, server.ITEM_PATH, server.CHAT_PATH} == {
+        "/api/c4/edit", "/api/project", "/api/item", "/api/chat"
+    }
+    assert {server.CHAT_EVENTS_PATH, server.CHAT_AUTH_PATH, server.CHAT_DIFF_PATH} == {
+        "/api/chat/events", "/api/chat/auth", "/api/chat/diff"
+    }
+
+
+def request(base, path, *, method="GET", headers=None, body=None):
+    req = urllib.request.Request(base + path, data=body, headers=headers or {}, method=method)
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def test_route_policy_over_http(env):
+    base = env[0]
+    token = J(env, "/api/session")["token"]
+
+    # POSTs to the four documented routes pass the shared guard and reach
+    # operation validation. Empty objects are deliberately invalid, so none
+    # can mutate project, item, C4, or chat state.
+    guarded = {"X-Strata-Token": token, "X-Strata-Edit": "1",
+               "Content-Type": "application/json"}
+    for path in (server.EDIT_PATH, server.PROJECT_PATH, server.ITEM_PATH, server.CHAT_PATH):
+        status, _ = request(base, path, method="POST", headers=guarded, body=b"{}")
+        assert status == 400, path
+
+    # Unknown POSTs and other mutation verbs are not routed to a handler.
+    assert request(base, "/api/not-a-write-route", method="POST", headers=guarded, body=b"{}")[0] == 405
+    for method in ("PUT", "DELETE", "PATCH"):
+        for path in (server.EDIT_PATH, server.PROJECT_PATH, server.ITEM_PATH, server.CHAT_PATH):
+            assert request(base, path, method=method)[0] == 405, (method, path)
+
+    chat_queries = (
+        (server.CHAT_EVENTS_PATH, "project=a&session_id=s", 409),
+        (server.CHAT_AUTH_PATH, "provider=invalid", 400),
+        (server.CHAT_DIFF_PATH, "project=a&session_id=s", 409),
+    )
+    for path, query, expected in chat_queries:
+        url = f"{path}?{query}"
+        # Missing and incorrect tokens are rejected before query processing.
+        assert request(base, url)[0] == 403, path
+        assert request(base, url, headers={"X-Strata-Token": "wrong"})[0] == 403, path
+        # The correct token reaches the endpoint's specific validation/result.
+        assert request(base, url, headers={"X-Strata-Token": token})[0] == expected, path
+
+    # A valid token does not bypass the DNS-rebinding Host check.
+    host = {"Host": "attacker.invalid", "X-Strata-Token": token}
+    assert request(base, server.CHAT_AUTH_PATH + "?provider=invalid", headers=host)[0] == 403
 
 
 def test_board_ui_filters_in_url():
