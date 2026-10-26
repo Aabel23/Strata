@@ -416,7 +416,7 @@ function render(keepCam,keepOld){
     if(e.list.length>1&&expanded.has(ek)){s+=laneEdges(e,ek,ge.points,springKey===ek?0:1,hot);return}
     const hn=e.list.map(c=>hot.get(c.id)).find(v=>v!==undefined);
     const isHot=hn!==undefined, st=e.list.length===1?stc(c0.status):"live";
-    const dim=(tag&&!e.list.some(c=>(c.tags||[]).includes(tag)))||(flow&&!isHot);
+    const dim=(tag&&!e.list.some(c=>(c.tags||[]).includes(tag)));
     const lw=(label(e).length+(isHot?3:0))*6; // estimate text width
     const dir=c0.direction||"outgoing", d=curve(ge.points);
     const r=isHot&&rev, mk=r?'marker-start="url(#ar)"':(dir!=="none"?'marker-end="url(#ar)"':"")+(dir==="bidirectional"?' marker-start="url(#ar)"':"");
@@ -498,7 +498,7 @@ function paint(){
   if(selected){rel.add(selected);curEdges.forEach((e,k)=>{if(e.from===selected||e.to===selected){relE.add(k);rel.add(e.from);rel.add(e.to)}})}
   // A picked edge (or the edge carrying the picked connection) lights up; the rest fades.
   const pk=new Set();curEdges.forEach((e,k)=>{if(k===pickEdge||(pickConn&&e.list.some(c=>c.id===pickConn))){pk.add(k);rel.add(e.from);rel.add(e.to)}});
-  const dimAll=!!selected||pk.size>0;
+  const dimAll=!flow&&(!!selected||pk.size>0); // no fade during flow playback
   document.querySelectorAll("#stage>svg:not(.old) .node").forEach(el=>{el.classList.toggle("sel",el.dataset.id===selected);el.classList.toggle("fade",dimAll&&!rel.has(el.dataset.id))});
   document.querySelectorAll("#stage>svg:not(.old) .edge").forEach(el=>{el.classList.toggle("rel",relE.has(el.dataset.e));el.classList.toggle("pick",el.dataset.c?el.dataset.c===pickConn||(!pickConn&&pk.has(el.dataset.e)):pk.has(el.dataset.e));el.classList.toggle("fade",dimAll&&!relE.has(el.dataset.e)&&!pk.has(el.dataset.e))});
   updateEd();
