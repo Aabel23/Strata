@@ -8,3 +8,4 @@ __pycache__/
 backups/
 agent/skills/schematic/
 .gitnexus/
+/*.codemap/
