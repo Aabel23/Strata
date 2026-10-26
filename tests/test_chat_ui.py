@@ -95,6 +95,7 @@ const valid=[
   "https://auth.openai.com:443/authorize",
   "https://chatgpt.com/backend-api/codex/oauth",
   "https://chatgpt.com:443/path",
+  "https://auth.openai.com/codex/device",
 ];
 const invalid=[
   "http://auth.openai.com/", "https://evil.example/", "https://chatgpt.com.evil/",
@@ -105,12 +106,17 @@ const invalid=[
 ];
 for(const url of valid)if(!context.safeCodexLoginUrl(url))throw Error("expected allowed: "+JSON.stringify(url));
 for(const url of invalid)if(context.safeCodexLoginUrl(url)!==null)throw Error("expected rejected: "+JSON.stringify(url));
+
+const validCodes=["ABCD-1234", "1234", "CODE 1234", "A".repeat(64)];
+for(const code of validCodes)if(context.safeCodexUserCode(code)!==code)throw Error("expected code allowed: "+code);
+const invalidCodes=["", null, undefined, "A".repeat(65), "ABCD\nEFGH", "ABCD\0EFGH", "ABCD<script>", "ABCDé"];
+for(const code of invalidCodes)if(context.safeCodexUserCode(code)!==null)throw Error("expected code rejected: "+code);
 '''
     result = subprocess.run([node, "-e", script, str(app)], capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
 
 
-def test_login_link_click_creates_session_and_renders_link_after_auth_refresh():
+def test_login_link_click_requests_global_login_and_renders_device_code_and_link():
     node = shutil.which("node")
     if not node:
         raise AssertionError("Node.js is required for the chat runtime regression test")
@@ -118,7 +124,7 @@ def test_login_link_click_creates_session_and_renders_link_after_auth_refresh():
     script = r'''
 const fs=require("fs"),vm=require("vm");
 const source=fs.readFileSync(process.argv[1],"utf8");
-const failLogin=process.argv[2]==="fail";
+const mode=process.argv[2]||"device";
 const begin=source.indexOf("function safeCodexLoginUrl(value){");
 const end=source.indexOf("async function chatSend",begin);
 if(begin<0||end<0)throw Error("chat login flow was not found");
@@ -132,14 +138,24 @@ elements.get("chat-provider").value="codex";
 const body={classList:{toggle(){},contains(){return true}}};
 const calls=[];
 let visibleError="";
+let authStatus="login_required";
 let context;
-context={URL,console,Date,document:{body},CUR:{p:"demo",tab:"task"},enc:encodeURIComponent,
+context={URL,console,Date,document:{body},CUR:{p:null,tab:"task"},enc:encodeURIComponent,
   $:id=>elements.get(id),el:(_tag,_class,text)=>element(text),
   chatState:{sessions:[],selected:null,polling:false,lastDiffAt:0,loginPending:false,loginUrl:null,authRevision:0},
   chatSession(id){return context.chatState.sessions.find(s=>s.session_id===(id||context.chatState.selected))||null},
-  chatGet:async()=>({status:"login_required"}),
-  api:async(_path,data)=>{calls.push(data.op);if(data.op==="start")return {session_id:"session-new",thread_id:null};
-    if(data.op==="login"){if(failLogin)throw Error("login unavailable");return {url:"https://auth.openai.com/authorize?state=abc"}}throw Error("unexpected operation "+data.op)},
+  chatGet:async()=>({status:authStatus}),
+  api:async(_path,data)=>{
+    calls.push(data.op);
+    if(data.op==="login"){
+      if(mode==="fail")throw Error("login unavailable");
+      if(mode==="invalid_device")return {mode:"device",verification_url:"https://evil.example/codex/device",user_code:"ABCD-1234"};
+      if(mode==="invalid_code")return {mode:"device",verification_url:"https://auth.openai.com/codex/device",user_code:"bad\ncode"};
+      if(mode==="browser")return {mode:"browser",url:"https://auth.openai.com/authorize?state=browser-flow"};
+      return {mode:"device",verification_url:"https://auth.openai.com/codex/device",user_code:"ABCD-1234",login_id:"dev-1"};
+    }
+    throw Error("unexpected operation "+data.op);
+  },
   chatClearError(){visibleError=""},chatShowError(message){visibleError=message},
   chatPoll:async()=>{},saveChatSessions(){},renderChatCards(){},renderChatPanel(){},
   pruneClosedChatRefs(){return true},store:{set(){}},hashFor:p=>"#/p/"+p,
@@ -148,21 +164,70 @@ vm.createContext(context);vm.runInContext("const CHAT_MAX_SESSIONS=4;"+source.sl
 (async()=>{
   await context.chatCheckAuth();
   const firstArea=elements.get("chat-login-area"),button=firstArea.children.find(x=>x.textContent==="Get sign-in link");
-  if(!button||button.disabled)throw Error("login link action should be enabled with a selected project and no session");
+  if(!button||button.disabled)throw Error("login link action should be enabled even without a selected project");
   await button.onclick();
-  if(calls.join(",")!=="start,login")throw Error("one click should create a session and request login: "+calls.join(","));
-  if(context.chatState.sessions.length!==1||context.chatState.sessions[0].thread_id!==null)
-    throw Error("pre-auth session was not retained");
+  if(calls.join(",")!=="login")throw Error("Get sign-in link should call login directly without session start: "+calls.join(","));
+  if(context.chatState.sessions.length!==0)throw Error("no session should be created for global login");
+
   const currentArea=elements.get("chat-login-area"),link=currentArea.children.find(x=>x.id==="chat-login-link");
-  if(currentArea.children.includes(button))throw Error("auth refresh did not replace the original login controls");
-  if(failLogin){
+  const codeEl=currentArea.children.find(x=>x.id==="chat-login-code");
+
+  if(mode==="fail"){
     if(!visibleError.includes("Could not get a sign-in link. login unavailable"))
-      throw Error("login failure should remain visible after successful auth refresh: "+visibleError);
-  }else if(!link||link.hidden||link.href!=="https://auth.openai.com/authorize?state=abc")
-    throw Error("the refreshed login UI must show the validated sign-in URL");
+      throw Error("login failure should be reported: "+visibleError);
+    return;
+  }
+  if(mode==="invalid_device"||mode==="invalid_code"){
+    if(!visibleError.includes("Could not get a sign-in link."))
+      throw Error("invalid device response should be reported: "+visibleError);
+    return;
+  }
+  if(mode==="browser"){
+    if(!link||link.hidden||link.href!=="https://auth.openai.com/authorize?state=browser-flow")
+      throw Error("browser fallback link was not rendered: "+(link?.href));
+    if(codeEl)throw Error("browser mode must not render a device code element");
+    await context.chatCheckAuth();
+    const refreshedLink=elements.get("chat-login-area").children.find(x=>x.id==="chat-login-link");
+    if(!refreshedLink||refreshedLink.href!=="https://auth.openai.com/authorize?state=browser-flow")
+      throw Error("browser link must be preserved across auth refresh");
+    return;
+  }
+
+  // Device mode
+  if(!link||link.hidden||link.href!=="https://auth.openai.com/codex/device")
+    throw Error("device verification URL was not rendered: "+(link?.href));
+  if(!codeEl||!codeEl.textContent.includes("ABCD-1234"))
+    throw Error("one-time device code was not rendered: "+(codeEl?.textContent));
+
+  // Preserved across auth refresh
+  await context.chatCheckAuth();
+  const preservedArea=elements.get("chat-login-area");
+  const preservedLink=preservedArea.children.find(x=>x.id==="chat-login-link");
+  const preservedCode=preservedArea.children.find(x=>x.id==="chat-login-code");
+  if(!preservedLink||preservedLink.href!=="https://auth.openai.com/codex/device"||!preservedCode||!preservedCode.textContent.includes("ABCD-1234"))
+    throw Error("device code and link must be preserved across auth refresh");
+
+  // Provider switching clears login
+  elements.get("chat-provider").value="openrouter";
+  await context.chatCheckAuth();
+  if(elements.get("chat-login-area").children.find(x=>x.id==="chat-login-link"||x.id==="chat-login-code"))
+    throw Error("provider switch must clear login link and code");
+
+  // Switch back, request login again, then test completion refresh
+  elements.get("chat-provider").value="codex";
+  await context.chatCheckAuth();
+  const newButton=elements.get("chat-login-area").children.find(x=>x.textContent==="Get sign-in link");
+  await newButton.onclick();
+  if(!elements.get("chat-login-area").children.find(x=>x.id==="chat-login-code"))
+    throw Error("login re-request after provider switch failed");
+
+  // Completion refresh: status becomes account_present
+  authStatus="account_present";
+  await context.chatCheckAuth();
+  if(elements.get("chat-login-area").children.find(x=>x.id==="chat-login-link"||x.id==="chat-login-code"))
+    throw Error("completion refresh must clear login link and code");
 })().catch(error=>{console.error(error);process.exitCode=1});
 '''
-    result = subprocess.run([node, "-e", script, str(app)], capture_output=True, text=True, timeout=10)
-    assert result.returncode == 0, result.stderr
-    failed = subprocess.run([node, "-e", script, str(app), "fail"], capture_output=True, text=True, timeout=10)
-    assert failed.returncode == 0, failed.stderr
+    for arg in ("device", "browser", "fail", "invalid_device", "invalid_code"):
+        result = subprocess.run([node, "-e", script, str(app), arg], capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, f"Mode {arg} failed: {result.stderr}"
