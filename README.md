@@ -42,6 +42,44 @@ The installer checks only `~/.local/bin/strata`. If a file or symlink is already
 
 GitNexus is licensed under PolyForm Noncommercial 1.0.0 (noncommercial use only). Review the [license](tools/gitnexus/LICENSE) before using GitNexus.
 
+## AI chat
+
+The viewer includes an AI coding agent panel (the **AI** button in the top bar; the panel is titled **AI chat**). It runs the local [Codex CLI](https://github.com/openai/codex) as `codex app-server` on the machine that runs `strata serve`; your browser only talks to Strata. Claude is not supported. A Claude SDK or API-key route was researched but not shipped.
+
+**Setup**
+
+1. Install the Codex CLI so `codex` is on the `PATH` of the `strata serve` process. Without it, starting a session fails. The viewer only shows a generic "chat request could not be completed" error (the detail stays server-side), and because the worktree is created before Codex starts, a retained worktree is left behind (see cleanup below).
+2. The project must be registered in Strata and its folder must be the top-level directory of a Git repository with at least one commit. Nested repositories and symlinked roots are rejected.
+3. Chat needs editing enabled: use the default loopback bind, or pass `--allow-edit` to `strata serve` on a non-loopback bind (`--no-edit` disables it). Otherwise every chat request, including start, returns 403 "editing disabled".
+4. Open the project in the viewer, open **AI chat**, choose a provider, optionally enter a model (blank uses the default), and select **New session**.
+
+**Providers and sign-in**
+
+- **Codex** (default): uses your local Codex account. If the panel shows "Codex sign-in required", start a session, select **Get sign-in link**, then open the OpenAI link it shows. Login happens on the server: Codex redirects to a localhost callback on the machine running Strata, so for a remote viewer you may need a tunnel for that callback port.
+- **OpenRouter** and **OmniRoute**: set these in the environment of `strata serve`, then restart it. The key is never taken from the browser.
+
+| Provider | API key | Base URL (optional) | Default base URL |
+| --- | --- | --- | --- |
+| OpenRouter | `STRATA_OPENROUTER_API_KEY` | `STRATA_OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` |
+| OmniRoute | `STRATA_OMNIROUTE_API_KEY` | `STRATA_OMNIROUTE_BASE_URL` | `http://127.0.0.1:20128/v1` |
+
+A base URL must be HTTPS, or HTTP on `localhost`, `127.0.0.1`, or `::1`, with no credentials, query, or fragment. Otherwise the panel shows "Provider configuration required".
+
+The status line shows "Codex account connected" or a provider as configured ("inference not yet verified"). Neither is proof that the model works: model access is confirmed only after a turn completes successfully.
+
+**Worktree and review**
+
+Each session works in its own detached Git worktree of `HEAD`, at `<project parent>/.strata-worktrees/<project-id>/chat-<session-id>`, so your checkout is not touched. Uncommitted changes in your checkout are not visible to the agent. Open **Review changes** in the panel to see the worktree's status and diff, which refresh while you chat. Apply changes yourself, for example by committing in the worktree and merging its commit, or by copying files. The diff is capped at 256 KiB, any file over 64 KiB is omitted from it with a marker, and the status list is capped at 64 KiB. Also, a project over 2 GiB (or with a file over 128 MiB) cannot be given a chat worktree.
+
+**Approvals and cancel**
+
+The agent runs with Codex `approvalPolicy: on-request` and a read-only sandbox, so commands and file changes appear as an **Approval required** card with **Allow** and **Deny**. Review each command before you select Allow: the worktree is the agent's working directory, not an enforced boundary for commands you approve. An approval that is not answered within 300 seconds is denied. **Cancel turn** interrupts the running turn and denies pending approvals. **Close session** stops the agent and denies pending approvals; its worktree remains for review. Stopping `strata serve` also closes all sessions.
+
+**Limits and cleanup**
+
+- At most 4 live sessions at once; close one to start another. The viewer remembers up to 4 session references per browser tab.
+- Strata never deletes chat worktrees, including after a failed startup. Remove one when you are done with `git worktree remove --force <worktree path>` from the project, or delete `.strata-worktrees/<project-id>/chat-*` and run `git worktree prune`.
+
 ## Common commands
 
 ```sh
