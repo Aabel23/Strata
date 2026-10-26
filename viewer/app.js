@@ -927,7 +927,8 @@ async function chatRefreshDiff(force){
   }catch(error){if(error.status===409)removeChatSession(s);else if(s.session_id===chatState.selected)chatShowError("Could not load worktree review. "+error.message)}
 }
 function safeCodexLoginUrl(value){
-  try{const u=new URL(value);return u.protocol==="https:"&&u.hostname==="auth.openai.com"&&["","443"].includes(u.port)&&!u.username&&!u.password&&!u.hash?u.href:null}catch{return null}
+  if(typeof value!=="string"||/[\s\u0000-\u001f\u007f]/.test(value)||value.includes("#"))return null;
+  try{const u=new URL(value),authority=value.match(/^https:\/\/([^/?#]*)/i)?.[1];return u.protocol==="https:"&&["auth.openai.com","chatgpt.com"].includes(u.hostname)&&["","443"].includes(u.port)&&!u.username&&!u.password&&authority&&!authority.endsWith(":")?u.href:null}catch{return null}
 }
 async function chatCheckAuth(){
   const provider=$("chat-provider").value;
