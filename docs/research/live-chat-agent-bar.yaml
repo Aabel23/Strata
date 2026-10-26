@@ -1,0 +1,75 @@
+title: Viewer chat and agent bar design
+summary: Proposed four-pane viewer, write-capable Claude chat with per-action approval, and B1 run cards for task #304.
+code: [viewer/app.html, viewer/app.css, viewer/app.js, strata/server.py, docs/research/kernel-b1.yaml]
+blocks:
+  - md: |
+      ## Status and job
+      Design proposal for #304, revised after the owner required a write-capable chat. A user working in Board, Architecture, Code map, or Docs should be able to discuss and edit a project with Claude while seeing running ticket agents, without losing the main view. Kernel B1 and this chat are still future work.
+
+      The existing shell has a left project/section sidebar and one main content area. It already has a sidebar resize handle, a task-detail popup, flat cards, light/dark tokens, and a narrow-screen overlay pattern. The owner chose four blocks: left navigation, centre view, right resizable chat, and a resizable horizontal agent-card bar below the centre view.
+
+  - table:
+      head: [Block, Proposed behavior, Priority]
+      rows:
+        - ["Centre view", "Board, Architecture, Code map, or Docs remains the primary workspace; task detail stays a popup", "Primary"]
+        - ["Right chat", "Resizable; streaming text and tool events; persistent composer, stop control, and exact approve/deny card for each proposed write", "Secondary"]
+        - ["Bottom agent bar", "Resizable height; horizontal B1 run cards showing state dot, role, task, elapsed time, and tokens only when reported", "Tertiary"]
+        - ["Left sidebar", "Existing projects and sections with the current resize/collapse behavior", "Navigation"]
+
+  - md: |
+      ## Responsive behavior [proposal]
+      Keep the centre view usable. On a narrow viewport, chat becomes a full-height drawer opened from the top bar and agent cards become a bottom drawer. Splitters work by pointer and keyboard and announce their size. When B1 is unavailable, show an honest empty state.
+
+      Chat is an interactive, multi-turn session; B1 runs are one-ticket supervised subprocesses with a Gate. Chat does not change a B1 run, task status, or Gate result. Agent cards query B1 rows; an open chat is not a B1 run.
+
+  - diagram:
+      dir: LR
+      caption: Proposed write and approval path. A chat session writes only in its own worktree; applying that diff is a separate owner action.
+      nodes:
+        - {id: browser, text: Viewer shell, tone: ui}
+        - {id: api, text: Guarded chat API}
+        - {id: host, text: Chat session host}
+        - {id: sdk, text: Claude Agent SDK}
+        - {id: worktree, text: Chat worktree, shape: store}
+        - {id: runs, text: B1 run records, shape: store}
+        - {id: cards, text: Agent-card read API}
+      edges:
+        - [browser, api, "messages, events, approve or deny"]
+        - [api, host, "session commands and decisions"]
+        - [host, sdk, "streaming input and canUseTool"]
+        - [sdk, worktree, "approved Edit or Write via scoped Claude runtime"]
+        - [browser, cards, "read cards"]
+        - [cards, runs, "query"]
+
+  - md: |
+      ## Integration choice [proposal]
+      Use the Python Claude Agent SDK for this chat and keep B1's approved CLI `runexec` design unchanged. The SDK's `ClaudeSDKClient` supports persistent multi-turn input, real-time output and a `can_use_tool` callback that pauses an approval-requiring action until the host returns allow or deny. The CLI can also stream JSON, but browser permission mediation would require a custom MCP prompt tool and another process bridge. The SDK adds a pinned Python package/runtime dependency; it is not installed in the current Strata venv.
+
+      Configure the chat SDK with `permission_mode="default"`, `setting_sources=[]`, no broad allow rules, and an explicit built-in tool set `Read`, `Glob`, `Grep`, `Edit`, and `Write`. Exclude Bash, MCP, browser/network tools and `AskUserQuestion` from the first version; that tool requires a separate question/answer UI and callback result. Read tools may be auto-approved inside the session worktree. For every Edit or Write, a `PreToolUse` hook first denies forbidden paths and symlink escapes, then returns `permissionDecision: "ask"` for a valid request so `can_use_tool` presents it to the browser even if another rule would allow it. The callback verifies the path again before returning allow for that exact input. No persistent "always allow" rule is offered. Managed policy can still deny actions; the pinned SDK version and effective permission order must be tested so no write can bypass the browser decision.
+
+      Sources: [Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview), [streaming input](https://code.claude.com/docs/en/agent-sdk/streaming-vs-single-mode), [streaming output](https://code.claude.com/docs/en/agent-sdk/streaming-output), [approval callback](https://code.claude.com/docs/en/agent-sdk/user-input), [permission evaluation](https://code.claude.com/docs/en/agent-sdk/permissions), [SDK hooks](https://code.claude.com/docs/en/agent-sdk/hooks), [Python SDK reference](https://code.claude.com/docs/en/agent-sdk/python).
+
+  - md: |
+      ## Session and route contract [proposal]
+      On session start, the server resolves a registered project root and creates a dedicated `chat-<id>` worktree from its current HEAD. Existing uncommitted checkout changes are therefore absent from the new chat workspace. The browser cannot supply an arbitrary cwd. The server hosts one active turn per chat and gives each pending tool request a random, one-use approval ID bound to the exact tool name and input. The viewer displays the complete requested path/change and asks Allow or Deny; the decision request carries only the ID and choice. Allow returns the original input to the SDK, Deny returns a denial. A missing, stale, mismatched, timed-out or disconnected approval never executes. The server does not auto-commit, merge, submit a task, or delete the worktree. The first version exposes the worktree path and diff for review; the owner can ask the main chat to apply reviewed changes through the existing governed workflow. A viewer Apply control requires a later design.
+
+      Proposed routes: `POST /api/chat/sessions` to start, `POST /api/chat/sessions/{id}/messages` for one turn, authenticated `GET /api/chat/sessions/{id}/events?after=N` for replayable streamed events, `POST /api/chat/sessions/{id}/approvals/{approval_id}` for a one-use decision, and guarded cancel/close operations. Mutating requests inherit per-start token, Host, Origin, JSON body-cap and editing-enabled guards; the event GET also requires the token and project/session authorization. Use `fetch()` streaming because native EventSource cannot attach the token header. Bounded queues, output and idle timeouts prevent abandoned sessions from consuming unbounded resources.
+
+      The event stream carries text deltas, completed tool requests, approval-required events, tool results, usage and errors. Partial tool input is display-only until complete. On browser disconnect, the approval stays pending only until a bounded deadline and can be replayed to a reconnecting viewer; expiry denies it. Cancel or server shutdown denies pending approvals and stops the session. Do not retry a failed tool call automatically. Credentials and raw internal SDK logs are never sent to the browser; the authorized stream includes only that session's intended conversation and normalized events. Transcript retention and cleanup are explicit implementation decisions.
+
+  - md: |
+      ## Authentication and write boundary
+      This design adds guarded chat lifecycle and approval routes as a future exception to `CLAUDE.md`'s current three-write-route rule. The owner must approve that exception before implementation. A worktree protects the active checkout from direct edits but is not an OS sandbox. The first tool set excludes Bash and other command execution; a broader tool set requires a separate sandbox/approval design. A later apply/merge step must detect conflicts and preserve the active checkout's uncommitted work.
+
+      The official SDK quickstart uses an API key. Its overview says third-party products should not offer claude.ai login/rate limits without prior approval. The proposed first version requires a user-provided API key or supported enterprise provider configured on the server; it never sends credentials to the browser. If local CLI subscription login is required instead, the CLI plus MCP approval bridge must replace the SDK choice before implementation.
+
+  - question:
+      q: "Approve the first write-capable chat design?"
+      options:
+        - {label: "SDK with isolated edits", note: "per-action browser approval; writes stay in a chat worktree until separately applied; server-side API key/provider"}
+        - {label: "CLI with approval bridge", note: "reuse local Claude CLI auth, but design and maintain a custom MCP permission server"}
+      recommend: "SDK with isolated edits"
+
+  - md: |
+      ## Implementation checks before tickets
+      Pin and exercise a Python SDK version newer than 0.1.59, including `setting_sources=[]`, streaming, `PreToolUse` ask/deny behavior, approval callback, path recheck, session stop/restart and provider authentication. Verify writes cannot skip the callback under effective managed settings. Specify transcript retention and explicit worktree cleanup. Confirm B1 `usage` fields before showing token totals. Cross-host chat sessions, attachments, transcript search, Bash execution, and automatic diff application are outside this first slice.

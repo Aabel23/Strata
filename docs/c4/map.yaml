@@ -326,6 +326,58 @@ objects:
   name: Coding agent CLI
   status: future
   summary: 'External CLI coding agent (Claude Code `claude -p` by default, Codex `codex exec` possible) run as a supervised subprocess; Strata never calls an LLM API. Later slices (not built): B2 bwrap sandbox, B3 Agents tab, B4 context packer, B5 controller'
+- id: chat_panel
+  parent: shell
+  kind: component
+  name: Live chat panel
+  status: future
+  summary: 'Right resizable multi-turn Claude chat; renders streamed text, tool events, and a one-action approve/deny card for requested edits in the viewer shell.'
+- id: agent_bar
+  parent: shell
+  kind: component
+  name: Agent bar
+  status: future
+  summary: 'Bottom resizable horizontal cards reading Kernel B1 runs: state, role, task, elapsed time and available token usage.'
+- id: chat_api
+  parent: server
+  kind: component
+  name: Chat session API
+  status: future
+  summary: 'Proposed guarded start, turn, one-use approval decision, cancel and close operations with an authenticated event stream; requires an explicit exception to the current three-POST-route rule.'
+- id: chat_sessions
+  parent: server
+  kind: component
+  name: Chat session supervisor
+  status: future
+  summary: 'Separate from B1 runexec; owns an interactive session, bounded queues and output, and one pending approval per exact write action. Denial or expiry never executes the action.'
+- id: chat_scope
+  parent: server
+  kind: component
+  name: Chat workspace scope
+  status: future
+  summary: 'Creates a per-session Git worktree, pins cwd to it, and validates Edit/Write target paths and symlinks before approval.'
+- id: chat_sdk
+  parent: server
+  kind: component
+  name: Claude Agent SDK adapter
+  status: future
+  summary: 'Python SDK multi-turn client with a can_use_tool callback routed to the viewer through the session host.'
+- id: chat_worktree
+  kind: system
+  name: Chat worktree
+  status: future
+  summary: 'Dedicated Git worktree for one interactive session; approved Edit/Write tools affect this workspace only.'
+- id: run_cards_api
+  parent: handler
+  kind: component
+  name: Agent card read API
+  status: future
+  summary: 'Read-only projection of Kernel B1 run rows for the viewer agent bar.'
+- id: claude_chat_cli
+  kind: system
+  name: Claude Code runtime
+  status: future
+  summary: 'Claude Code runtime launched by the Python Agent SDK for interactive chat, separate from one-ticket B1 coding runs.'
 links:
 - id: u_browse
   from: user
@@ -916,3 +968,99 @@ links:
   status: future
   detail: runs.runs_db
   summary: Registry stores runs and appends an audit row.
+- id: chat_turn
+  from: viewer
+  to: server
+  name: Guarded chat turn and event stream (HTTP)
+  status: future
+  summary: Viewer sends a turn and receives streamed text, tool, pending-approval, usage and error events.
+- id: chat_manage
+  from: chat_api
+  to: chat_sessions
+  name: Manage interactive session
+  status: future
+  summary: Server validates the request and controls the session process and event queue.
+- id: chat_process
+  from: chat_sessions
+  to: chat_sdk
+  name: Call Python Agent SDK adapter
+  status: future
+  summary: Session host sends turns and approval results to the SDK adapter and receives text, tool and permission events.
+- id: chat_runtime
+  from: chat_sdk
+  to: claude_chat_cli
+  name: Run Claude Code runtime (SDK)
+  status: future
+  summary: SDK manages the underlying Claude Code runtime for streaming turns and tool execution.
+- id: chat_isolate
+  from: chat_sessions
+  to: chat_scope
+  name: Prepare scoped workspace
+  status: future
+  summary: Session host requests a dedicated chat worktree and a path guard for Edit/Write.
+- id: chat_scope_repo
+  from: chat_scope
+  to: repo
+  name: Create Git worktree
+  status: future
+  summary: Create a session-owned worktree from project HEAD without changing the active checkout.
+- id: chat_workspace
+  from: chat_scope
+  to: chat_worktree
+  name: Configure chat worktree
+  status: future
+  summary: Bind the created worktree as the session cwd and path boundary.
+- id: chat_write
+  from: claude_chat_cli
+  to: chat_worktree
+  name: Execute approved file edit
+  status: future
+  summary: Claude runtime writes only the exact approved Edit/Write input inside the session worktree.
+- id: chat_approval
+  from: viewer
+  to: server
+  name: Approve or deny tool action (HTTP)
+  status: future
+  summary: Browser sends a one-use decision ID and choice, never revised tool arguments or a blanket permission.
+- id: chat_decide
+  from: chat_api
+  to: chat_sessions
+  name: Resolve pending approval
+  status: future
+  summary: Server binds the decision to the exact pending action and resumes the callback only on a valid approval.
+- id: cards_read
+  from: viewer
+  to: server
+  name: Read run cards (HTTP GET)
+  status: future
+  summary: Viewer requests a read-only summary of B1 runs for the selected project.
+- id: cards_runs
+  from: server
+  to: cli
+  name: Query run registry (Python import)
+  status: future
+  summary: Server projects run state, task, role, duration and available usage without changing run records.
+- id: cards_db
+  from: runs
+  to: sqlite
+  name: Read run rows (sqlite3)
+  status: future
+  summary: Agent-card projection reads B1 run rows without writing run state or audit records.
+- id: shell_chat
+  from: shell
+  to: chat_panel
+  name: Display chat panel
+  status: future
+  summary: Viewer shell opens the right chat panel without replacing the centre view.
+- id: shell_cards
+  from: shell
+  to: agent_bar
+  name: Display agent bar
+  status: future
+  summary: Viewer shell opens the bottom agent cards below the centre view.
+- id: handler_cards
+  from: handler
+  to: run_cards_api
+  name: Dispatch card query
+  status: future
+  summary: Server dispatches a read-only agent-card request.

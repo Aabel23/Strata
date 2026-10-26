@@ -1,0 +1,36 @@
+id: approve_chat_edit
+name: Approve one Claude chat edit (future)
+steps:
+- link: u_browse
+  text: View a chat session with a proposed edit
+- at: chat_panel
+  text: Inspect the exact tool action and choose Allow
+- link: chat_approval
+  text: Send the one-use approval ID and decision
+- at: chat_api
+  text: Verify the session, token, decision ID and pending action
+- link: chat_decide
+  text: Resolve this exact pending approval
+- link: chat_process
+  text: Return allow for the original SDK tool input
+- link: chat_runtime
+  text: Resume the Claude runtime for the approved tool action
+- link: chat_write
+  text: Execute the exact approved edit in the chat worktree
+- link: chat_write
+  reverse: true
+  text: Return the filesystem result
+- link: chat_runtime
+  reverse: true
+  text: Return the tool result
+- link: chat_process
+  reverse: true
+  text: Stream the result and updated session state
+- link: chat_decide
+  reverse: true
+  text: Mark the approval ID consumed
+- link: chat_approval
+  reverse: true
+  text: Return the action result
+- at: chat_panel
+  text: Show the edit result and a reviewable worktree diff

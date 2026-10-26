@@ -197,3 +197,54 @@ The Architect view has a derived Code level below components. Select a component
 | step | exactly one of `link` \| `at` | `reverse` (with `link`), `text`, `values`, `transition` (with `at`) |
 
 Complete example: `tests/fixtures/c4_layered/` (small) and `docs/c4/` (the Strata map).
+
+## 6. Design rules (a map a reader can trace)
+
+Owner-approved layout, distilled from the `strata`, `app_version1.1` and `project1_app` maps. Follow it when you create or remake a map.
+
+**Levels**
+
+1. **Top (context):** actors, the product's big units, and outside systems (`tags: [external]`). A product made of separately
+   deployed parts (phone app, server, device) gets one top unit per part, not one wrapper system. A unit that is one process
+   is an `app` at the top; a unit that holds several processes or stores is a `system`.
+2. **Container:** inside a unit, each running process or data store (`app` / `store`), always with `tech`. A store sits inside
+   the unit that owns it.
+3. **Component:** what each container is made of, one code folder each, about 4-7 per container. Only leaves `owns` code; a
+   parent never owns what its children own (`C4-OWNS-OVERLAP`). Merge a single-file component whose only job is forwarding
+   into its caller (`C4-FILE-OBJECT`).
+
+Build the map from the current code (folder READMEs, route tables, entry points), never by porting an older map of another
+version.
+
+**Links**
+
+- One link per real call; name what flows, plus the protocol on cross-unit links. Replies are `reverse: true` steps, never
+  reverse links.
+- **Endpoint links.** Zoomed into a unit, the viewer shows every outside object as its top unit and drops links whose two ends
+  are both outside (`lift()` in `viewer/index.html`). So a unit-to-unit hop (for example `app -> server`) vanishes once you zoom
+  in. For each cross-unit hop keep the unit-level link that flows use, and add display-only links with an `ep_` prefix:
+  - sender side: inner block -> the other side's **top unit** (`a_cloud -> server`);
+  - receiver side: the other side's **top unit** -> inner block (`app -> transport`).
+  Target the top unit, not the other block: a component-to-component link across apps raises `C4-COMP-CROSS`, and a deeper
+  target would show the link twice in the wrong views. Reuse the hop's contract as `detail`.
+- An actor may link straight to the component it touches (screen, CLI) as an endpoint link; accept that `C4-PERSON-TARGET`.
+- Check the result per view: for the top level and each unit or container with children, list the links that have one end
+  outside. Every outside unit the code talks to must appear there.
+
+**Flows**
+
+- One user-visible action per flow. Prefix the name with its reading order: `"3. Log in"`.
+- Plumbing shared by every request (envelope, auth) appears once, in flow `0`; business flows skip it.
+- One hop per step; show app-internal hops only when they add information.
+- Add a reverse step only when continuity needs it. A call into a store that sits inside the same unit needs no return step
+  before that unit replies.
+- Aim for at most about 20 steps and zero `C4-FLOW-BREAK`. Step text says what happens and names the key route or symbol, in
+  about 12 words.
+
+**Warnings**
+
+0 errors and 0 flow breaks are required. A remaining warning must be a real code fact (two components calling each other, a
+store shared by two processes) or a tool limit (non-Python contract symbols). Report it to the user; do not bend the map to
+hide it.
+
+Reference map for this layout: `project1_app` (`/home/abel/project/internproj/project1_app/documentation/c4`).

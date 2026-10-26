@@ -1,0 +1,46 @@
+id: live_chat
+name: Use Claude chat beside the current viewer page (future)
+steps:
+- link: u_browse
+  text: Open a Strata project and its main view
+- at: chat_panel
+  text: Open the right chat panel and enter a message
+- link: chat_turn
+  text: Send a guarded turn for the selected project and session
+- at: chat_api
+  text: Authorize the turn and its event stream
+- link: chat_manage
+  text: Create or resume the interactive session
+- link: chat_isolate
+  text: Prepare the session's writable workspace
+- link: chat_scope_repo
+  text: Create a dedicated Git worktree from project HEAD
+- link: chat_scope_repo
+  reverse: true
+  text: Return the workspace path
+- link: chat_workspace
+  text: Bind the chat worktree as this session's working directory
+- link: chat_workspace
+  reverse: true
+  text: Return the scoped workspace handle
+- link: chat_isolate
+  reverse: true
+  text: Return the scoped workspace policy
+- link: chat_process
+  text: Send the turn to the Python Agent SDK client
+- link: chat_runtime
+  text: Run the Claude Code session
+- link: chat_runtime
+  reverse: true
+  text: Receive streamed text and tool activity
+- link: chat_process
+  reverse: true
+  text: Forward events or a pending edit request
+- link: chat_manage
+  reverse: true
+  text: Forward bounded session events
+- link: chat_turn
+  reverse: true
+  text: Stream events to the viewer
+- at: chat_panel
+  text: Render the response or an approval card for a proposed edit

@@ -1,0 +1,28 @@
+id: view_agent_runs
+name: View Kernel B1 agents below the main view (future)
+steps:
+- link: u_browse
+  text: Open a Strata project
+- at: agent_bar
+  text: Open the bottom agent bar
+- link: cards_read
+  text: Request the selected project's run cards
+- at: run_cards_api
+  text: Select a read-only projection for the project
+- link: cards_runs
+  text: Query the B1 run registry
+- at: runs
+  text: Read current and recent run rows
+- link: cards_db
+  text: Read run rows and usage
+- link: cards_db
+  reverse: true
+  text: Return current and recent runs
+- link: cards_runs
+  reverse: true
+  text: Return state, task, role, timing and available usage
+- link: cards_read
+  reverse: true
+  text: Return card data
+- at: agent_bar
+  text: Show horizontal cards or an honest empty state
