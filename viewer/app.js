@@ -729,7 +729,7 @@ resize.addEventListener("keydown",e=>{
 const CHAT_STORE="strata-chat-sessions-v1", CHAT_MAX_SESSIONS=4, CHAT_MAX_TIMELINE=150, CHAT_MAX_BLOCK=16000, CHAT_MAX_TIMELINE_CHARS=1000000;
 const chatProjectPattern=/^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/;
 const chatSessionPattern=/^[A-Za-z0-9_-]{1,128}$/;
-const chatState={sessions:[],selected:null,polling:false,lastDiffAt:0};
+const chatState={sessions:[],selected:null,polling:false,lastDiffAt:0,loginPending:false,loginUrl:null,authRevision:0};
 function readChatSessions(){
   try{
     const raw=sessionStorage.getItem(CHAT_STORE), value=raw?JSON.parse(raw):[];
@@ -931,10 +931,10 @@ function safeCodexLoginUrl(value){
   try{const u=new URL(value),authority=value.match(/^https:\/\/([^/?#]*)/i)?.[1];return u.protocol==="https:"&&["auth.openai.com","chatgpt.com"].includes(u.hostname)&&["","443"].includes(u.port)&&!u.username&&!u.password&&authority&&!authority.endsWith(":")?u.href:null}catch{return null}
 }
 async function chatCheckAuth(){
-  const provider=$("chat-provider").value;
+  const provider=$("chat-provider").value,revision=++chatState.authRevision;
   try{
     const state=await chatGet("/api/chat/auth?provider="+enc(provider));
-    if(provider!==$("chat-provider").value)return;
+    if(revision!==chatState.authRevision||provider!==$("chat-provider").value)return;
     chatClearError();
     const messages={account_present:"Codex account connected",provider_configured:"Provider configured · inference not yet verified",
       provider_ready:"Provider configured · inference not yet verified",login_required:"Codex sign-in required",
@@ -943,22 +943,38 @@ async function chatCheckAuth(){
     $("chat-auth-state").dataset.state=String(state.status||"unavailable");
     const area=$("chat-login-area");area.replaceChildren();
     if(provider==="codex"&&state.status==="login_required"){
-      const start=el("button","","Get sign-in link");start.type="button";start.disabled=!chatSession()||chatSession().closed;
-      const help=el("p","chat-help",chatSession()?"A sign-in link will appear here for you to open.":"Start a Codex session first, then request a sign-in link.");
+      const project=CUR.p,selected=chatSession(),session=selected&&!selected.closed&&selected.provider==="codex"&&selected.project===project?selected:
+        [...chatState.sessions].reverse().find(s=>!s.closed&&s.provider==="codex"&&s.project===project)||null;
+      const login=chatState.loginUrl&&chatState.loginUrl.project===project&&session&&chatState.loginUrl.session_id===session.session_id?chatState.loginUrl:null;
+      const start=el("button","","Get sign-in link");start.type="button";start.disabled=!project||chatState.loginPending;
+      const help=el("p","chat-help",login?"Open the link to finish signing in.":"A sign-in link will appear here for you to open.");
       const anchor=el("a","");anchor.id="chat-login-link";anchor.target="_blank";anchor.rel="noopener noreferrer";anchor.textContent="Open OpenAI sign-in";anchor.hidden=true;
+      if(login){anchor.href=login.url;anchor.hidden=false}
       start.onclick=async()=>{
-        const session=chatSession();if(!session)return;
-        start.disabled=true;chatClearError();
-        try{const result=await api("/api/chat",{op:"login",project:session.project,session_id:session.session_id});
+        if(chatState.loginPending||!CUR.p)return;
+        const requestedProject=CUR.p;chatState.loginPending=true;start.disabled=true;chatClearError();let flowError=null;
+        try{
+          let active=chatSession();if(!active||active.closed||active.provider!=="codex"||active.project!==requestedProject)
+            active=[...chatState.sessions].reverse().find(s=>!s.closed&&s.provider==="codex"&&s.project===requestedProject)||null;
+          if(!active)active=await chatStartSession(false);
+          if(!active)return;
+          if(CUR.p!==requestedProject)throw new Error("Project changed before the sign-in link was requested.");
+          const result=await api("/api/chat",{op:"login",project:active.project,session_id:active.session_id});
           const url=safeCodexLoginUrl(result.url);if(!url)throw new Error("Codex returned an unsupported sign-in link");
-          anchor.href=url;anchor.hidden=false;help.textContent="Open the link to finish signing in.";
-        }catch(error){chatShowError(error.message)}finally{start.disabled=!chatSession()||chatSession().closed}
+          chatState.loginUrl={project:active.project,session_id:active.session_id,url};
+          chatClearError();
+        }catch(error){flowError="Could not get a sign-in link. "+error.message}finally{
+          chatState.loginPending=false;
+          if(document.body.classList.contains("chat-open"))await chatCheckAuth();
+          if(flowError)chatShowError(flowError);
+        }
       };
       area.append(start,anchor,help);area.hidden=false;
     }else if(provider!=="codex"&&state.status==="configuration_required"){
       area.append(el("p","chat-help","Configure this provider's key and base URL in the Strata server environment."));area.hidden=false;
     }else{area.hidden=true}
   }catch(error){
+    if(revision!==chatState.authRevision)return;
     $("chat-auth-state").textContent="Authentication status unavailable";
     $("chat-auth-state").dataset.state="unavailable";
     if(error.status!==409)chatShowError("Could not check provider status. "+error.message);
@@ -977,7 +993,7 @@ function chatInitOpenPreference(){
   const saved=store.get(CHAT_OPEN_STORE);
   chatOpen(saved!=="0",false);
 }
-async function chatStartSession(){
+async function chatStartSession(showError=true){
   const project=CUR.p;if(!project){chatShowError("Choose a project before starting a session.");return}
   const button=$("chat-new-session"),provider=$("chat-provider").value,model=$("chat-model").value.trim();
   button.disabled=true;chatClearError();
@@ -990,8 +1006,8 @@ async function chatStartSession(){
       closed:false,timeline:[],lastSeq:0,pendingApproval:null,activeTurn:false,restorePending:false,replayIncomplete:false};
     if(!chatSession(session.session_id))chatState.sessions.push(session);
     chatState.selected=session.session_id;
-    saveChatSessions();renderChatCards();renderChatPanel();chatOpen(true);await chatPoll();
-  }catch(error){chatShowError(error.message)}finally{button.disabled=false}
+    saveChatSessions();renderChatCards();renderChatPanel();chatOpen(true);await chatPoll();return session;
+  }catch(error){if(showError){chatShowError(error.message);return null}throw error}finally{button.disabled=false}
 }
 async function chatSend(e){
   e.preventDefault();const s=chatSession(),input=$("chat-message"),message=input.value.trim();

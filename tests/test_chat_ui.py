@@ -108,3 +108,61 @@ for(const url of invalid)if(context.safeCodexLoginUrl(url)!==null)throw Error("e
 '''
     result = subprocess.run([node, "-e", script, str(app)], capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
+
+
+def test_login_link_click_creates_session_and_renders_link_after_auth_refresh():
+    node = shutil.which("node")
+    if not node:
+        raise AssertionError("Node.js is required for the chat runtime regression test")
+    app = pathlib.Path(__file__).resolve().parents[1] / "viewer" / "app.js"
+    script = r'''
+const fs=require("fs"),vm=require("vm");
+const source=fs.readFileSync(process.argv[1],"utf8");
+const failLogin=process.argv[2]==="fail";
+const begin=source.indexOf("function safeCodexLoginUrl(value){");
+const end=source.indexOf("async function chatSend",begin);
+if(begin<0||end<0)throw Error("chat login flow was not found");
+const elements=new Map();
+function element(text=""){return {textContent:text,value:"",hidden:false,disabled:false,attrs:{},children:[],dataset:{},
+  replaceChildren(...items){this.children=items},append(...items){this.children.push(...items)},
+  setAttribute(k,v){this.attrs[k]=v}}}
+for(const id of ["chat-provider","chat-model","chat-auth-state","chat-login-area","chat-new-session","chat-panel","chat-toggle"])
+  elements.set(id,element(id==="chat-provider"?"codex":""));
+elements.get("chat-provider").value="codex";
+const body={classList:{toggle(){},contains(){return true}}};
+const calls=[];
+let visibleError="";
+let context;
+context={URL,console,Date,document:{body},CUR:{p:"demo",tab:"task"},enc:encodeURIComponent,
+  $:id=>elements.get(id),el:(_tag,_class,text)=>element(text),
+  chatState:{sessions:[],selected:null,polling:false,lastDiffAt:0,loginPending:false,loginUrl:null,authRevision:0},
+  chatSession(id){return context.chatState.sessions.find(s=>s.session_id===(id||context.chatState.selected))||null},
+  chatGet:async()=>({status:"login_required"}),
+  api:async(_path,data)=>{calls.push(data.op);if(data.op==="start")return {session_id:"session-new",thread_id:null};
+    if(data.op==="login"){if(failLogin)throw Error("login unavailable");return {url:"https://auth.openai.com/authorize?state=abc"}}throw Error("unexpected operation "+data.op)},
+  chatClearError(){visibleError=""},chatShowError(message){visibleError=message},
+  chatPoll:async()=>{},saveChatSessions(){},renderChatCards(){},renderChatPanel(){},
+  pruneClosedChatRefs(){return true},store:{set(){}},hashFor:p=>"#/p/"+p,
+};
+vm.createContext(context);vm.runInContext("const CHAT_MAX_SESSIONS=4;"+source.slice(begin,end),context);
+(async()=>{
+  await context.chatCheckAuth();
+  const firstArea=elements.get("chat-login-area"),button=firstArea.children.find(x=>x.textContent==="Get sign-in link");
+  if(!button||button.disabled)throw Error("login link action should be enabled with a selected project and no session");
+  await button.onclick();
+  if(calls.join(",")!=="start,login")throw Error("one click should create a session and request login: "+calls.join(","));
+  if(context.chatState.sessions.length!==1||context.chatState.sessions[0].thread_id!==null)
+    throw Error("pre-auth session was not retained");
+  const currentArea=elements.get("chat-login-area"),link=currentArea.children.find(x=>x.id==="chat-login-link");
+  if(currentArea.children.includes(button))throw Error("auth refresh did not replace the original login controls");
+  if(failLogin){
+    if(!visibleError.includes("Could not get a sign-in link. login unavailable"))
+      throw Error("login failure should remain visible after successful auth refresh: "+visibleError);
+  }else if(!link||link.hidden||link.href!=="https://auth.openai.com/authorize?state=abc")
+    throw Error("the refreshed login UI must show the validated sign-in URL");
+})().catch(error=>{console.error(error);process.exitCode=1});
+'''
+    result = subprocess.run([node, "-e", script, str(app)], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    failed = subprocess.run([node, "-e", script, str(app), "fail"], capture_output=True, text=True, timeout=10)
+    assert failed.returncode == 0, failed.stderr
