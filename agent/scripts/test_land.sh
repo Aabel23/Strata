@@ -46,6 +46,20 @@ task G verify.txt; old=$(g rev-parse HEAD); land G false; rc=$?
 check "failed verification rejected" "$rc" 4
 check "failed verification leaves main unchanged" "$(g rev-parse HEAD)" "$old"
 
+# A task rebased during a failed verification must be retryable with the same
+# original base. Main's intervening path is disjoint from the task's path.
+task H retry/task.txt
+mkdir -p "$R/retry"
+echo parallel >"$R/retry/main.txt"; g add retry/main.txt; g commit -qm 'parallel disjoint change'
+old=$(g rev-parse HEAD); land H false; rc=$?
+check "first verification after rebase fails" "$rc" 4
+check "failed verify leaves main unchanged" "$(g rev-parse HEAD)" "$old"
+git -C "$T/wtH" merge-base --is-ancestor "$old" HEAD && rebased=yes || rebased=no
+check "task branch was rebased onto current main" "$rebased" yes
+land H true; rc=$?
+check "same-original-base retry lands after failed verify" "$rc" 0
+g show main:retry/main.txt >/dev/null 2>&1 && check "retry preserves intervening main path" yes yes || check "retry preserves intervening main path" no yes
+
 # A verify command advances main exactly once. The script must retry, recheck,
 # rebase and verify again before landing.
 task F retry/f.txt
