@@ -74,28 +74,46 @@ def _child_env(provider: str, environ: dict[str, str] | None = None) -> dict[str
         if not key or not _safe_url(base_url):
             raise ValueError(f"{provider} requires a server-configured API key and HTTPS or loopback base URL")
         env[url_name] = base_url
-        # Never place credentials in argv or events. The selected key is the
-        # only provider secret passed to Codex and its tool subprocesses.
+        # Never place credentials in argv or events. Codex receives the key for
+        # inference; shell_environment_policy filters it from tool subprocesses.
         env["OPENAI_API_KEY"] = key
     return env
 
 
 def _provider_args(provider: str, environ: dict[str, str]) -> list[str]:
+    # The app-server keeps its own inference environment, then applies this
+    # policy to command/tool subprocesses. Use a small runtime allowlist and
+    # explicitly remove credential-bearing names and proxy URLs.
+    from json import dumps
+    safe_names = [
+        "PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_*", "TMPDIR", "TMP", "TEMP",
+        "XDG_RUNTIME_DIR", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE", "NODE_EXTRA_CA_CERTS", "SYSTEMROOT", "WINDIR", "COMSPEC",
+        "PATHEXT", "APPDATA", "LOCALAPPDATA", "USERPROFILE",
+    ]
+    secret_patterns = ["OPENAI_API_KEY", "STRATA_*", "*PROXY*", "*KEY*", "*SECRET*",
+                       "*TOKEN*", "*PASS*", "*CRED*", "*AUTH*", "*COOKIE*"]
+    args = [
+        "-c", 'shell_environment_policy.inherit="core"',
+        "-c", "shell_environment_policy.ignore_default_excludes=false",
+        "-c", f"shell_environment_policy.include_only={dumps(safe_names)}",
+        "-c", f"shell_environment_policy.exclude={dumps(secret_patterns)}",
+    ]
     if provider == "codex":
-        return []
+        return args
     _, url_name, provider_id, default_url = _PROVIDERS[provider]
     url = environ.get(url_name, default_url)
     # `-c` values are fixed from server environment and TOML-quoted. No browser
     # input is interpolated into the command line.
-    from json import dumps
-    return [
+    args.extend([
         "-c", f'model_provider={dumps(provider_id)}',
         "-c", f'model_providers.{provider_id}.name={dumps(provider_id)}',
         "-c", f'model_providers.{provider_id}.base_url={dumps(url)}',
         "-c", f'model_providers.{provider_id}.env_key="OPENAI_API_KEY"',
         "-c", f'model_providers.{provider_id}.wire_api="responses"',
         "-c", f'model_providers.{provider_id}.requires_openai_auth=false',
-    ]
+    ])
+    return args
 
 
 def _redact_error(value: Any, secrets_to_hide=()) -> str:

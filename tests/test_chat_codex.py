@@ -254,6 +254,21 @@ def test_provider_secrets_only_enter_child_environment(tmp_path):
     assert "AWS_SECRET_ACCESS_KEY" not in kwargs["env"] and "OPENAI_BASE_URL" not in kwargs["env"]
     assert "model_providers.openrouter.requires_openai_auth=false" in args
     assert "STRATA_OPENROUTER_API_KEY" not in kwargs["env"]
+    config = {args[i + 1].split("=", 1)[0]: args[i + 1].split("=", 1)[1]
+              for i, arg in enumerate(args[:-1]) if arg == "-c"}
+    assert config['shell_environment_policy.inherit'] == '"core"'
+    assert config['shell_environment_policy.ignore_default_excludes'] == "false"
+    assert "shell_environment_policy.filters." not in " ".join(args)
+    assert json.loads(config["shell_environment_policy.include_only"]) == [
+        "PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_*", "TMPDIR", "TMP", "TEMP",
+        "XDG_RUNTIME_DIR", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE", "NODE_EXTRA_CA_CERTS", "SYSTEMROOT", "WINDIR", "COMSPEC",
+        "PATHEXT", "APPDATA", "LOCALAPPDATA", "USERPROFILE",
+    ]
+    assert json.loads(config["shell_environment_policy.exclude"]) == [
+        "OPENAI_API_KEY", "STRATA_*", "*PROXY*", "*KEY*", "*SECRET*",
+        "*TOKEN*", "*PASS*", "*CRED*", "*AUTH*", "*COOKIE*",
+    ]
     assert not any("secret-key" in json.dumps(e) for e in session.events())
     session.close()
     with pytest.raises(ValueError):
