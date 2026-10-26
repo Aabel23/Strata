@@ -1,46 +1,55 @@
 id: live_chat
-name: Use Claude chat beside the current viewer page (future)
+name: Chat with a Codex agent beside the current viewer page
 steps:
 - link: u_browse
   text: Open a Strata project and its main view
 - at: chat_panel
-  text: Open the right chat panel and enter a message
+  text: Pick a provider, start a session and enter a message
 - link: chat_turn
-  text: Send a guarded turn for the selected project and session
+  text: POST /api/chat op start, then op turn
+- link: chat_dispatch
+  text: Handler routes the authorized request to the chat API
 - at: chat_api
-  text: Authorize the turn and its event stream
+  text: Check token, Origin/Host, project and session IDs; roots come from the DB registry
 - link: chat_manage
-  text: Create or resume the interactive session
-- link: chat_isolate
-  text: Prepare the session's writable workspace
+  text: Start the session in ChatSupervisor
 - link: chat_scope_repo
-  text: Create a dedicated Git worktree from project HEAD
+  text: git worktree add --detach --no-checkout from project HEAD
 - link: chat_scope_repo
   reverse: true
-  text: Return the workspace path
+  text: Return the worktree path
 - link: chat_workspace
-  text: Bind the chat worktree as this session's working directory
+  text: Materialize HEAD files into the worktree
 - link: chat_workspace
   reverse: true
-  text: Return the scoped workspace handle
-- link: chat_isolate
-  reverse: true
-  text: Return the scoped workspace policy
+  text: Return the ready workspace
 - link: chat_process
-  text: Send the turn to the Python Agent SDK client
+  text: CodexSession.start and turn with cwd set to the worktree
 - link: chat_runtime
-  text: Run the Claude Code session
+  text: Run the turn in codex app-server (read-only sandbox, approvalPolicy on-request)
 - link: chat_runtime
   reverse: true
-  text: Receive streamed text and tool activity
+  text: Receive streamed JSON-RPC notifications
 - link: chat_process
   reverse: true
-  text: Forward events or a pending edit request
+  text: Buffer events in the replay list
 - link: chat_manage
   reverse: true
-  text: Forward bounded session events
+  text: Return the thread and turn IDs
 - link: chat_turn
   reverse: true
-  text: Stream events to the viewer
+  text: Return ok
+- link: chat_events
+  text: Poll GET /api/chat/events?after=<seq>
+- link: chat_dispatch
+  text: Handler routes the authorized read to the chat API
+- link: chat_manage
+  text: Read events from ChatSupervisor
+- link: chat_manage
+  reverse: true
+  text: Return ordered events
+- link: chat_events
+  reverse: true
+  text: Return the JSON response
 - at: chat_panel
-  text: Render the response or an approval card for a proposed edit
+  text: Render the response, tool activity or an approval card

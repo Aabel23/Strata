@@ -329,55 +329,53 @@ objects:
 - id: chat_panel
   parent: shell
   kind: component
-  name: Live chat panel
-  status: future
-  summary: 'Right resizable multi-turn Claude chat; renders streamed text, tool events, and a one-action approve/deny card for requested edits in the viewer shell.'
+  name: Chat panel
+  summary: 'Right panel in viewer/app.html + app.js: start a Codex session (provider codex/openrouter/omniroute), send turns, show streamed events, one-use Allow/Deny card, cancel/close, worktree diff; session refs live in sessionStorage.'
 - id: agent_bar
   parent: shell
   kind: component
-  name: Agent bar
-  status: future
-  summary: 'Bottom resizable horizontal cards reading Kernel B1 runs: state, role, task, elapsed time and available token usage.'
+  name: Agent session bar
+  summary: 'Bottom bar listing this browser tab''s chat sessions (cards from client-side chat state, not Kernel B1 runs); shows an empty state when none is open. Selecting a card opens it in the chat panel.'
 - id: chat_api
   parent: server
   kind: component
-  name: Chat session API
-  status: future
-  summary: 'Proposed guarded start, turn, one-use approval decision, cancel and close operations with an authenticated event stream; requires an explicit exception to the current three-POST-route rule.'
+  name: Chat API
+  summary: 'strata/server.py: POST /api/chat (ops start, turn, decide, cancel, close, login, cancel_login) and GET /api/chat/events, /auth, /diff; per-start token on POST and GET, Origin check on POST, Host check on all requests, project and session ID regexes, projects only from the DB registry.'
 - id: chat_sessions
   parent: server
   kind: component
   name: Chat session supervisor
-  status: future
-  summary: 'Separate from B1 runexec; owns an interactive session, bounded queues and output, and one pending approval per exact write action. Denial or expiry never executes the action.'
-- id: chat_scope
+  summary: 'ChatSupervisor: up to 4 live Codex sessions, each in its own detached Git worktree (blobs materialized from HEAD, symlink and size guards); routes turn/decide/cancel/close/login and builds a bounded review diff.'
+  owns:
+  - strata/chat.py
+  - strata/chat_codex.py
+- id: chat_codex
   parent: server
   kind: component
-  name: Chat workspace scope
-  status: future
-  summary: 'Creates a per-session Git worktree, pins cwd to it, and validates Edit/Write target paths and symlinks before approval.'
-- id: chat_sdk
-  parent: server
-  kind: component
-  name: Claude Agent SDK adapter
-  status: future
-  summary: 'Python SDK multi-turn client with a can_use_tool callback routed to the viewer through the session host.'
+  name: Codex app-server adapter
+  summary: 'strata/chat_codex.py. CodexSession: spawns `codex app-server --listen stdio://`, speaks JSON-RPC, sandbox read-only with approvalPolicy on-request; turns command/file-change approval requests into one-use approval IDs (24 bytes, timeout, deny on expiry/close); filtered child env, replay buffer.'
 - id: chat_worktree
   kind: system
   name: Chat worktree
-  status: future
-  summary: 'Dedicated Git worktree for one interactive session; approved Edit/Write tools affect this workspace only.'
-- id: run_cards_api
-  parent: handler
-  kind: component
-  name: Agent card read API
-  status: future
-  summary: 'Read-only projection of Kernel B1 run rows for the viewer agent bar.'
-- id: claude_chat_cli
+  summary: 'Detached Git worktree under .strata-worktrees/ beside the project repo, one per chat session. It is the session cwd and the only checkout Strata exposes; changes are reviewed through the bounded diff and the worktree is retained after close.'
+- id: codex_app_server
   kind: system
-  name: Claude Code runtime
-  status: future
-  summary: 'Claude Code runtime launched by the Python Agent SDK for interactive chat, separate from one-ticket B1 coding runs.'
+  name: Codex app-server
+  tags:
+  - external
+  summary: 'Local `codex` CLI child process (JSON-RPC over stdio). Runs the model turn, tools and approved file changes; owns ChatGPT login.'
+- id: openrouter
+  kind: system
+  name: OpenRouter
+  tags:
+  - external
+  summary: 'Optional model gateway (default https://openrouter.ai/api/v1; STRATA_OPENROUTER_BASE_URL/API_KEY). Only used when the session provider is openrouter.'
+- id: omniroute
+  kind: system
+  name: OmniRoute
+  tags:
+  - external
+  summary: 'Optional local model gateway (default http://127.0.0.1:20128/v1; STRATA_OMNIROUTE_BASE_URL/API_KEY). Only used when the session provider is omniroute.'
 links:
 - id: u_browse
   from: user
@@ -971,96 +969,75 @@ links:
 - id: chat_turn
   from: viewer
   to: server
-  name: Guarded chat turn and event stream (HTTP)
-  status: future
-  summary: Viewer sends a turn and receives streamed text, tool, pending-approval, usage and error events.
+  name: Chat operations start/turn/cancel/close/login (HTTP POST /api/chat)
+  summary: Guarded JSON ops with token header; the browser sends only project ID, session ID, provider, model and message.
+- id: chat_events
+  from: viewer
+  to: server
+  name: Poll events, auth status, worktree diff (HTTP GET /api/chat/*)
+  summary: Viewer polls ordered events by sequence number and reads auth readiness and the review diff.
+- id: chat_dispatch
+  from: handler
+  to: chat_api
+  name: Dispatch chat route (in-process)
+  summary: do_POST/do_GET hand /api/chat paths to the chat handlers.
 - id: chat_manage
   from: chat_api
   to: chat_sessions
-  name: Manage interactive session
-  status: future
-  summary: Server validates the request and controls the session process and event queue.
+  name: Call ChatSupervisor (Python import)
+  summary: Server validates the request, then starts, drives or reads a session through the supervisor.
 - id: chat_process
   from: chat_sessions
-  to: chat_sdk
-  name: Call Python Agent SDK adapter
-  status: future
-  summary: Session host sends turns and approval results to the SDK adapter and receives text, tool and permission events.
+  to: chat_codex
+  name: Call CodexSession (Python import)
+  summary: Supervisor sends turns, cancel and approval decisions, and reads replayed events.
 - id: chat_runtime
-  from: chat_sdk
-  to: claude_chat_cli
-  name: Run Claude Code runtime (SDK)
-  status: future
-  summary: SDK manages the underlying Claude Code runtime for streaming turns and tool execution.
-- id: chat_isolate
-  from: chat_sessions
-  to: chat_scope
-  name: Prepare scoped workspace
-  status: future
-  summary: Session host requests a dedicated chat worktree and a path guard for Edit/Write.
+  from: chat_codex
+  to: codex_app_server
+  name: Run Codex app-server (subprocess JSON-RPC over stdio)
+  summary: Adapter starts the child, runs thread/turn requests and answers its approval requests.
 - id: chat_scope_repo
-  from: chat_scope
+  from: chat_sessions
   to: repo
-  name: Create Git worktree
-  status: future
-  summary: Create a session-owned worktree from project HEAD without changing the active checkout.
+  name: Create Git worktree (git subprocess)
+  summary: '`git worktree add --detach --no-checkout` from project HEAD, then read-tree; the active checkout is untouched.'
 - id: chat_workspace
-  from: chat_scope
+  from: chat_sessions
   to: chat_worktree
-  name: Configure chat worktree
-  status: future
-  summary: Bind the created worktree as the session cwd and path boundary.
+  name: Materialize HEAD and read review diff (filesystem)
+  summary: Writes HEAD blobs into the worktree with path-escape checks, later reads it for the bounded diff.
 - id: chat_write
-  from: claude_chat_cli
+  from: codex_app_server
   to: chat_worktree
-  name: Execute approved file edit
-  status: future
-  summary: Claude runtime writes only the exact approved Edit/Write input inside the session worktree.
+  name: Apply approved file change (filesystem)
+  summary: After an Allow decision the Codex app-server applies the change in its session cwd (the worktree). Confinement is Codex's own (read-only sandbox plus approvals), not enforced by Strata, and approved commands are not path-scoped.
 - id: chat_approval
   from: viewer
   to: server
-  name: Approve or deny tool action (HTTP)
-  status: future
-  summary: Browser sends a one-use decision ID and choice, never revised tool arguments or a blanket permission.
+  name: Approve or deny tool action (HTTP POST /api/chat op decide)
+  summary: Browser sends the one-use approval ID and a boolean, never revised arguments or a blanket permission.
 - id: chat_decide
   from: chat_api
   to: chat_sessions
-  name: Resolve pending approval
-  status: future
-  summary: Server binds the decision to the exact pending action and resumes the callback only on a valid approval.
-- id: cards_read
-  from: viewer
-  to: server
-  name: Read run cards (HTTP GET)
-  status: future
-  summary: Viewer requests a read-only summary of B1 runs for the selected project.
-- id: cards_runs
-  from: server
-  to: cli
-  name: Query run registry (Python import)
-  status: future
-  summary: Server projects run state, task, role, duration and available usage without changing run records.
-- id: cards_db
-  from: runs
-  to: sqlite
-  name: Read run rows (sqlite3)
-  status: future
-  summary: Agent-card projection reads B1 run rows without writing run state or audit records.
+  name: Resolve pending approval (Python import)
+  summary: Supervisor passes the decision to the session, which answers only the matching pending request.
+- id: chat_openrouter
+  from: codex_app_server
+  to: openrouter
+  name: Model inference (HTTPS, optional)
+  summary: Used only when the provider is openrouter, via model_providers config passed with -c.
+- id: chat_omniroute
+  from: codex_app_server
+  to: omniroute
+  name: Model inference (HTTP, optional)
+  summary: Used only when the provider is omniroute, via model_providers config passed with -c.
 - id: shell_chat
   from: shell
   to: chat_panel
   name: Display chat panel
-  status: future
   summary: Viewer shell opens the right chat panel without replacing the centre view.
 - id: shell_cards
   from: shell
   to: agent_bar
   name: Display agent bar
-  status: future
-  summary: Viewer shell opens the bottom agent cards below the centre view.
-- id: handler_cards
-  from: handler
-  to: run_cards_api
-  name: Dispatch card query
-  status: future
-  summary: Server dispatches a read-only agent-card request.
+  summary: Viewer shell renders session cards from client-side chat state below the centre view.

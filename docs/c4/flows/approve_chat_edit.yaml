@@ -1,36 +1,38 @@
 id: approve_chat_edit
-name: Approve one Claude chat edit (future)
+name: Approve or deny one Codex chat action
 steps:
 - link: u_browse
-  text: View a chat session with a proposed edit
+  text: View a chat session with a pending approval
 - at: chat_panel
-  text: Inspect the exact tool action and choose Allow
+  text: Inspect the exact command or file-change request and choose Allow or Deny
 - link: chat_approval
-  text: Send the one-use approval ID and decision
+  text: POST /api/chat op decide with approval_id and allow
+- link: chat_dispatch
+  text: Handler routes the authorized request to the chat API
 - at: chat_api
-  text: Verify the session, token, decision ID and pending action
+  text: Verify token, project and session IDs, and the boolean decision
 - link: chat_decide
   text: Resolve this exact pending approval
 - link: chat_process
-  text: Return allow for the original SDK tool input
+  text: CodexSession.decide pops the one-use ID and answers the app-server request
 - link: chat_runtime
-  text: Resume the Claude runtime for the approved tool action
+  text: Send the accept or decline JSON-RPC response (a timeout or close also declines)
 - link: chat_write
-  text: Execute the exact approved edit in the chat worktree
+  text: On accept, the Codex app-server applies the change in its session cwd (the worktree); Strata does not path-scope approved commands
 - link: chat_write
   reverse: true
-  text: Return the filesystem result
+  text: Return the file result
 - link: chat_runtime
   reverse: true
-  text: Return the tool result
+  text: Stream the item result
 - link: chat_process
   reverse: true
-  text: Stream the result and updated session state
+  text: Record approval_decided and the result events
 - link: chat_decide
   reverse: true
-  text: Mark the approval ID consumed
+  text: Return whether the ID was still pending
 - link: chat_approval
   reverse: true
-  text: Return the action result
+  text: Return accepted
 - at: chat_panel
-  text: Show the edit result and a reviewable worktree diff
+  text: Show the result and refresh the worktree diff

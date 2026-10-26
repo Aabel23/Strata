@@ -1,28 +1,29 @@
 id: view_agent_runs
-name: View Kernel B1 agents below the main view (future)
+name: Follow chat sessions from the agent bar
 steps:
 - link: u_browse
   text: Open a Strata project
+- link: shell_cards
+  text: Render session cards from client-side chat state
 - at: agent_bar
-  text: Open the bottom agent bar
-- link: cards_read
-  text: Request the selected project's run cards
-- at: run_cards_api
-  text: Select a read-only projection for the project
-- link: cards_runs
-  text: Query the B1 run registry
-- at: runs
-  text: Read current and recent run rows
-- link: cards_db
-  text: Read run rows and usage
-- link: cards_db
+  text: Show session cards or the empty state; select one
+- link: shell_chat
+  text: Open the selected session in the chat panel
+- at: chat_panel
+  text: Show the replayed timeline and the pending approval, if any
+- link: chat_events
+  text: Poll GET /api/chat/events and /api/chat/diff for the session
+- link: chat_dispatch
+  text: Handler routes the authorized read to the chat API
+- at: chat_api
+  text: Validate IDs and the after cursor
+- link: chat_manage
+  text: Read events and diff status from ChatSupervisor
+- link: chat_manage
   reverse: true
-  text: Return current and recent runs
-- link: cards_runs
+  text: Return events and diff
+- link: chat_events
   reverse: true
-  text: Return state, task, role, timing and available usage
-- link: cards_read
-  reverse: true
-  text: Return card data
+  text: Return the JSON response
 - at: agent_bar
-  text: Show horizontal cards or an honest empty state
+  text: Update the card state from the new events
