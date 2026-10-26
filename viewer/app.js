@@ -407,7 +407,7 @@ function docReader(box,p,id,docs){
 }
 
 /* ---------- task board (read-only): status columns, task popup. Filters live in the hash query. ---------- */
-const COLS=["open","proposed","approved","doing","review"], FOLD=["done","rejected"], COLLBL={open:"To do"};
+const COLS=["proposed","approved","doing","review"], COLLBL={}, ARCHIVE=["open","done","rejected"], ARCHIVE_LABEL={open:"To do",done:"Done",rejected:"Rejected"};
 const PRI_TAG={p0:"P0",p1:"P1",p2:"P2",p3:"P3"};
 const BKIND=["task","step"];
 const DAY=864e5;
@@ -428,9 +428,23 @@ function itemCard(x,p,qs,sel,blockedBy){
   if(stale(x))row.append(tag("over 24h","stale","Claimed more than 24 hours ago"));
   a.append(m,el("span","t",x.title),row);return a;
 }
-function fold(label,items,mk){
-  const d=el("details","tfold");d.append(el("summary","",label+" · "+items.length));
-  const c=el("div","cards");items.forEach(x=>c.append(mk(x)));d.append(c);return d;
+function boardArchive(items,selectedStatus,statusFilter,mk){
+  const counts=Object.fromEntries(ARCHIVE.map(st=>[st,items.filter(x=>x.status===st).length]));
+  const total=ARCHIVE.reduce((n,st)=>n+counts[st],0);
+  const shouldReveal=ARCHIVE.includes(statusFilter)||ARCHIVE.includes(selectedStatus);
+  if(!total&&!shouldReveal)return null;
+  const d=el("details","tfold tfold-more"), summary=el("summary","",`More statuses · ${total}`);
+  summary.setAttribute("aria-label",`More statuses: To do ${counts.open}, Done ${counts.done}, Rejected ${counts.rejected}`);
+  d.append(summary);d.open=shouldReveal;
+  ARCHIVE.forEach(st=>{
+    const group=el("section","dsec board-archive-group"), h=el("h4");
+    h.append(statusIcon(st),`${ARCHIVE_LABEL[st]} · ${counts[st]}`);group.append(h);
+    const cards=el("div","cards"), rows=items.filter(x=>x.status===st);
+    if(rows.length)rows.forEach(x=>cards.append(mk(x)));
+    else cards.append(el("p","muted tnone","Empty"));
+    group.append(cards);d.append(group);
+  });
+  return d;
 }
 function chipRow(label,opts,cur,set){
   const r=el("div","tchips");r.append(el("span","lbl",label));
@@ -458,13 +472,14 @@ async function boardView(box,p,id){
   const act=[...Object.entries(f)].filter(([,v])=>v);
   if(act.length){const c=el("div","tactive");act.forEach(([k,v])=>{const b=el("button","chipx",k+": "+v+" ×");b.onclick=()=>go({[k]:""});c.append(b)});box.append(c)}
   const main=el("div","tmain"), board=el("div","tboard"), mk=x=>itemCard(x,p,qs,id);
+  board.style.gridTemplateColumns="repeat(4,minmax(150px,1fr))";
   COLS.forEach(st=>{
     const its=vis.filter(x=>x.status===st), col=el("section","tcol"), h=el("h3");
     h.append(statusIcon(st),(COLLBL[st]||st)+" · "+its.length);col.append(h);
     const c=el("div","cards");its.forEach(x=>c.append(mk(x)));if(!its.length)c.append(el("p","muted tnone","Empty"));col.append(c);board.append(col);
   });
-  const folds=el("div","tfolds");
-  FOLD.forEach(st=>{const its=vis.filter(x=>x.status===st);if(its.length){const d=fold(st,its,mk);if(its.some(x=>String(x.id)===String(id)))d.open=true;folds.append(d)}});
+  const folds=el("div","tfolds"), selectedItem=all.find(x=>String(x.id)===String(id));
+  const archive=boardArchive(vis,selectedItem&&selectedItem.status,f.status,mk);if(archive)folds.append(archive);
   const left=el("div","tleft");left.append(board);if(folds.children.length)left.append(folds);
   main.append(left);box.append(main);
   if(!all.length)box.prepend(empty("No work items yet","Add via CLI:","strata.py item add --project "+p+" --kind task --title ..."));
