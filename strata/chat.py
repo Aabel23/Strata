@@ -30,7 +30,7 @@ MAX_WORKTREE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_WORKTREE_TREE_BYTES = 16 * 1024 * 1024
 GIT_TIMEOUT = 30
 _PROJECT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
-_AUTH_HOSTS = {"auth.openai.com"}
+_AUTH_HOSTS = {"auth.openai.com", "chatgpt.com"}
 
 
 class ChatError(RuntimeError):
@@ -44,13 +44,15 @@ class ChatError(RuntimeError):
 
 
 def _safe_auth_url(value: Any) -> bool:
-    if not isinstance(value, str) or not value or len(value) > 4096 or value != value.strip():
+    if (not isinstance(value, str) or not value or len(value) > 4096
+            or any(char.isspace() or ord(char) < 0x20 or ord(char) == 0x7f for char in value)
+            or "#" in value):
         return False
     try:
         parsed = urlsplit(value)
         return (parsed.scheme == "https" and parsed.hostname in _AUTH_HOSTS
                 and parsed.username is None and parsed.password is None
-                and parsed.port in (None, 443) and not parsed.fragment)
+                and parsed.port in (None, 443) and not parsed.netloc.endswith(":"))
     except ValueError:
         return False
 

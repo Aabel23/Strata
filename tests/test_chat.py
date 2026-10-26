@@ -133,12 +133,29 @@ def test_login_url_is_validated_and_never_auto_opened(tmp_path):
     assert supervisor.cancel_login("project", started["session_id"], "login") is True
 
     session = supervisor._get("project", started["session_id"])["session"]
-    session.login = lambda: {"authUrl": "https://evil.example/oauth"}
-    with pytest.raises(ChatError, match="unsupported login URL"):
-        supervisor.login("project", started["session_id"])
-    session.login = lambda: {"authUrl": "https://user:pass@auth.openai.com/path"}
-    with pytest.raises(ChatError):
-        supervisor.login("project", started["session_id"])
+    for url in (
+        "https://chatgpt.com/oauth/authorize?client_id=test",
+        "https://auth.openai.com/oauth/authorize?client_id=test",
+        "https://chatgpt.com:443/oauth/authorize",
+    ):
+        session.login = lambda url=url: {"authUrl": url}
+        assert supervisor.login("project", started["session_id"])["url"] == url
+
+    for url in (
+        "https://evil.example/oauth",
+        "http://chatgpt.com/oauth",
+        "https://user:pass@auth.openai.com/path",
+        "https://chatgpt.com:444/oauth",
+        "https://chatgpt.com/oauth#fragment",
+        "https://chatgpt.com/#",
+        "https://chatgpt.com:/login",
+        "https://chatgpt.com/log\nin",
+        "https://chatgpt.com/oauth\n",
+        "https://chatgpt.com:bad/oauth",
+    ):
+        session.login = lambda url=url: {"authUrl": url}
+        with pytest.raises(ChatError, match="unsupported login URL"):
+            supervisor.login("project", started["session_id"])
 
 
 def test_login_events_filter_untrusted_urls(tmp_path):
@@ -147,9 +164,11 @@ def test_login_events_filter_untrusted_urls(tmp_path):
     session = supervisor._get("project", started["session_id"])["session"]
     session._events = [
         {"seq": 1, "type": "login_started", "data": {"authUrl": "https://evil.example/"}},
-        {"seq": 2, "type": "text_delta", "data": {"text": "ok"}},
+        {"seq": 2, "type": "login_started", "data": {"authUrl": "https://chatgpt.com/login"}},
+        {"seq": 3, "type": "login_status", "data": {"url": "https://auth.openai.com/login"}},
+        {"seq": 4, "type": "text_delta", "data": {"text": "ok"}},
     ]
-    assert [event["seq"] for event in supervisor.events("project", started["session_id"])] == [2]
+    assert [event["seq"] for event in supervisor.events("project", started["session_id"])] == [2, 3, 4]
 
 
 def test_closed_session_frees_live_slot_but_keeps_review_record(tmp_path):
