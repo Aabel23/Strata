@@ -258,6 +258,48 @@ def test_failed_start_keeps_discoverable_worktree_and_closes_agent(tmp_path):
     assert report["worktree"] == str(worktree)
 
 
+def test_login_required_retains_session_and_defers_thread_until_first_turn(tmp_path, monkeypatch):
+    from strata.chat import CodexSession
+
+    root = make_repo(tmp_path / "repo")
+    sessions = {}
+    monkeypatch.setattr(CodexSession, "auth_status", classmethod(
+        lambda cls, provider="codex", **kwargs: {"provider": provider, "status": "login_required"}))
+    def fake_init(self, cwd, provider="codex", model=None, **kwargs):
+        self.cwd, self.provider, self.model = pathlib.Path(cwd), provider, model
+        self.closed = False
+        self.calls = []
+        self.started = False
+        self._events = []
+        sessions["session"] = self
+    def fake_start(self):
+        self.started = True
+        self.calls.append(("start",))
+        return "thread-after-login"
+    def fake_login(self):
+        return {"authUrl": "https://auth.openai.com/oauth/authorize?client_id=test", "loginId": "login"}
+    def fake_turn(self, message):
+        if not self.started:
+            self.start()
+        self.calls.append(("turn", message))
+        return "turn-fake"
+    monkeypatch.setattr(CodexSession, "__init__", fake_init)
+    monkeypatch.setattr(CodexSession, "start", fake_start)
+    monkeypatch.setattr(CodexSession, "login", fake_login)
+    monkeypatch.setattr(CodexSession, "turn", fake_turn)
+    supervisor = ChatSupervisor({"project": root})
+    started = supervisor.start("project", root)
+    assert started["thread_id"] is None
+    assert pathlib.Path(started["worktree"]).is_dir()
+    session = sessions["session"]
+    assert not session.started
+
+    assert supervisor.login("project", started["session_id"])["url"].startswith("https://auth.openai.com/")
+    assert not session.closed
+    assert supervisor.turn("project", started["session_id"], "hello") == "turn-fake"
+    assert session.calls == [("start",), ("turn", "hello")]
+
+
 def test_registry_refresh_add_change_remove_invalidates_stale_sessions(tmp_path):
     root_a = make_repo(tmp_path / "repo-a")
     root_b = make_repo(tmp_path / "repo-b")

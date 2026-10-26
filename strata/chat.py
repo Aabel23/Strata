@@ -698,7 +698,12 @@ class ChatSupervisor:
                     raise ChatError("created worktree escaped its allowed parent")
                 session = self._session_factory(resolved, provider=provider, model=model)
                 record["session"] = session
-                thread_id = session.start()
+                auth = (CodexSession.auth_status(provider)
+                        if provider == "codex" and self._session_factory is CodexSession else None)
+                if isinstance(auth, dict) and auth.get("status") == "login_required":
+                    thread_id = None
+                else:
+                    thread_id = session.start()
                 record["closed"] = False
             except Exception as exc:
                 # Keep partial worktrees and an opaque lookup record. Close only
