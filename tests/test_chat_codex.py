@@ -6,7 +6,7 @@ import time
 import pytest
 
 from strata.chat_codex import (MAX_EVENT_BYTES, MAX_PENDING_APPROVALS, MAX_REPLAY_BYTES,
-                               CodexError, CodexSession, _child_env, _safe_url,
+                               CodexDeviceUnsupported, CodexError, CodexSession, _child_env, _safe_url,
                                _terminate_and_reap)
 
 
@@ -56,6 +56,21 @@ class FakeStdin:
         elif method == "turn/start": result = {"turn": {"id": "turn-1"}}
         elif method == "turn/interrupt": result = {}
         elif method == "account/read": result = {"account": {"type": "chatgpt"}, "requiresOpenaiAuth": False}
+        elif method == "account/login/start" and message["params"].get("type") == "chatgptDeviceCode":
+            if self.proc.protocol in {"old-device", "old-device-prefixed", "old-device-other-code", "device-other-error"}:
+                code, error_message = -32602, "unknown variant `chatgptDeviceCode`, expected `chatgpt`"
+                if self.proc.protocol == "old-device-prefixed":
+                    error_message = "Invalid request: unknown variant `chatgptDeviceCode`, expected one of `chatgpt`, `apiKey`"
+                if self.proc.protocol == "old-device-other-code": code = -32000
+                if self.proc.protocol == "device-other-error": error_message = "device endpoint unavailable"
+                self.proc.stdout.put({"jsonrpc": "2.0", "id": request_id, "error": {
+                    "code": code, "message": error_message}})
+                return len(raw)
+            result = {"type": "chatgptDeviceCode", "loginId": "login-2",
+                      "verificationUrl": "https://auth.openai.com/codex/device", "userCode": "ABCD-1234",
+                      "accessToken": "must-not-escape"}
+            if self.proc.device_result is not None:
+                result.update(self.proc.device_result)
         elif method == "account/login/start": result = {"type": "chatgpt", "loginId": "login-1", "authUrl": "https://auth.example.test/start"}
         elif method == "account/login/cancel": result = {"status": "canceled"}
         elif method in ("item/commandExecution/requestApproval", "item/fileChange/requestApproval"):
@@ -69,6 +84,7 @@ class FakeStdin:
 class FakeProc:
     def __init__(self, protocol="legacy"):
         self.protocol = protocol
+        self.device_result = None
         self.stdout = FakeStdout(); self.stdin = FakeStdin(self); self.terminated = False
         self.waited = False; self.killed = False
     def terminate(self):
@@ -294,6 +310,95 @@ def test_auth_status_is_readiness_only_and_login_url_is_supported(tmp_path):
     assert next(m for m in login_children[0][2].stdin.messages if m.get("method") == "account/login/start")["params"] == {"type": "chatgpt"}
     assert session.inference_status["inference_verified"] is False
     session.close()
+
+
+def test_device_login_returns_only_verification_fields_and_keeps_process_alive(tmp_path):
+    session, children = make_session(tmp_path)
+    result = session.login_device()
+    assert result == {"verificationUrl": "https://auth.openai.com/codex/device",
+                      "userCode": "ABCD-1234", "loginId": "login-2"}
+    child = children[0][2]
+    request = next(m for m in child.stdin.messages if m.get("method") == "account/login/start")
+    assert request["params"] == {"type": "chatgptDeviceCode"}
+    assert child.terminated is False
+    assert "must-not-escape" not in json.dumps(result)
+    assert "must-not-escape" not in json.dumps(session.events())
+    session.close()
+
+
+@pytest.mark.parametrize("protocol", ["old-device", "old-device-prefixed"])
+def test_device_login_reports_exact_unsupported_variant_with_typed_error(tmp_path, protocol):
+    children = []
+    session = CodexSession(tmp_path, popen=factory(children, protocol), rpc_timeout=1)
+    with pytest.raises(CodexDeviceUnsupported, match="device-code login is unavailable") as caught:
+        session.login_device()
+    assert "unknown variant" not in str(caught.value)
+    assert children[0][2].terminated is False
+    session.close()
+
+
+@pytest.mark.parametrize("protocol, message", [
+    ("old-device-other-code", "unknown variant"),
+    ("device-other-error", "device endpoint unavailable"),
+])
+def test_device_login_preserves_nonmatching_rpc_errors(tmp_path, protocol, message):
+    children = []
+    session = CodexSession(tmp_path, popen=factory(children, protocol), rpc_timeout=1)
+    with pytest.raises(CodexError, match=message) as caught:
+        session.login_device()
+    assert type(caught.value) is CodexError
+    session.close()
+
+
+@pytest.mark.parametrize("updates", [
+    {"type": "chatgpt"},
+    {"verificationUrl": "https://auth.openai.com/codex/device?next=https://evil.invalid"},
+    {"verificationUrl": "https://user@auth.openai.com/codex/device"},
+    {"verificationUrl": "https://auth.openai.com/other"},
+    {"loginId": "login\nforged"},
+    {"loginId": "x" * 129},
+    {"loginId": "bad/login"},
+])
+def test_device_login_rejects_noncanonical_response_fields(tmp_path, updates):
+    children = []
+    def popen(args, **kwargs):
+        child = FakeProc()
+        child.device_result = updates
+        children.append((args, kwargs, child))
+        return child
+    session = CodexSession(tmp_path, popen=popen, rpc_timeout=1)
+    with pytest.raises(CodexError, match="invalid device-code login response"):
+        session.login_device()
+    session.close()
+
+
+def test_server_selected_codex_binary_is_used_for_auth_and_sessions(tmp_path):
+    binary = tmp_path / "codex-desktop"
+    binary.write_text("#!/bin/sh\nexit 0\n")
+    binary.chmod(0o755)
+    environ = {"PATH": "/usr/bin:/bin", "STRATA_CODEX_BIN": str(binary)}
+
+    auth_children = []
+    status = CodexSession.auth_status(environ=environ, popen=factory(auth_children), rpc_timeout=1)
+    assert status["status"] == "account_present"
+    assert auth_children[0][0][0] == str(binary)
+    assert "STRATA_CODEX_BIN" not in auth_children[0][1]["env"]
+
+    session, children = make_session(tmp_path, environ=environ)
+    session.start()
+    assert children[0][0][0] == str(binary)
+    assert "STRATA_CODEX_BIN" not in children[0][1]["env"]
+    session.close()
+
+
+def test_invalid_server_selected_codex_binary_does_not_fall_back(tmp_path):
+    environ = {"PATH": "/usr/bin:/bin", "STRATA_CODEX_BIN": "codex"}
+    children = []
+    status = CodexSession.auth_status(environ=environ, popen=factory(children), rpc_timeout=1)
+    assert status["status"] == "unavailable"
+    assert children == []
+    with pytest.raises(CodexError, match="absolute executable"):
+        CodexSession(tmp_path, environ=environ).start()
 
 
 def test_provider_secrets_only_enter_child_environment(tmp_path):

@@ -9,6 +9,7 @@ import collections
 import json
 import os
 import pathlib
+import re
 import secrets
 import shutil
 import subprocess
@@ -60,6 +61,10 @@ class CodexError(RuntimeError):
     """Safe, user-facing failure from the local Codex adapter."""
 
 
+class CodexDeviceUnsupported(CodexError):
+    """The app-server explicitly rejected the device-code login variant."""
+
+
 def _safe_url(value: str) -> bool:
     """Permit HTTPS endpoints and loopback HTTP only for server-configured gateways."""
     from urllib.parse import urlsplit
@@ -97,6 +102,25 @@ def _child_env(provider: str, environ: dict[str, str] | None = None) -> dict[str
         # inference; shell_environment_policy filters it from tool subprocesses.
         env["OPENAI_API_KEY"] = key
     return env
+
+
+def _codex_executable(environ: dict[str, str]) -> str:
+    """Resolve the server-selected Codex CLI without forwarding its selector.
+
+    A configured path is deliberately required to be absolute and executable;
+    this lets the server choose the desktop-bundled CLI while making a typo
+    visible instead of silently falling back to a different CLI on PATH.
+    """
+    configured = environ.get("STRATA_CODEX_BIN")
+    if configured is not None:
+        if (not isinstance(configured, str) or not os.path.isabs(configured)
+                or not os.path.isfile(configured) or not os.access(configured, os.X_OK)):
+            raise CodexError("STRATA_CODEX_BIN must name an absolute executable")
+        return configured
+    executable = shutil.which("codex")
+    if not executable:
+        raise CodexError("Codex CLI is not installed or not on the server PATH")
+    return executable
 
 
 def _provider_args(provider: str, environ: dict[str, str]) -> list[str]:
@@ -217,7 +241,8 @@ class CodexSession:
         try:
             env_source = dict(os.environ if environ is None else environ)
             env = _child_env(provider, env_source)
-            args = ["codex", "app-server", "--listen", "stdio://", *_provider_args(provider, env_source)]
+            codex = _codex_executable(env_source)
+            args = [codex, "app-server", "--listen", "stdio://", *_provider_args(provider, env_source)]
             proc = popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                          text=True, bufsize=1, env=env)
             temp = cls.__new__(cls)
@@ -315,9 +340,7 @@ class CodexSession:
                 return
             if self._closed:
                 raise CodexError("session is closed")
-        codex = shutil.which("codex")
-        if not codex:
-            raise CodexError("Codex CLI is not installed or not on the server PATH")
+        codex = _codex_executable(self._env_source)
         args = [codex, "app-server", "--listen", "stdio://", *_provider_args(self.provider, self._env_source)]
         try:
             self._proc = self._popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -358,6 +381,31 @@ class CodexSession:
             return {k: result[k] for k in fields if isinstance(result, dict) and k in result}
         except CodexError as exc:
             raise CodexError("Codex login flow is unavailable in this CLI version") from exc
+
+    def login_device(self) -> dict[str, str]:
+        """Start Codex's device-code login and return only its public prompt.
+
+        The app-server process remains alive after this RPC so its own login
+        flow can poll for completion and write the local Codex credentials.
+        No tokens or raw RPC fields are returned to the caller.
+        """
+        with self._lifecycle:
+            if self.provider != "codex":
+                raise CodexError("login is available through the local Codex account only")
+            self._launch()
+            result = self._rpc("account/login/start", {"type": "chatgptDeviceCode"})
+
+            verification_url = result.get("verificationUrl")
+            user_code = result.get("userCode")
+            login_id = result.get("loginId")
+            if (result.get("type") != "chatgptDeviceCode"
+                    or verification_url != "https://auth.openai.com/codex/device"
+                    or not isinstance(user_code, str) or not 1 <= len(user_code) <= 64
+                    or not user_code.isascii() or not all(c.isalnum() or c in "- " for c in user_code)
+                    or not isinstance(login_id, str)
+                    or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", login_id) is None):
+                raise CodexError("Codex returned an invalid device-code login response")
+            return {"verificationUrl": verification_url, "userCode": user_code, "loginId": login_id}
 
     def cancel_login(self, login_id: str) -> bool:
         with self._lifecycle:
@@ -509,8 +557,16 @@ class CodexSession:
             self._response_bytes -= len(json.dumps(response, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
             self._waiters.discard(request_id)
         if "error" in response:
-            message = _redact_error(response["error"].get("message", "request failed"),
-                                    [self._env.get("OPENAI_API_KEY", "")])
+            error = response["error"]
+            raw_message = error.get("message", "request failed")
+            message = _redact_error(raw_message, [self._env.get("OPENAI_API_KEY", "")])
+            if (method == "account/login/start" and error.get("code") == -32602
+                    and isinstance(raw_message, str)
+                    and re.fullmatch(
+                        r"(?:Invalid request: )?unknown variant `chatgptDeviceCode`, expected .+",
+                        raw_message,
+                    )):
+                raise CodexDeviceUnsupported("Codex device-code login is unavailable in this CLI version")
             raise CodexError(message)
         result = response.get("result", {})
         return result if isinstance(result, dict) else {}
