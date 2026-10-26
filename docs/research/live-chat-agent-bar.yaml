@@ -1,75 +1,122 @@
 title: Viewer chat and agent bar design
-summary: Proposed four-pane viewer, write-capable Claude chat with per-action approval, and B1 run cards for task #304.
-code: [viewer/app.html, viewer/app.css, viewer/app.js, strata/server.py, docs/research/kernel-b1.yaml]
+summary: Implemented Codex app-server chat in the four-pane viewer (#312-#326) with ChatGPT, OpenRouter or OmniRoute routing, isolated worktrees and per-action approval; live authentication is not yet validated end to end.
+code: [viewer/app.html, viewer/app.css, viewer/app.js, strata/server.py, strata/chat.py, strata/chat_codex.py, docs/research/kernel-b1.yaml, docs/c4/flows/live_chat.yaml]
 blocks:
   - md: |
       ## Status and job
-      Design proposal for #304, revised after the owner required a write-capable chat. A user working in Board, Architecture, Code map, or Docs should be able to discuss and edit a project with Claude while seeing running ticket agents, without losing the main view. Kernel B1 and this chat are still future work.
+      Design record for #304, rewritten in #318 to match what shipped in #312-#326. The first proposal chose the Claude Agent SDK. The implementation is Codex-first: the server spawns the local `codex app-server` CLI over stdio and drives it with JSON-RPC. A user working in Board, Architecture, Code map or Docs can talk to a coding agent beside the main view, see every session in a bottom bar, and approve or deny each proposed command or file change.
 
-      The existing shell has a left project/section sidebar and one main content area. It already has a sidebar resize handle, a task-detail popup, flat cards, light/dark tokens, and a narrow-screen overlay pattern. The owner chose four blocks: left navigation, centre view, right resizable chat, and a resizable horizontal agent-card bar below the centre view.
+      The owner-approved layout is unchanged: left sidebar, centre view, right chat panel, bottom agent bar. Status: the code, the API and the unit tests exist. No test or run has exercised real sign-in or real inference, so authentication is a known gap (see the last section).
 
   - table:
-      head: [Block, Proposed behavior, Priority]
+      head: [Block, Behavior as built, Gap against the approved intent]
       rows:
-        - ["Centre view", "Board, Architecture, Code map, or Docs remains the primary workspace; task detail stays a popup", "Primary"]
-        - ["Right chat", "Resizable; streaming text and tool events; persistent composer, stop control, and exact approve/deny card for each proposed write", "Secondary"]
-        - ["Bottom agent bar", "Resizable height; horizontal B1 run cards showing state dot, role, task, elapsed time, and tokens only when reported", "Tertiary"]
-        - ["Left sidebar", "Existing projects and sections with the current resize/collapse behavior", "Navigation"]
+        - ["Left sidebar", "Existing projects and sections with resize and collapse (`viewer/app.js:706`)", "None"]
+        - ["Centre view", "Board, Architecture, Code map and Docs stay primary; task detail stays a popup", "None"]
+        - ["Right chat panel", "Toggled by the top-bar `AI` button; message composer, send, cancel, close, provider picker, auth state, approval card and diff/status view (`viewer/app.html:27-31`, `viewer/app.js:809-860`)", "Not resizable: only the sidebar has a splitter (`viewer/app.js:706`)"]
+        - ["Bottom agent bar", "One card per chat session with a live count and an empty state; collapsible (`viewer/app.html:81-87`, `viewer/app.js:776-791`, `viewer/app.css:498-499,549`)", "Fixed 38px / 210px height, not resizable. Cards show chat sessions, not Kernel B1 run cards"]
+      caption: Four-pane layout intent versus the shipped viewer.
 
   - md: |
-      ## Responsive behavior [proposal]
-      Keep the centre view usable. On a narrow viewport, chat becomes a full-height drawer opened from the top bar and agent cards become a bottom drawer. Splitters work by pointer and keyboard and announce their size. When B1 is unavailable, show an honest empty state.
+      ## Responsive behavior
+      On a narrow viewport the sidebar splitter is hidden and the shell collapses to one column (`viewer/app.css:218-219`). Keep the centre view usable; the chat panel and bar must not push it off screen.
 
-      Chat is an interactive, multi-turn session; B1 runs are one-ticket supervised subprocesses with a Gate. Chat does not change a B1 run, task status, or Gate result. Agent cards query B1 rows; an open chat is not a B1 run.
+      Two things stay separate. A chat session is an interactive multi-turn Codex thread. A Kernel B1 run is a one-ticket supervised subprocess with a Gate. Chat does not change a B1 run, a task status or a Gate result, and an open chat is not a B1 run. Showing B1 run cards in the bar remains future work and needs the B1 `usage` fields confirmed before any token totals appear.
 
   - diagram:
       dir: LR
-      caption: Proposed write and approval path. A chat session writes only in its own worktree; applying that diff is a separate owner action.
+      caption: Implemented write and approval path. A session writes only inside its own worktree; applying that diff is a separate owner action.
       nodes:
         - {id: browser, text: Viewer shell, tone: ui}
-        - {id: api, text: Guarded chat API}
-        - {id: host, text: Chat session host}
-        - {id: sdk, text: Claude Agent SDK}
-        - {id: worktree, text: Chat worktree, shape: store}
-        - {id: runs, text: B1 run records, shape: store}
-        - {id: cards, text: Agent-card read API}
+        - {id: api, text: "Guarded /api/chat routes", note: "strata/server.py"}
+        - {id: sup, text: ChatSupervisor, note: "strata/chat.py"}
+        - {id: sess, text: CodexSession, note: "strata/chat_codex.py"}
+        - {id: codex, text: "codex app-server", note: "stdio JSON-RPC child"}
+        - {id: worktree, text: "Chat worktree (detached HEAD)", shape: store}
+        - {id: model, text: "ChatGPT, OpenRouter or OmniRoute", tone: muted}
       edges:
-        - [browser, api, "messages, events, approve or deny"]
-        - [api, host, "session commands and decisions"]
-        - [host, sdk, "streaming input and canUseTool"]
-        - [sdk, worktree, "approved Edit or Write via scoped Claude runtime"]
-        - [browser, cards, "read cards"]
-        - [cards, runs, "query"]
+        - [browser, api, "POST ops, GET poll"]
+        - [api, sup, "registered root only"]
+        - [sup, worktree, "git worktree add + materialize HEAD"]
+        - [sup, sess, "cwd = worktree"]
+        - [sess, codex, "requests, approval answers"]
+        - [codex, sess, "notifications, approval requests"]
+        - [codex, worktree, "writes only after approval"]
+        - [codex, model, "inference"]
 
   - md: |
-      ## Integration choice [proposal]
-      Use the Python Claude Agent SDK for this chat and keep B1's approved CLI `runexec` design unchanged. The SDK's `ClaudeSDKClient` supports persistent multi-turn input, real-time output and a `can_use_tool` callback that pauses an approval-requiring action until the host returns allow or deny. The CLI can also stream JSON, but browser permission mediation would require a custom MCP prompt tool and another process bridge. The SDK adds a pinned Python package/runtime dependency; it is not installed in the current Strata venv.
+      ## Integration choice
+      The server launches `codex app-server --listen stdio://` as a child process with provider flags (`strata/chat_codex.py:276-300`). It sends `initialize` and an `initialized` notification, then `thread/start`, `turn/start` and the approval answers. The documented transport is newline-delimited JSON over stdio, and clients must send `initialize` then `initialized` before anything else.
 
-      Configure the chat SDK with `permission_mode="default"`, `setting_sources=[]`, no broad allow rules, and an explicit built-in tool set `Read`, `Glob`, `Grep`, `Edit`, and `Write`. Exclude Bash, MCP, browser/network tools and `AskUserQuestion` from the first version; that tool requires a separate question/answer UI and callback result. Read tools may be auto-approved inside the session worktree. For every Edit or Write, a `PreToolUse` hook first denies forbidden paths and symlink escapes, then returns `permissionDecision: "ask"` for a valid request so `can_use_tool` presents it to the browser even if another rule would allow it. The callback verifies the path again before returning allow for that exact input. No persistent "always allow" rule is offered. Managed policy can still deny actions; the pinned SDK version and effective permission order must be tested so no write can bypass the browser decision.
+      Why Codex rather than the earlier Claude Agent SDK choice: it uses the owner's own ChatGPT sign-in, it needs no new Python dependency (only the `codex` binary on the server PATH, checked with `shutil.which` at `strata/chat_codex.py:286`), and the app-server protocol already carries server-to-client approval requests, so no custom MCP permission bridge is needed. The cost is a dependency on an external CLI whose protocol can change; the code notes that Codex 0.114.0 ignores the `initialized` notification (`strata/chat_codex.py:302-303`).
 
-      Sources: [Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview), [streaming input](https://code.claude.com/docs/en/agent-sdk/streaming-vs-single-mode), [streaming output](https://code.claude.com/docs/en/agent-sdk/streaming-output), [approval callback](https://code.claude.com/docs/en/agent-sdk/user-input), [permission evaluation](https://code.claude.com/docs/en/agent-sdk/permissions), [SDK hooks](https://code.claude.com/docs/en/agent-sdk/hooks), [Python SDK reference](https://code.claude.com/docs/en/agent-sdk/python).
+      Sandbox and approvals. `thread/start` is sent with `approvalPolicy: "on-request"` and `sandbox: "read-only"` (`strata/chat_codex.py:259`). The comment there gives the reason: in read-only mode a write attempt surfaces as a server approval request, whereas `workspace-write` could let in-worktree writes skip the browser. Only `item/commandExecution/requestApproval` and `item/fileChange/requestApproval` are accepted (`strata/chat_codex.py:30-33`); any other server request is answered with an error, never auto-approved (`strata/chat_codex.py:542-548`). Wire spelling is unverified: the official app-server examples write these values in camelCase (`onRequest`, `unlessTrusted`, `readOnly`, `workspaceWrite`), while Strata sends the kebab-case strings `on-request` and `read-only`. Whether the pinned Codex version accepts that spelling has not been checked, and the approval boundary depends on it. Unlike the first proposal, command execution is allowed, but only through an approval card.
 
-  - md: |
-      ## Session and route contract [proposal]
-      On session start, the server resolves a registered project root and creates a dedicated `chat-<id>` worktree from its current HEAD. Existing uncommitted checkout changes are therefore absent from the new chat workspace. The browser cannot supply an arbitrary cwd. The server hosts one active turn per chat and gives each pending tool request a random, one-use approval ID bound to the exact tool name and input. The viewer displays the complete requested path/change and asks Allow or Deny; the decision request carries only the ID and choice. Allow returns the original input to the SDK, Deny returns a denial. A missing, stale, mismatched, timed-out or disconnected approval never executes. The server does not auto-commit, merge, submit a task, or delete the worktree. The first version exposes the worktree path and diff for review; the owner can ask the main chat to apply reviewed changes through the existing governed workflow. A viewer Apply control requires a later design.
-
-      Proposed routes: `POST /api/chat/sessions` to start, `POST /api/chat/sessions/{id}/messages` for one turn, authenticated `GET /api/chat/sessions/{id}/events?after=N` for replayable streamed events, `POST /api/chat/sessions/{id}/approvals/{approval_id}` for a one-use decision, and guarded cancel/close operations. Mutating requests inherit per-start token, Host, Origin, JSON body-cap and editing-enabled guards; the event GET also requires the token and project/session authorization. Use `fetch()` streaming because native EventSource cannot attach the token header. Bounded queues, output and idle timeouts prevent abandoned sessions from consuming unbounded resources.
-
-      The event stream carries text deltas, completed tool requests, approval-required events, tool results, usage and errors. Partial tool input is display-only until complete. On browser disconnect, the approval stays pending only until a bounded deadline and can be replayed to a reconnecting viewer; expiry denies it. Cancel or server shutdown denies pending approvals and stops the session. Do not retry a failed tool call automatically. Credentials and raw internal SDK logs are never sent to the browser; the authorized stream includes only that session's intended conversation and normalized events. Transcript retention and cleanup are explicit implementation decisions.
+      Sources: [Codex app-server](https://developers.openai.com/codex/app-server) (308 redirect to learn.chatgpt.com/docs/app-server), [Codex advanced configuration](https://developers.openai.com/codex/config-advanced) (308 redirect to learn.chatgpt.com/docs/config-file/config-advanced), [Codex CLI repository](https://github.com/openai/codex).
 
   - md: |
-      ## Authentication and write boundary
-      This design adds guarded chat lifecycle and approval routes as a future exception to `CLAUDE.md`'s current three-write-route rule. The owner must approve that exception before implementation. A worktree protects the active checkout from direct edits but is not an OS sandbox. The first tool set excludes Bash and other command execution; a broader tool set requires a separate sandbox/approval design. A later apply/merge step must detect conflicts and preserve the active checkout's uncommitted work.
+      ## Authentication and provider routing
+      Three providers are accepted by `POST /api/chat` and `GET /api/chat/auth`: `codex`, `openrouter` and `omniroute` (`strata/server.py:266-267,324-326`). The default is `codex`.
 
-      The official SDK quickstart uses an API key. Its overview says third-party products should not offer claude.ai login/rate limits without prior approval. The proposed first version requires a user-provided API key or supported enterprise provider configured on the server; it never sends credentials to the browser. If local CLI subscription login is required instead, the CLI plus MCP approval bridge must replace the SDK choice before implementation.
+      **Native ChatGPT login (`codex`).** Strata does not handle the user's ChatGPT credentials. `POST /api/chat` with `op: "login"` calls the app-server method `account/login/start` with `{"type": "chatgpt"}` and returns the sign-in URL and a login ID (`strata/chat_codex.py:315-328`). `cancel_login` calls `account/login/cancel`. The documented response carries `loginId` and `authUrl`. The server never opens the URL; the viewer shows an `Open OpenAI sign-in` link (`viewer/app.js:944-960`). The URL is accepted only if it is HTTPS on `auth.openai.com` with no credentials, port 443 and no fragment (`strata/chat.py:33,46-55`, mirrored at `viewer/app.js:929-931`). The code comment says the Codex browser flow redirects to a localhost callback on the Strata server, so a remote viewer may need a tunnel (`strata/chat.py:781-786`).
+
+      **OpenRouter and OmniRoute.** Both are reached as custom Codex model providers with `wire_api="responses"`, a base URL, and the key placed in `OPENAI_API_KEY` of the child only (`strata/chat_codex.py:34-37,58-116`). Defaults: `https://openrouter.ai/api/v1` and `http://127.0.0.1:20128/v1`. OpenRouter documents a drop-in Responses endpoint with Bearer authentication, but it is stateless: requests with `store: true` or a non-null `previous_response_id` are rejected. OmniRoute documents an OpenAI-compatible `/v1` gateway on port 20128 with a Bearer key; its page confirms Chat Completions with a curl example but its README claims Responses compatibility at `/v1` without showing any `/v1/responses` call, so that path is untested.
+
+      **Keys stay on the server.** Keys come only from `STRATA_OPENROUTER_API_KEY` / `STRATA_OMNIROUTE_API_KEY`; base URLs from `STRATA_*_BASE_URL`. The browser can pick only the provider name and a model matching `[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}` (`strata/server.py:268-271`). A base URL must be HTTPS or loopback HTTP, with no userinfo, query or fragment (`strata/chat_codex.py:44-55`). The child environment is an allowlist (`strata/chat_codex.py:58-80`). Codex tool subprocesses get a second filter: `shell_environment_policy` with `inherit="core"`, `ignore_default_excludes=false`, an `include_only` allowlist and an `exclude` list (both arrays are legacy but still supported per the config page) covering `OPENAI_API_KEY`, `STRATA_*`, `*KEY*`, `*TOKEN*`, `*SECRET*` and similar (`strata/chat_codex.py:83-100`). Event payloads drop `token`, `apiKey`, `authorization` and the literal key value (`strata/chat_codex.py:682-692`). Git subprocesses use their own small environment (`strata/chat.py:58-69`).
+
+      Sources: [Codex app-server accounts and login](https://developers.openai.com/codex/app-server), [Codex advanced configuration](https://developers.openai.com/codex/config-advanced), [OpenRouter Responses API](https://openrouter.ai/docs/api-reference/responses/overview), [OmniRoute](https://github.com/diegosouzapw/OmniRoute).
+
+  - md: |
+      ## Worktree and approval boundary
+      On `start` the server takes the project root from the DB registry; the request body may contain only `op`, `project`, `provider` and `model`, so the browser cannot supply a path (`strata/server.py:259-273`). The supervisor then:
+      - runs `git worktree add --detach --no-checkout` into `<project parent>/.strata-worktrees/<project>/chat-<id>`, with hooks disabled and symlinked base directories refused (`strata/chat.py:657-700`);
+      - runs `git read-tree HEAD` and writes the files from Git blobs itself, with no filters or hooks, refusing absolute or escaping symlinks and `..` paths, with per-file and total size caps of 128 MB and 2 GB (`strata/chat.py:28-29,177-248`);
+      - starts Codex with that worktree as `cwd` (`strata/chat.py:696-699`).
+      Uncommitted changes in the main checkout are therefore absent from the chat workspace. At most 4 sessions are live (`strata/chat.py:23`).
+
+      Approvals. Each approval request is reduced to an allowlisted, size-bounded DTO (`strata/chat_codex.py:569-605`) and given a random one-use ID. The pending set is capped at 64; each approval expires after 300 seconds and expiry means decline (`strata/chat_codex.py:24,29,623-628`). `decide` pops the ID, so a repeated, unknown or stale ID returns false and nothing executes; the answer sent to Codex is `accept` or `decline` only, a deliberate subset of the official `accept`, `acceptForSession`, `decline` and `cancel` (`strata/chat_codex.py:396-407,607-608`). The viewer shows the request details and Allow or Deny (`viewer/app.js:845-853`). No "always allow" choice is offered. Cancel interrupts the turn and declines pending approvals; server shutdown closes all sessions (`strata/chat.py:837-849`).
+
+      The server does not commit, merge, apply or delete the worktree. `GET /api/chat/diff` returns a bounded status and a diff built without running Git filters, external diff or hooks (`strata/chat.py:311-390,806-829`). After close the worktree remains for review, and a failed start keeps a partial worktree and reports its path (`strata/chat.py:703-722`). The owner applies reviewed changes through the existing governed workflow; a viewer Apply control still needs its own design.
+
+      A worktree is not an OS sandbox. Codex's own `read-only` sandbox plus the approval gate is the boundary for commands; an approved command still runs with the server user's permissions inside Codex's sandbox rules. This is weaker than the earlier proposal that excluded command execution, and approval cards must show the full command and `cwd`.
+
+  - table:
+      head: [Operation, Request, Result, Guards]
+      rows:
+        - ["Start", "POST /api/chat {op:start, project, provider?, model?}", "{ok, project, session_id, thread_id, worktree}", "Registered project only; provider and model validated; 404 if unregistered"]
+        - ["Turn", "POST {op:turn, project, session_id, message}", "{ok, turn_id}", "Non-empty text up to 100000 characters; one active turn per session"]
+        - ["Decide", "POST {op:decide, project, session_id, approval_id, allow:boolean}", "{ok, accepted}", "One-use ID; false if missing, stale or expired"]
+        - ["Cancel / Close", "POST {op:cancel|close, project, session_id}", "{ok, cancelled|closed}", "Exact field set"]
+        - ["Login / Cancel login", "POST {op:login|cancel_login, project, session_id[, login_id]}", "{ok, url, login_id?} / {ok, cancelled}", "codex provider only; URL allowlist"]
+        - ["Events", "GET /api/chat/events?project&session_id&after=N", "{events:[{seq,type,data,time}]}", "Token header; replay buffer"]
+        - ["Auth status", "GET /api/chat/auth?provider=", "{provider, account_present, configured, inference_verified, status}", "Token header; readiness only"]
+        - ["Diff", "GET /api/chat/diff?project&session_id", "{status, diff, *_truncated, worktree, closed, startup_error}", "Token header; size limits"]
+      caption: HTTP API contract (`strata/server.py:34-37,173-203,252-345`).
+
+  - md: |
+      ## API contract notes
+      All POSTs go to the single path `/api/chat`; the operation is in the body. They share the existing write guards: loopback-allowed Host, editing enabled, `X-Strata-Token` compared in constant time, `X-Strata-Edit: 1`, Origin (when present, it must equal `http://<Host>`; a missing Origin passes, `strata/server.py:181`), `application/json`, a 64 KiB body cap, and no query string (`strata/server.py:38,173-192`). The three GET paths require the token and a strict query allowlist. Errors are generic: 400 invalid, 404 unregistered project, 409 chat failure, 503 unexpected (`strata/server.py:304-310`). A project or session ID is checked by regex, and a session is found only with its matching project ID.
+
+      The first proposal used replayable streaming with `fetch()`. The shipped design polls instead: the viewer calls the events GET every 1200 ms with `after=<last seq>` (`viewer/app.js:888-915,1046`). The session keeps a bounded replay buffer of at most 2000 events and 4 MiB, each event at most 64 KiB, and oversized events become `event_truncated` (`strata/chat_codex.py:20-23,665-680`). Event types include `session_started`, `turn_started`, `text_delta`, `item_started`, `item_completed`, `tool_completed`, `tool_output`, `reasoning_delta`, `approval_required`, `approval_decided`, `approval_expired`, `login_started`, `login_status`, `turn_completed` and `error` (`strata/chat_codex.py:630-662`). Login events are dropped from the feed if their URL fails the allowlist (`strata/chat.py:745-760`). The viewer keeps session references in `sessionStorage` and shows an error when earlier events were evicted (`viewer/app.js:729-757,904`).
+
+      `CLAUDE.md` still lists three write-route exceptions and says no other POST route exists. `POST /api/chat` is a fourth; that rule needs the owner's recorded exception update, which this doc does not make.
 
   - question:
-      q: "Approve the first write-capable chat design?"
+      q: "Which authentication path should the first real-world validation use?"
       options:
-        - {label: "SDK with isolated edits", note: "per-action browser approval; writes stay in a chat worktree until separately applied; server-side API key/provider"}
-        - {label: "CLI with approval bridge", note: "reuse local Claude CLI auth, but design and maintain a custom MCP permission server"}
-      recommend: "SDK with isolated edits"
+        - {label: "Native ChatGPT login", note: "no key to manage; needs the localhost callback and a signed-in Codex account on the server host"}
+        - {label: "OpenRouter or OmniRoute key", note: "server-side key and Responses endpoint; OmniRoute Responses support unverified"}
+      recommend: "Native ChatGPT login"
 
   - md: |
-      ## Implementation checks before tickets
-      Pin and exercise a Python SDK version newer than 0.1.59, including `setting_sources=[]`, streaming, `PreToolUse` ask/deny behavior, approval callback, path recheck, session stop/restart and provider authentication. Verify writes cannot skip the callback under effective managed settings. Specify transcript retention and explicit worktree cleanup. Confirm B1 `usage` fields before showing token totals. Cross-host chat sessions, attachments, transcript search, Bash execution, and automatic diff application are outside this first slice.
+      ## Known gap: live authentication is not validated end to end
+      Treat the chat as unproven against real services.
+      - `auth_status` only reads local state through `account/read` and always reports `inference_verified: false` (`strata/chat_codex.py:193-224`). `configured` means an account is present or the gateway has a key and URL, not that inference works. A session's own `inference_status` flips to verified only after a turn completes with status `completed` (`strata/chat_codex.py:647,694-698`).
+      - The unit tests use fake app-server children (`tests/test_chat_codex.py`, for example the login test at line 227). They do not call ChatGPT, OpenRouter or OmniRoute.
+      - Possible mismatch to test first: the official docs show an `authUrl` beginning `https://chatgpt.com/...`, while Strata accepts only `auth.openai.com` in both server and viewer (`strata/chat.py:33`, `viewer/app.js:929-931`). A real login URL on another host would be rejected as unsupported.
+      - The remote-viewer callback needs a tunnel (see above) and has not been tried.
+      - OpenRouter rejects `store: true` and `previous_response_id`; whether Codex's Responses requests through the custom provider satisfy that is untested. OmniRoute `/v1/responses` is unconfirmed.
+      - The viewer labels a configured gateway "inference not yet verified" but labels a present account "Codex account connected" (`viewer/app.js:938-939`), which can read as working before any turn has run.
+
+      ## Implementation checks before calling this done
+      Run a real sign-in with a pinned Codex version, confirm it accepts the `on-request` / `read-only` spelling (and that a write really raises an approval request instead of running), one turn per provider, one approved and one denied file change, cancel mid-turn, expiry, server restart and worktree cleanup. Decide transcript retention and explicit worktree cleanup (none exists today; worktrees persist). Add pointer and keyboard splitters for the chat panel and bar if the approved resizable intent still stands. Outside this slice: cross-host sessions, attachments, transcript search, automatic diff application and B1 run cards.
