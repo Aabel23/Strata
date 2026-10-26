@@ -2,6 +2,10 @@ project:
   id: strata
   name: strata
   root: ../..
+# Coverage exceptions: tests/, sandbox/, design/, scripts/ and viewer/vendor/ are
+# tests, examples/prototypes, standalone utilities or third-party code. The
+# empty strata/__init__.py is only a package marker; viewer/workspace.html is
+# an unreferenced standalone mockup and needs a design decision before mapping.
 objects:
 - id: agent
   kind: actor
@@ -27,40 +31,30 @@ objects:
   name: Connection side panel
   summary: 'DESIGN; kind=connections. Edits existing connection fields: from, to, name, kind, technology, interface, status, description.'
   status: future
-  owns:
-  - viewer/index.html
 - id: c4_drc
   parent: viewer
   kind: component
   name: Map rules and DRC
   summary: DESIGN; kind=rules. Validates references, typed endpoints, required connection fields, and model consistency before a proposed write.
   status: future
-  owns:
-  - strata/c4.py
 - id: c4_editor
   parent: viewer
   kind: component
   name: C4 map editor
   summary: DESIGN; kind=editor. Proposed UI only; existing viewer remains read-only until the guarded write path is implemented.
   status: future
-  owns:
-  - viewer/index.html
 - id: c4_health
   parent: viewer
   kind: component
   name: Map health
   summary: DESIGN; kind=health. Summarizes completeness, stale links, and DRC findings for the selected map.
   status: future
-  owns:
-  - strata/c4.py
 - id: c4_library
   parent: viewer
   kind: component
   name: Reusable block library
   summary: DESIGN; kind=block-library. Offers hand-drawn reusable key blocks and on-demand L4 blocks generated from repository files.
   status: future
-  owns:
-  - viewer/index.html
 - id: c4_lvs
   parent: viewer
   kind: component
@@ -68,8 +62,6 @@ objects:
   summary: DESIGN; kind=lvs. Compares declared map structure and links with repository-derived structure; reports differences without changing
     the model.
   status: future
-  owns:
-  - strata/c4.py
 - id: c4_ports
   parent: viewer
   kind: component
@@ -77,16 +69,12 @@ objects:
   summary: DESIGN; kind=ports. Suggests valid connection endpoints from existing C4 object types plus a planned kind subtype; does not add a new
     C4 type.
   status: future
-  owns:
-  - viewer/index.html
 - id: c4_prompt
   parent: viewer
   kind: component
   name: Prompt rendering
   summary: DESIGN; kind=prompt. Renders selected DB-backed C4 context into copyable agent prompt text.
   status: future
-  owns:
-  - strata/context.py
 - id: c4_write_api
   parent: server
   kind: component
@@ -94,8 +82,6 @@ objects:
   summary: DESIGN; kind=write-api. Proposed authenticated/authorized mutation route for editor changes; no POST C4 API currently exists and current
     server is GET-only.
   status: future
-  owns:
-  - strata/server.py
 - id: c4_write_service
   parent: cli
   kind: component
@@ -103,23 +89,22 @@ objects:
   summary: DESIGN; kind=write-service. Proposed permission-checked, validated transactional SQLite write path with an audit entry; YAML is exported
     from the DB source of truth. Not implemented.
   status: future
-  owns:
-  - strata/service.py
 - id: c4_yaml
   parent: viewer
   kind: component
   name: Structured YAML export
   summary: DESIGN; kind=export. Exports the current DB source of truth to the existing C4 YAML model format; import remains through the CLI.
   status: future
-  owns:
-  - strata/c4.py
 - id: c4mod
   parent: cli
   kind: component
   name: c4
   summary: C4 model - import, validate, context, flow
   owns:
-  - strata/c4.py
+  - strata/c4_layered.py
+  - strata/c4_edit.py
+  - strata/c4_drift.py
+  - strata/symbols.py
 - id: c4view
   parent: viewer
   kind: component
@@ -131,10 +116,11 @@ objects:
   parent: strata
   kind: app
   name: Claude Code hooks
-  summary: 'DESIGN: Claude Code PreToolUse hooks enforce role boundaries: subagents do not use the CLI path, the main chat does not edit code'
-  status: future
+  summary: 'Hook sources under agent/hooks/: the private-memory guard is registered in Claude user settings; scope_guard.py is implemented but still requires separate host PreToolUse registration and a coordinator task contract to activate. These hooks provide accident prevention, not a security boundary.'
+  tech: Python 3, Claude Code PreToolUse
   owns:
-  - agent/hooks
+  - agent/hooks/scope_guard.py
+  - agent/hooks/block_secondbrain_creative_agents.py
 - id: cli
   parent: strata
   kind: app
@@ -142,8 +128,6 @@ objects:
   summary: The only write path; every change leaves an audit entry
   tags:
   - write
-  owns:
-  - strata.py
 - id: ctxmod
   parent: cli
   kind: component
@@ -171,16 +155,12 @@ objects:
   name: block_subagent_strata_cli
   summary: 'DESIGN: file agent/hooks/block_subagent_strata_cli.py; blocks subagents from running strata.py write commands via Bash'
   status: future
-  owns:
-  - agent/hooks
 - id: hk_edit
   parent: cc_hooks
   kind: component
   name: block_main_code_edit
   summary: 'DESIGN: file agent/hooks/block_main_code_edit.py; blocks the main chat from editing code files, code work is delegated to the coder'
   status: future
-  owns:
-  - agent/hooks
 - id: item_report
   parent: strata
   kind: store
@@ -188,25 +168,19 @@ objects:
   summary: 'DESIGN: worker report table, lives in SQLite (a store cannot be nested so it is placed alongside sqlite); columns item, state (checkpoint|needs_input|stuck|done),
     note, artifacts, actor role, time; item also has branch, worktree columns (workspace at claim)'
   status: future
-  owns:
-  - strata/schema.sql
 - id: mcp
   parent: strata
   kind: app
   name: MCP server
-  summary: 'DESIGN: strata.py mcp --role R; the role is fixed at startup, each role has its own MCP config entry, and the agent cannot change
-    its role'
-  status: future
+  summary: 'Live stdio JSON-RPC server launched by strata.py mcp --role R; the role is fixed at startup and client tool arguments cannot change it.'
+  tech: Python 3, MCP over JSON-RPC stdio
   tags:
   - write
-  owns:
-  - strata/mcp.py
 - id: mcp_tools
   parent: mcp
   kind: component
   name: tools
-  summary: 'DESIGN: tool wrappers that call service'
-  status: future
+  summary: 'Live role-filtered MCP tool registry and JSON-RPC dispatch; write tools call the audited service layer.'
   owns:
   - strata/mcp.py
 - id: repo
@@ -218,14 +192,11 @@ objects:
   kind: app
   name: Server
   summary: Serves GET (incl. /api/codemap and the /codemap/ static renderer); three guarded write routes (c4 edit, item, project) need a per-start token plus Origin/Host checks; blocks unknown Host and traversal
-  owns:
-  - strata/server.py
 - id: service
   parent: cli
   kind: component
   name: service
-  summary: 'DESIGN: add_item, set_item, add_decision, set_decision_status, search; every function takes a role'
-  status: future
+  summary: 'Live shared CLI/MCP service layer for project and item operations, role checks, audit, search and code map setup; planned report and attention functions remain future.'
   owns:
   - strata/service.py
 - id: shell
@@ -235,6 +206,11 @@ objects:
   summary: Project sidebar, tabs, Ctrl+K
   owns:
   - viewer/app.js
+  - viewer/app.css
+  - viewer/page.html
+  - viewer/page.js
+  - viewer/page.css
+  - viewer/swimlane.js
 - id: sqlite
   parent: strata
   kind: store
@@ -257,7 +233,6 @@ objects:
   summary: Multi-project app shell, a zoomable C4 map and a Code map tab (iframe of /codemap/)
   owns:
   - viewer/app.html
-  - viewer/index.html
 - id: gitnexus
   parent: strata
   kind: app
@@ -348,12 +323,13 @@ objects:
   summary: 'ChatSupervisor: up to 4 live Codex sessions, each in its own detached Git worktree (blobs materialized from HEAD, symlink and size guards); routes turn/decide/cancel/close/login and builds a bounded review diff.'
   owns:
   - strata/chat.py
-  - strata/chat_codex.py
 - id: chat_codex
   parent: server
   kind: component
   name: Codex app-server adapter
   summary: 'strata/chat_codex.py. CodexSession: spawns `codex app-server --listen stdio://`, speaks JSON-RPC, sandbox read-only with approvalPolicy on-request; turns command/file-change approval requests into one-use approval IDs (24 bytes, timeout, deny on expiry/close); filtered child env, replay buffer.'
+  owns:
+  - strata/chat_codex.py
 - id: chat_worktree
   kind: system
   name: Chat worktree
