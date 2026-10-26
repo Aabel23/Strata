@@ -44,7 +44,7 @@ GitNexus is licensed under PolyForm Noncommercial 1.0.0 (noncommercial use only)
 
 ## AI chat
 
-The viewer includes an AI coding agent panel (the **AI** button in the top bar; the panel is titled **AI chat**). It runs the local [Codex CLI](https://github.com/openai/codex) as `codex app-server` on the machine that runs `strata serve`; your browser only talks to Strata. Claude is not supported. A Claude SDK or API-key route was researched but not shipped.
+The viewer includes an AI coding agent panel (the **Chat** button in the top bar; the panel is titled **AI chat**). It runs the local [Codex CLI](https://github.com/openai/codex) as `codex app-server` on the machine that runs `strata serve`; your browser only talks to Strata. Claude is not supported. A Claude SDK or API-key route was researched but not shipped.
 
 **Setup**
 
