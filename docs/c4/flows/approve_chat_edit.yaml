@@ -10,7 +10,7 @@ steps:
 - link: chat_dispatch
   text: Handler routes the authorized request to the chat API
 - at: chat_api
-  text: Verify token, project and session IDs, and the boolean decision
+  text: Require editing enabled, X-Strata-Token and X-Strata-Edit 1; check Origin/Host, project and session IDs, and the boolean decision
 - link: chat_decide
   text: Resolve this exact pending approval
 - link: chat_process

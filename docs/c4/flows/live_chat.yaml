@@ -10,7 +10,7 @@ steps:
 - link: chat_dispatch
   text: Handler routes the authorized request to the chat API
 - at: chat_api
-  text: Check token, Origin/Host, project and session IDs; roots come from the DB registry
+  text: Require editing enabled, X-Strata-Token and X-Strata-Edit 1; check Origin/Host, project and session IDs; roots come from the DB registry
 - link: chat_manage
   text: Start the session in ChatSupervisor
 - link: chat_scope_repo

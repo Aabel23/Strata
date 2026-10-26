@@ -315,7 +315,7 @@ objects:
   parent: server
   kind: component
   name: Chat API
-  summary: 'strata/server.py: POST /api/chat (ops start, turn, decide, cancel, close, login, cancel_login) and GET /api/chat/events, /auth, /diff; per-start token on POST and GET, Origin check on POST, Host check on all requests, project and session ID regexes, projects only from the DB registry.'
+  summary: 'strata/server.py: POST /api/chat (ops start, turn, decide, cancel, close, login, cancel_login) requires editing enabled, per-start X-Strata-Token and X-Strata-Edit 1, Origin/Host checks; GET /api/chat/events, /auth, /diff require token and Host check; project and session ID regexes, projects only from the DB registry.'
 - id: chat_sessions
   parent: server
   kind: component
