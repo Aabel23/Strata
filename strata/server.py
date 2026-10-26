@@ -254,6 +254,8 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             try:
                 refresh_chat_projects()
                 operation = op.get("op")
+                if operation == "login" and set(op) == {"op"}:
+                    return self.json({"ok": True, **chat_supervisor.login_global()})
                 project_id = op.get("project")
                 if not isinstance(project_id, str) or not CHAT_PROJECT_ID.fullmatch(project_id):
                     raise ValueError("invalid project")

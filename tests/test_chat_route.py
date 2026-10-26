@@ -56,6 +56,10 @@ class FakeChatSupervisor:
         self.calls.append(("login", project, session_id))
         return {"url": "https://auth.openai.com/oauth/authorize?client_id=x", "login_id": "login-1"}
 
+    def login_global(self):
+        self.calls.append(("login_global",))
+        return {"verification_url": "https://auth.openai.com/codex/device", "user_code": "ABCD-1234", "login_id": "login-2"}
+
     def cancel_login(self, project, session_id, login_id):
         self._bound(project, session_id)
         self.calls.append(("cancel_login", project, session_id, login_id))
@@ -195,6 +199,29 @@ def test_chat_operations_events_auth_diff_and_no_store(chat_server):
     assert "diff --git" in decoded(diff)["diff"] and diff[1]["Cache-Control"] == "no-store"
     login = next(call for call in supervisor.calls if call[0] == "login")
     assert login[1:] == ("p", "session-1")
+
+
+def test_project_independent_login_requires_exact_op_field_and_uses_global_supervisor(chat_server):
+    base, token, _, supervisor, *_ = chat_server
+    response = post(base, token, {"op": "login"})
+    assert response[0] == 200
+    assert decoded(response) == {
+        "ok": True,
+        "verification_url": "https://auth.openai.com/codex/device",
+        "user_code": "ABCD-1234",
+        "login_id": "login-2",
+    }
+    assert supervisor.calls == [("login_global",)]
+
+    for body in (
+        {"op": "login", "project": "p"},
+        {"op": "login", "session_id": "session-1"},
+        {"op": "login", "unexpected": True},
+    ):
+        invalid = post(base, token, body)
+        assert invalid[0] == 400
+        assert decoded(invalid) == {"error": "invalid chat request"}
+    assert supervisor.calls == [("login_global",)]
 
 
 def test_chat_project_registry_refreshes_from_database_each_operation(chat_server):
