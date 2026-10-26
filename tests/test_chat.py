@@ -7,6 +7,7 @@ import pytest
 
 from strata.chat import (MAX_DIFF_BYTES, MAX_STATUS_BYTES, ChatError,
                          ChatSupervisor)
+from strata.chat_codex import CodexDeviceUnsupported
 
 
 def git(root, *args):
@@ -39,6 +40,7 @@ class FakeSession:
     def cancel(self): self.calls.append(("cancel",)); return True
     def close(self): self.closed = True
     def login(self): return {"authUrl": "https://auth.openai.com/oauth/authorize?client_id=test", "loginId": "login"}
+    def login_device(self): return {"verificationUrl": "https://auth.openai.com/codex/device", "userCode": "ABCD-EFGH", "loginId": "device-login"}
     def cancel_login(self, login_id): return login_id == "login"
 
 
@@ -163,10 +165,10 @@ def test_global_login_needs_no_project_worktree_and_restarts_attempts(tmp_path):
     def factory(cwd, **kwargs):
         attempt = len(made) + 1
         class LoginSession(FakeSession):
-            def login(self):
-                self.calls.append(("login",))
-                return {"authUrl": f"https://auth.openai.com/oauth/authorize?attempt={attempt}",
-                        "loginId": f"login-{attempt}"}
+            def login_device(self):
+                self.calls.append(("login_device",))
+                return {"verificationUrl": "https://auth.openai.com/codex/device",
+                        "userCode": f"CODE-{attempt}", "loginId": f"device-{attempt}"}
             def cancel_login(self, login_id):
                 self.calls.append(("cancel_login", login_id))
                 return True
@@ -177,13 +179,15 @@ def test_global_login_needs_no_project_worktree_and_restarts_attempts(tmp_path):
 
     first = supervisor.login_global()
     second = supervisor.login_global()
-    assert first == {"url": "https://auth.openai.com/oauth/authorize?attempt=1", "login_id": "login-1"}
-    assert second == {"url": "https://auth.openai.com/oauth/authorize?attempt=2", "login_id": "login-2"}
+    assert first == {"mode": "device", "verification_url": "https://auth.openai.com/codex/device",
+                     "user_code": "CODE-1", "login_id": "device-1"}
+    assert second == {"mode": "device", "verification_url": "https://auth.openai.com/codex/device",
+                      "user_code": "CODE-2", "login_id": "device-2"}
     assert len(made) == 2
     assert made[0].cwd == pathlib.Path.cwd()
-    assert made[0].calls == [("login",), ("cancel_login", "login-1")]
+    assert made[0].calls == [("login_device",), ("cancel_login", "device-1")]
     assert made[0].closed
-    assert made[1].calls == [("login",)]  # no coding-thread start or turn
+    assert made[1].calls == [("login_device",)]  # no coding-thread start or turn
     supervisor.shutdown()
     assert made[1].closed
 
@@ -191,20 +195,69 @@ def test_global_login_needs_no_project_worktree_and_restarts_attempts(tmp_path):
 def test_global_login_failure_closes_session_and_allows_retry():
     made = []
     class InvalidLoginSession(FakeSession):
-        def login(self): return {"authUrl": "https://evil.example/", "loginId": "bad"}
+        def login_device(self):
+            return {"verificationUrl": "https://evil.example/", "userCode": "ABCD", "loginId": "bad"}
     def factory(cwd, **kwargs):
         session = InvalidLoginSession(cwd, **kwargs)
         made.append(session)
         return session
     supervisor = ChatSupervisor({}, session_factory=factory)
 
-    with pytest.raises(ChatError, match="unsupported login URL"):
+    with pytest.raises(ChatError, match="invalid device-code"):
         supervisor.login_global()
     assert made[0].closed
     supervisor._session_factory = lambda cwd, **kwargs: FakeSession(cwd, **kwargs)
-    assert supervisor.login_global()["url"].startswith("https://auth.openai.com/")
+    assert supervisor.login_global()["mode"] == "device"
     supervisor.shutdown()
 
+
+
+def test_global_login_falls_back_only_when_device_flow_is_unsupported():
+    made = []
+    class BrowserOnlySession(FakeSession):
+        def login_device(self):
+            self.calls.append(("login_device",))
+            raise CodexDeviceUnsupported("unsupported")
+        def login(self):
+            self.calls.append(("login",))
+            return {"authUrl": "https://auth.openai.com/oauth/authorize?client_id=test",
+                    "loginId": "browser-login"}
+    def factory(cwd, **kwargs):
+        session = BrowserOnlySession(cwd, **kwargs); made.append(session); return session
+    supervisor = ChatSupervisor({}, session_factory=factory)
+
+    assert supervisor.login_global() == {
+        "mode": "browser", "url": "https://auth.openai.com/oauth/authorize?client_id=test",
+        "login_id": "browser-login"}
+    assert made[0].calls == [("login_device",), ("login",)]
+    supervisor.shutdown()
+    assert made[0].closed
+
+
+def test_global_device_login_rejects_invalid_codes_and_ids():
+    for response in (
+        {"verificationUrl": "https://evil.example/codex/device", "userCode": "ABCD", "loginId": "id"},
+        {"verificationUrl": "https://auth.openai.com/codex/device", "userCode": "bad\ncode", "loginId": "id"},
+        {"verificationUrl": "https://auth.openai.com/codex/device", "userCode": "ABCD", "loginId": "bad id"},
+    ):
+        class InvalidDeviceSession(FakeSession):
+            def login_device(self): return response
+        session = InvalidDeviceSession(pathlib.Path.cwd())
+        supervisor = ChatSupervisor({}, session_factory=lambda cwd, **kwargs: session)
+        with pytest.raises(ChatError, match="invalid device-code"):
+            supervisor.login_global()
+        assert session.closed
+
+
+def test_global_login_does_not_fall_back_after_other_device_errors():
+    class BrokenDeviceSession(FakeSession):
+        def login_device(self): raise RuntimeError("device transport failed")
+        def login(self): raise AssertionError("browser fallback must not run")
+    session = BrokenDeviceSession(pathlib.Path.cwd())
+    supervisor = ChatSupervisor({}, session_factory=lambda cwd, **kwargs: session)
+    with pytest.raises(ChatError, match="unavailable"):
+        supervisor.login_global()
+    assert session.closed
 
 def test_login_events_filter_untrusted_urls(tmp_path):
     root, supervisor, _ = setup_supervisor(tmp_path)

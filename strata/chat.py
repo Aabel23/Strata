@@ -17,7 +17,7 @@ import hashlib
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
-from strata.chat_codex import CodexSession
+from strata.chat_codex import CodexDeviceUnsupported, CodexSession
 
 
 MAX_SESSIONS = 4
@@ -806,7 +806,7 @@ class ChatSupervisor:
         return response
 
     def login_global(self) -> dict[str, str]:
-        """Start a fresh project-independent Codex login attempt."""
+        """Start a fresh project-independent Codex device login when supported."""
         with self._lock:
             if self._shutting_down:
                 raise ChatError("chat supervisor is shutting down")
@@ -826,21 +826,38 @@ class ChatSupervisor:
                 except Exception:
                     pass
             try:
-                # cwd is only a constructor requirement for CodexSession;
-                # login() launches app-server and does not create a thread.
+                # Use a server-owned cwd; login does not create a worktree or thread.
                 session = self._session_factory(pathlib.Path.cwd(), provider="codex", model=None)
-                self._global_auth_session = session
             except Exception as exc:
                 raise ChatError("could not initialize Codex login") from exc
+            self._global_auth_session = session
             try:
-                result = session.login()
-                url = result.get("authUrl") or result.get("url") if isinstance(result, dict) else None
-                login_id = result.get("loginId") if isinstance(result, dict) else None
-                if not _safe_auth_url(url):
-                    raise ChatError("Codex returned an unsupported login URL")
-                response = {"url": url}
-                if isinstance(login_id, str) and login_id and len(login_id) <= 256:
-                    response["login_id"] = login_id
+                try:
+                    result = session.login_device()
+                    if not isinstance(result, dict):
+                        raise ChatError("Codex returned an invalid device-code response")
+                    url = result.get("verificationUrl")
+                    user_code = result.get("userCode")
+                    login_id = result.get("loginId")
+                    if (url != "https://auth.openai.com/codex/device"
+                            or not _safe_auth_url(url)
+                            or not isinstance(user_code, str) or not 1 <= len(user_code) <= 64
+                            or not user_code.isascii()
+                            or not all(char.isalnum() or char in "- " for char in user_code)
+                            or not isinstance(login_id, str)
+                            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", login_id) is None):
+                        raise ChatError("Codex returned an invalid device-code response")
+                    response = {"mode": "device", "verification_url": url,
+                                "user_code": user_code, "login_id": login_id}
+                except CodexDeviceUnsupported:
+                    result = session.login()
+                    url = result.get("authUrl") or result.get("url") if isinstance(result, dict) else None
+                    login_id = result.get("loginId") if isinstance(result, dict) else None
+                    if not _safe_auth_url(url):
+                        raise ChatError("Codex returned an unsupported login URL")
+                    response = {"mode": "browser", "url": url}
+                    if isinstance(login_id, str) and login_id and len(login_id) <= 256:
+                        response["login_id"] = login_id
                 self._global_auth_result = response
                 return dict(response)
             except Exception as exc:
