@@ -1,53 +1,73 @@
-#!/usr/bin/env python3
-import json, os, subprocess, sys, tempfile
+"""Subprocess tests for the PreToolUse scope guard; pytest-safe collection."""
+import json
+import os
+import subprocess
+import sys
+import tempfile
 
 HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scope_guard.py")
+MARKER = ".strata-task-contract.json"
 
-def run(tool, path, cwd):
-    p = subprocess.run([sys.executable, HOOK], text=True, capture_output=True,
-                       input=json.dumps({"tool_name": tool, "tool_input": {"file_path": path}, "cwd": cwd}))
+
+def run(tool, path, cwd, coder=True):
+    env = os.environ.copy()
+    if coder:
+        env["STRATA_AGENT_ROLE"] = "coder"
+    else:
+        env.pop("STRATA_AGENT_ROLE", None)
+    p = subprocess.run(
+        [sys.executable, HOOK], text=True, capture_output=True, env=env,
+        input=json.dumps({"tool_name": tool, "tool_input": {"file_path": path}, "cwd": cwd}),
+    )
     return p.returncode
 
-fails = 0
-def check(name, got, want):
-    global fails
-    ok = got == want
-    fails += not ok
-    print(("PASS " if ok else "FAIL ") + name + ("" if ok else f" (got {got}, want {want})"))
 
-with tempfile.TemporaryDirectory() as t:
-    t = os.path.realpath(t)
-    free = os.path.join(t, "free"); os.makedirs(free)
-    check("no .task-scope allows", run("Write", "x.txt", free), 0)
-    w = os.path.join(t, "wt"); os.makedirs(os.path.join(w, "src/sub")); os.makedirs(os.path.join(w, "other"))
-    outside = os.path.join(t, "outside"); os.makedirs(outside)
-    with open(os.path.join(w, ".task-scope"), "w") as f:
-        f.write("# c\n\nREADME.md\nsrc\n")
-    os.symlink(outside, os.path.join(w, "src/link"))
-    check("allowed file", run("Edit", "README.md", w), 0)
-    check("allowed dir (new file)", run("Write", os.path.join(w, "src/sub/new.py"), w), 0)
-    check("outside blocked", run("Edit", "other/a.py", w), 2)
-    check("sibling prefix blocked", run("Edit", "src2/a.py", w), 2)
-    check("../ escape blocked", run("Edit", "src/../other/a.py", w), 2)
-    check("symlink escape blocked", run("Write", "src/link/evil.py", w), 2)
-    check(".task-scope blocked", run("Write", ".task-scope", w), 2)
-    check("non-edit tool allowed", run("Bash", "other/a.py", w), 0)
-    main = os.path.join(t, "maincheckout"); os.makedirs(main)
-    check("cwd scoped + absolute target outside blocked", run("Write", os.path.join(main, "x.py"), w), 2)
-    os.symlink(os.path.join(w, "src"), os.path.join(t, "inlink"))
-    os.symlink(os.path.join(w, "other"), os.path.join(t, "badlink"))
-    check("outside symlink -> allowed dir allowed", run("Write", os.path.join(t, "inlink/n.py"), w), 0)
-    check("outside symlink -> disallowed dir blocked", run("Write", os.path.join(t, "badlink/n.py"), w), 2)
-    bad = os.path.join(t, "bad"); os.makedirs(bad)
-    with open(os.path.join(bad, ".task-scope"), "wb") as f:
-        f.write(b"\xff\xfe\x80")
-    check("undecodable .task-scope blocked", run("Write", "a.py", bad), 2)
-    unread = os.path.join(t, "unread"); os.makedirs(unread)
-    open(os.path.join(unread, ".task-scope"), "w").write("a.py\n")
-    os.chmod(os.path.join(unread, ".task-scope"), 0)
-    if os.access(os.path.join(unread, ".task-scope"), os.R_OK):
-        print("SKIP unreadable .task-scope (running as root)")
-    else:
-        check("unreadable .task-scope blocked", run("Write", "a.py", unread), 2)
-    check("MultiEdit outside blocked", run("MultiEdit", "other/a.py", w), 2)
-sys.exit(1 if fails else 0)
+def marker(root, payload):
+    with open(os.path.join(root, MARKER), "w", encoding="utf-8") as f:
+        json.dump(payload, f)
+
+
+def contract(touch=None):
+    return {"task_id": "test", "mode": "implement", "scope": {"module": "agent", "touch": ["agent/hooks"] if touch is None else touch}}
+
+
+def test_missing_and_malformed_scope_fail_closed_for_coder():
+    with tempfile.TemporaryDirectory() as t:
+        assert run("Write", "x", t) == 2
+        marker(t, {"task_id": "test", "mode": "implement", "scope": {"touch": "agent"}})
+        assert run("Write", "x", t) == 2
+
+
+def test_enforces_contract_touch_and_safe_paths():
+    with tempfile.TemporaryDirectory() as t:
+        root = os.path.realpath(t)
+        os.makedirs(os.path.join(root, "agent/hooks/sub"))
+        os.makedirs(os.path.join(root, "agent/scripts"))
+        outside = os.path.join(root, "outside")
+        os.makedirs(outside)
+        marker(root, contract(["agent/hooks"]))
+        assert run("Edit", "agent/hooks/file.py", root) == 0
+        assert run("Write", "agent/hooks/sub/new.py", root) == 0
+        assert run("Edit", "agent/scripts/land.sh", root) == 2
+        assert run("Write", "agent/hooks2/a.py", root) == 2
+        assert run("Edit", "agent/hooks/../scripts/a.py", root) == 2
+        assert run("Write", MARKER, root) == 2
+        os.symlink(outside, os.path.join(root, "agent/hooks/link"))
+        assert run("Write", "agent/hooks/link/escape.py", root) == 2
+        assert run("Bash", "outside/file", root) == 0
+
+
+def test_marker_can_be_found_from_nested_cwd_and_contract_paths_are_validated():
+    with tempfile.TemporaryDirectory() as t:
+        root = os.path.realpath(t)
+        nested = os.path.join(root, "agent/hooks")
+        os.makedirs(nested)
+        marker(root, contract(["agent/hooks"]))
+        assert run("Write", "x.py", nested) == 0
+        marker(root, contract(["../outside"]))
+        assert run("Write", "x.py", nested) == 2
+
+
+def test_non_coder_without_marker_remains_unrestricted():
+    with tempfile.TemporaryDirectory() as t:
+        assert run("Write", "x.py", t, coder=False) == 0

@@ -14,6 +14,8 @@ For a new feature or system, preserve these owner approval gates. Do not restart
 
 Stage 5 uses the contract `code_map`; stage 6 compares `gitnexus detect-changes` with scope, both per [CODE_MAP.md](CODE_MAP.md). Explicit user model/effort requests override default profiles. Hosts select actual models; report unavailable mappings honestly. Existing fixes/refactors use their authorized task contract and mandatory independent review without manufacturing new-feature design gates.
 
+For implement coders, the coordinator provisions the root `.strata-task-contract.json` marker in each task worktree. Its `scope.touch` list must be copied from the accepted task contract, and `STRATA_AGENT_ROLE=coder` must be present in the coder process environment. The PreToolUse hook in `hooks/scope_guard.py` then fails closed on missing/malformed contract scope and blocks Edit/Write-family tools outside those paths. See [COORDINATOR.md](COORDINATOR.md) for the marker schema and limits. Project source contains the hook implementation, but host registration is separate machine configuration.
+
 Ticket states are approved → doing → review → done. The reviewer must differ from the owner. Only the main chat marks done after acceptance and required approvals.
 
 Coder prompts start by loading `ponytail` at full level. Bugs within the approved specification may be fixed and noted. Coders/reviewers do not commit or run git state-changing commands (`stash`, `checkout`, `restore`, `reset`).

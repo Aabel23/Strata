@@ -1,56 +1,101 @@
 #!/usr/bin/env python3
-"""PreToolUse hook: confine file edits to the paths listed in the nearest `.task-scope`.
+"""Constrain file editing tools using a coordinator-provisioned task contract marker.
 
-No `.task-scope` above the target: allow. Blocks with exit 2. Applies to Edit-type tools only,
-so Bash writes are not covered (accident prevention, not a sandbox). Malformed input fails open.
+The marker is JSON: {"task_id": ..., "mode": "implement", "scope":
+{"module": ..., "touch": [repo-relative paths]}}. Its touch list is copied
+from the assigned contract's scope.touch. STRATA_AGENT_ROLE=coder makes a
+missing marker fail closed. This is an accident-prevention hook, not a sandbox.
 """
 import json
 import os
 import sys
 
 EDIT_TOOLS = {"Edit", "Write", "NotebookEdit", "MultiEdit"}
+MARKER = ".strata-task-contract.json"
+
+
+def block(message):
+    print("scope_guard: " + message, file=sys.stderr)
+    raise SystemExit(2)
+
+
+def ancestors(path):
+    d = os.path.realpath(path)
+    if not os.path.isdir(d):
+        d = os.path.dirname(d)
+    while True:
+        yield d
+        parent = os.path.dirname(d)
+        if parent == d:
+            break
+        d = parent
+
+
+def find_marker(paths):
+    found = set()
+    for path in paths:
+        for d in ancestors(path):
+            marker = os.path.join(d, MARKER)
+            if os.path.isfile(marker):
+                found.add(os.path.realpath(marker))
+    if len(found) > 1:
+        block("multiple task contract markers apply to this edit")
+    return next(iter(found), None)
+
+
+def load_scope(marker):
+    try:
+        with open(marker, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, UnicodeError, json.JSONDecodeError) as e:
+        block(f"cannot read valid {MARKER} ({e})")
+    if (not isinstance(data, dict) or not isinstance(data.get("task_id"), (str, int))
+            or data.get("mode") != "implement"):
+        block(f"{MARKER} must describe an implement task")
+    scope = data.get("scope")
+    paths = scope.get("touch") if isinstance(scope, dict) else None
+    module = scope.get("module") if isinstance(scope, dict) else None
+    if (not isinstance(module, str) or not module.strip() or not isinstance(paths, list)
+            or not paths or any(not isinstance(p, str) or not p.strip() for p in paths)):
+        block(f"{MARKER} has missing or malformed scope.touch")
+    root = os.path.realpath(os.path.dirname(marker))
+    allowed = []
+    for item in paths:
+        item = item.strip()
+        if os.path.isabs(item) or any(part == ".." for part in item.replace("\\", "/").split("/")):
+            block("scope.touch entries must be safe repo-relative paths")
+        allowed.append(os.path.realpath(os.path.join(root, item)))
+    return root, allowed
+
 
 try:
-    data = json.load(sys.stdin)
-    tool_input = data.get("tool_input") or {}
-    if data.get("tool_name") not in EDIT_TOOLS:
-        sys.exit(0)
-    cwd = data.get("cwd") or os.getcwd()
-    target = tool_input.get("file_path") or tool_input.get("notebook_path")
-except SystemExit:
-    raise
-except Exception:
+    request = json.load(sys.stdin)
+except Exception as e:
+    # A hook invocation that cannot be interpreted must not silently authorize an edit.
+    block(f"invalid hook input ({e})")
+
+if request.get("tool_name") not in EDIT_TOOLS:
     sys.exit(0)
-
-# Scope files are looked up from the cwd and from the target (lexical and real path); every one found is enforced.
-lexical = os.path.normpath(os.path.join(cwd, target)) if target else os.path.normpath(cwd)
+tool_input = request.get("tool_input")
+if not isinstance(tool_input, dict):
+    block("missing tool_input")
+cwd = os.path.abspath(request.get("cwd") or os.getcwd())
+raw_target = tool_input.get("file_path") or tool_input.get("notebook_path")
+if not isinstance(raw_target, str) or not raw_target:
+    block("edit tool has no target path")
+lexical = os.path.abspath(os.path.join(cwd, raw_target))
 target = os.path.realpath(lexical)
-
-def scope_root(start):
-    d = start if os.path.isdir(start) else os.path.dirname(start)
-    while not os.path.isfile(os.path.join(d, ".task-scope")):
-        if os.path.dirname(d) == d:
-            return None
-        d = os.path.dirname(d)
-    return os.path.realpath(d)
-
-def block(msg):
-    print("scope_guard: " + msg, file=sys.stderr)
-    sys.exit(2)
-
-roots = {r for r in (scope_root(os.path.normpath(cwd)), scope_root(lexical), scope_root(target)) if r}
-for root in sorted(roots):
-    if target == os.path.join(root, ".task-scope"):
-        block(".task-scope is read-only for agents")
-    try:
-        with open(os.path.join(root, ".task-scope"), encoding="utf-8") as f:
-            allowed = [l.strip() for l in f if l.strip() and not l.lstrip().startswith("#")]
-    except (OSError, UnicodeError) as e:
-        block(f"cannot read {root}/.task-scope ({e})")
-    for a in allowed:
-        p = os.path.realpath(os.path.join(root, a))
-        if (target == p or target.startswith(p.rstrip("/") + "/")) and (target == root or target.startswith(root + "/")):
-            break
-    else:
-        block(f"{target} is outside the task scope ({root}/.task-scope)")
+marker = find_marker((cwd, lexical, target))
+is_coder = os.environ.get("STRATA_AGENT_ROLE", "").lower() == "coder"
+if marker is None:
+    if is_coder:
+        block(f"coder edit has no coordinator-provisioned {MARKER}")
+    sys.exit(0)
+if target == marker:
+    block(f"{MARKER} is read-only for agents")
+root, allowed = load_scope(marker)
+if target == root or not (target == root or target.startswith(root + os.sep)):
+    block("target escapes task repository")
+if not any(target == p or target.startswith(p.rstrip(os.sep) + os.sep) for p in allowed):
+    block(f"{target} is outside contract scope.touch")
 sys.exit(0)

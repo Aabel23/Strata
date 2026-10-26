@@ -13,3 +13,16 @@ Delegated workers follow their supplied task and selected role. Do not read priv
 Before any Strata task, issue, document, or C4 operation, read its canonical tool skill at `/home/abel/project/tools/strata/agent/skills/strata/SKILL.md` and [STRATA_POLICY.md](STRATA_POLICY.md).
 
 Read [WORKFLOW.md](WORKFLOW.md) for a new feature/system or implementation delivery, [TASK_CONTRACT.md](TASK_CONTRACT.md) when assigning work, and [MIGRATION.md](MIGRATION.md) only for maintenance/setup. Skills are loaded when their task applies.
+
+## Edit scope hook
+
+The hook source is `hooks/scope_guard.py` in this repository. It is not registered by this file or by project configuration: the inspected Claude user settings currently register only the private-memory hook, so activating the scope guard requires a separate change to machine-level hook settings (and equivalent Codex host configuration where supported). Add this command to the existing `PreToolUse` hook list, preserving other entries:
+
+```json
+{
+  "type": "command",
+  "command": "python3 /home/abel/project/tools/strata/agent/hooks/scope_guard.py"
+}
+```
+
+Coder launches must also provide `STRATA_AGENT_ROLE=coder` and a coordinator-generated `.strata-task-contract.json` marker as described in `COORDINATOR.md`; without host registration, the source hook does not run.
