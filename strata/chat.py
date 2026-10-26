@@ -550,12 +550,67 @@ class ChatSupervisor:
 
     def __init__(self, projects: Mapping[str, str | os.PathLike[str]], *,
                  session_factory=CodexSession, max_sessions: int = MAX_SESSIONS):
-        self._projects = dict(projects)
+        self._projects = self._validated_projects(projects)
         self._session_factory = session_factory
         self._max_sessions = max(1, min(int(max_sessions), MAX_SESSIONS))
         self._sessions: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
         self._shutting_down = False
+
+    @classmethod
+    def _validated_projects(cls, projects: Mapping[str, str | os.PathLike[str]]) -> dict[str, str]:
+        if not isinstance(projects, Mapping):
+            raise ChatError("project registry must be a mapping")
+        validated = {}
+        for project, root in projects.items():
+            project = cls._project_id(project)
+            if not isinstance(root, (str, os.PathLike)):
+                raise ChatError("registered project root must be a path")
+            try:
+                path = pathlib.Path(root).expanduser()
+                if not path.is_absolute():
+                    path = pathlib.Path.cwd() / path
+                if _has_symlink_ancestor(path):
+                    raise ChatError("registered project root or one of its ancestors may not be a symlink")
+                validated[project] = os.path.normpath(os.fspath(path))
+            except ChatError:
+                raise
+            except (TypeError, ValueError, OSError) as exc:
+                raise ChatError("registered project root is invalid") from exc
+        return validated
+
+    def refresh_projects(self, projects: Mapping[str, str | os.PathLike[str]]) -> None:
+        """Replace the DB-backed registry and invalidate sessions with stale roots.
+
+        The lock covers both registry replacement and session shutdown. Public
+        session operations hold the same lock through delegation, so refresh
+        cannot race an operation using a registration that has just changed.
+        Worktrees remain on disk for review.
+        """
+        updated = self._validated_projects(projects)
+        with self._lock:
+            self._projects = updated
+            for record in self._sessions.values():
+                registered = updated.get(record["project"])
+                if registered is None or not self._same_root(record["root"], registered):
+                    record["invalidated"] = True
+                    if not record["closed"]:
+                        record["closed"] = True
+                        session = record.get("session")
+                        if session is not None:
+                            try:
+                                session.close()
+                            except Exception:
+                                pass
+
+    update_projects = refresh_projects
+
+    @staticmethod
+    def _same_root(left: str | os.PathLike[str], right: str | os.PathLike[str]) -> bool:
+        try:
+            return pathlib.Path(left).expanduser().resolve(strict=False) == pathlib.Path(right).expanduser().resolve(strict=False)
+        except (OSError, RuntimeError, ValueError):
+            return False
 
     @staticmethod
     def _project_id(project: str) -> str:
@@ -677,15 +732,19 @@ class ChatSupervisor:
             record = self._sessions.get(session_id)
             if record is None or not secrets.compare_digest(record["project"], project):
                 raise ChatError("chat session not found for this project")
+            if record.get("invalidated"):
+                raise ChatError("chat session was invalidated by a project registration change")
             if record["closed"] and not allow_closed:
                 raise ChatError("chat session is closed")
             return record
 
     def turn(self, project: str, session_id: str, message: str) -> str:
-        return self._get(project, session_id)["session"].turn(message)
+        with self._lock:
+            return self._get(project, session_id)["session"].turn(message)
 
     def events(self, project: str, session_id: str, after: int = 0) -> list[dict[str, Any]]:
-        events = self._get(project, session_id)["session"].events(after)
+        with self._lock:
+            events = self._get(project, session_id)["session"].events(after)
         safe = []
         for event in events[:MAX_SESSIONS * 2000]:
             if not isinstance(event, dict):
@@ -701,19 +760,21 @@ class ChatSupervisor:
         return safe
 
     def decide(self, project: str, session_id: str, approval_id: str, allow: bool) -> bool:
-        return self._get(project, session_id)["session"].decide(approval_id, allow)
+        with self._lock:
+            return self._get(project, session_id)["session"].decide(approval_id, allow)
 
     def cancel(self, project: str, session_id: str) -> bool:
-        return self._get(project, session_id)["session"].cancel()
+        with self._lock:
+            return self._get(project, session_id)["session"].cancel()
 
     def close(self, project: str, session_id: str) -> bool:
-        record = self._get(project, session_id, allow_closed=True)
         with self._lock:
+            record = self._get(project, session_id, allow_closed=True)
             if record["closed"]:
                 return False
             record["closed"] = True
-        record["session"].close()
-        return True
+            record["session"].close()
+            return True
 
     def login(self, project: str, session_id: str) -> dict[str, str]:
         """Return an official login URL for the UI to display; never open it.
@@ -721,7 +782,8 @@ class ChatSupervisor:
         Codex's browser flow redirects to a localhost callback on the Strata
         server, so remote viewers may need a tunnel for that callback port.
         """
-        result = self._get(project, session_id)["session"].login()
+        with self._lock:
+            result = self._get(project, session_id)["session"].login()
         url = result.get("authUrl") or result.get("url") if isinstance(result, dict) else None
         login_id = result.get("loginId") if isinstance(result, dict) else None
         if not _safe_auth_url(url):
@@ -734,35 +796,37 @@ class ChatSupervisor:
     def cancel_login(self, project: str, session_id: str, login_id: str) -> bool:
         if not isinstance(login_id, str) or not login_id or len(login_id) > 256:
             raise ChatError("invalid login ID")
-        return self._get(project, session_id)["session"].cancel_login(login_id)
+        with self._lock:
+            return self._get(project, session_id)["session"].cancel_login(login_id)
 
     @staticmethod
     def auth_status(provider: str = "codex") -> dict[str, Any]:
         return CodexSession.auth_status(provider)
 
     def diff_status(self, project: str, session_id: str) -> dict[str, Any]:
-        record = self._get(project, session_id, allow_closed=True)
-        root = record["worktree"]
-        status_raw, status_truncated = _safe_status(root)
-        status_output = bytearray()
-        for entry in status_raw.split(b"\0"):
-            if len(entry) >= 4 and entry[2:3] == b" ":
-                line = f"{entry[:2].decode('ascii', 'replace')} {json.dumps(os.fsdecode(entry[3:]), ensure_ascii=True)}\n".encode()
-                if len(status_output) + len(line) > MAX_STATUS_BYTES:
-                    status_truncated = True
-                    break
-                status_output.extend(line)
-        if status_truncated:
-            marker = b"[status truncated]\n"
-            status_output = status_output[:max(0, MAX_STATUS_BYTES - len(marker))]
-            status_output.extend(marker)
-        status_text = status_output.decode("utf-8", "replace")
-        diff_text, diff_truncated = _format_review_diff(root, status_raw, limit=MAX_DIFF_BYTES)
-        return {"status": status_text,
-                "diff": diff_text,
-                "status_truncated": status_truncated, "diff_truncated": diff_truncated,
-                "worktree": str(root), "closed": record["closed"],
-                "startup_error": record.get("startup_error")}
+        with self._lock:
+            record = self._get(project, session_id, allow_closed=True)
+            root = record["worktree"]
+            status_raw, status_truncated = _safe_status(root)
+            status_output = bytearray()
+            for entry in status_raw.split(b"\0"):
+                if len(entry) >= 4 and entry[2:3] == b" ":
+                    line = f"{entry[:2].decode('ascii', 'replace')} {json.dumps(os.fsdecode(entry[3:]), ensure_ascii=True)}\n".encode()
+                    if len(status_output) + len(line) > MAX_STATUS_BYTES:
+                        status_truncated = True
+                        break
+                    status_output.extend(line)
+            if status_truncated:
+                marker = b"[status truncated]\n"
+                status_output = status_output[:max(0, MAX_STATUS_BYTES - len(marker))]
+                status_output.extend(marker)
+            status_text = status_output.decode("utf-8", "replace")
+            diff_text, diff_truncated = _format_review_diff(root, status_raw, limit=MAX_DIFF_BYTES)
+            return {"status": status_text,
+                    "diff": diff_text,
+                    "status_truncated": status_truncated, "diff_truncated": diff_truncated,
+                    "worktree": str(root), "closed": record["closed"],
+                    "startup_error": record.get("startup_error")}
 
     def diff(self, project: str, session_id: str) -> dict[str, Any]:
         return self.diff_status(project, session_id)

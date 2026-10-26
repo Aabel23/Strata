@@ -1,5 +1,7 @@
 import pathlib
 import subprocess
+import threading
+import time
 
 import pytest
 
@@ -77,9 +79,8 @@ def test_rejects_unregistered_nonrepo_nested_root_and_symlink(tmp_path):
     nested_supervisor = ChatSupervisor({"nested": nested}, session_factory=FakeSession)
     with pytest.raises(ChatError): nested_supervisor.start("nested", nested)
     link = tmp_path / "repo-link"; link.symlink_to(root, target_is_directory=True)
-    linked = ChatSupervisor({"linked": link}, session_factory=FakeSession)
     with pytest.raises(ChatError, match="symlink"):
-        linked.start("linked", link)
+        ChatSupervisor({"linked": link}, session_factory=FakeSession)
 
 
 def test_operations_are_project_bound_and_delegated(tmp_path):
@@ -236,3 +237,89 @@ def test_failed_start_keeps_discoverable_worktree_and_closes_agent(tmp_path):
     report = supervisor.diff_status("project", caught.value.session_id)
     assert report["startup_error"] == "simulated startup failure"
     assert report["worktree"] == str(worktree)
+
+
+def test_registry_refresh_add_change_remove_invalidates_stale_sessions(tmp_path):
+    root_a = make_repo(tmp_path / "repo-a")
+    root_b = make_repo(tmp_path / "repo-b")
+    root_c = make_repo(tmp_path / "repo-c")
+    made = []
+    def factory(cwd, **kwargs):
+        session = FakeSession(cwd, **kwargs); made.append(session); return session
+    supervisor = ChatSupervisor({"project": root_a, "other": root_c}, session_factory=factory)
+    original = supervisor.start("project", root_a)
+    removed = supervisor.start("other", root_c)
+    original_worktree = pathlib.Path(original["worktree"])
+    removed_worktree = pathlib.Path(removed["worktree"])
+
+    # Adding a project keeps existing sessions valid and makes the new
+    # registration available immediately.
+    supervisor.refresh_projects({"project": root_a, "other": root_c, "added": root_b})
+    assert supervisor.turn("project", original["session_id"], "still valid") == "turn-fake"
+    added = supervisor.start("added", root_b)
+    assert pathlib.Path(added["worktree"]).exists()
+
+    # A changed root closes the old agent, leaves its worktree for inspection,
+    # and lets subsequent sessions use only the new root.
+    supervisor.update_projects({"project": root_b, "added": root_b})
+    assert made[0].closed
+    assert original_worktree.exists()
+    with pytest.raises(ChatError, match="invalidated"):
+        supervisor.turn("project", original["session_id"], "stale")
+    replacement = supervisor.start("project", root_b)
+    assert pathlib.Path(replacement["worktree"]).parent == root_b.parent / ".strata-worktrees" / "project"
+
+    # Removing a project invalidates its sessions in the same refresh.
+    supervisor.refresh_projects({"project": root_b})
+    assert made[1].closed
+    assert removed_worktree.exists()
+    with pytest.raises(ChatError, match="invalidated"):
+        supervisor.diff_status("other", removed["session_id"])
+    with pytest.raises(ChatError, match="not registered"):
+        supervisor.start("other", root_c)
+    supervisor.shutdown()
+
+
+def test_registry_refresh_waits_for_inflight_operation(tmp_path):
+    root, _, _ = setup_supervisor(tmp_path)
+    entered = threading.Event()
+    release = threading.Event()
+    made = []
+    class BlockingSession(FakeSession):
+        def turn(self, message):
+            entered.set()
+            assert release.wait(2)
+            return super().turn(message)
+    def factory(cwd, **kwargs):
+        session = BlockingSession(cwd, **kwargs); made.append(session); return session
+    supervisor = ChatSupervisor({"project": root}, session_factory=factory)
+    started = supervisor.start("project", root)
+    operation_result = []
+    operation = threading.Thread(target=lambda: operation_result.append(
+        supervisor.turn("project", started["session_id"], "in flight")))
+    operation.start()
+    assert entered.wait(1)
+    refreshed = threading.Event()
+    refresh = threading.Thread(target=lambda: (supervisor.refresh_projects({}), refreshed.set()))
+    refresh.start()
+    time.sleep(.05)
+    assert not refreshed.is_set() and not made[0].closed
+    release.set()
+    operation.join(2); refresh.join(2)
+    assert operation_result == ["turn-fake"] and refreshed.is_set() and made[0].closed
+    with pytest.raises(ChatError, match="invalidated"):
+        supervisor.events("project", started["session_id"])
+
+
+def test_registry_refresh_rejects_symlink_alias_to_same_root(tmp_path):
+    root, supervisor, _ = setup_supervisor(tmp_path)
+    started = supervisor.start("project", root)
+    alias = tmp_path / "repo-alias"
+    alias.symlink_to(root, target_is_directory=True)
+    with pytest.raises(ChatError, match="symlink"):
+        supervisor.refresh_projects({"project": alias})
+    # Failed refresh is atomic: the prior valid registry remains active and
+    # the alias cannot be used to start a new session.
+    assert supervisor.turn("project", started["session_id"], "still registered") == "turn-fake"
+    with pytest.raises(ChatError, match="symlink"):
+        supervisor.start("project", alias)
