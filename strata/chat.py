@@ -558,6 +558,11 @@ class ChatSupervisor:
         self._sessions: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
         self._shutting_down = False
+        # A login-only app-server is independent of project worktrees and
+        # never starts a coding thread. Keep it alive while the browser visits
+        # the provider so its localhost callback can complete.
+        self._global_auth_session = None
+        self._global_auth_result: dict[str, str] | None = None
 
     @classmethod
     def _validated_projects(cls, projects: Mapping[str, str | os.PathLike[str]]) -> dict[str, str]:
@@ -800,6 +805,55 @@ class ChatSupervisor:
             response["login_id"] = login_id
         return response
 
+    def login_global(self) -> dict[str, str]:
+        """Start a fresh project-independent Codex login attempt."""
+        with self._lock:
+            if self._shutting_down:
+                raise ChatError("chat supervisor is shutting down")
+            previous_session = self._global_auth_session
+            previous_result = self._global_auth_result
+            self._global_auth_session = None
+            self._global_auth_result = None
+            if previous_session is not None:
+                login_id = previous_result.get("login_id") if previous_result else None
+                if login_id:
+                    try:
+                        previous_session.cancel_login(login_id)
+                    except Exception:
+                        pass
+                try:
+                    previous_session.close()
+                except Exception:
+                    pass
+            try:
+                # cwd is only a constructor requirement for CodexSession;
+                # login() launches app-server and does not create a thread.
+                session = self._session_factory(pathlib.Path.cwd(), provider="codex", model=None)
+                self._global_auth_session = session
+            except Exception as exc:
+                raise ChatError("could not initialize Codex login") from exc
+            try:
+                result = session.login()
+                url = result.get("authUrl") or result.get("url") if isinstance(result, dict) else None
+                login_id = result.get("loginId") if isinstance(result, dict) else None
+                if not _safe_auth_url(url):
+                    raise ChatError("Codex returned an unsupported login URL")
+                response = {"url": url}
+                if isinstance(login_id, str) and login_id and len(login_id) <= 256:
+                    response["login_id"] = login_id
+                self._global_auth_result = response
+                return dict(response)
+            except Exception as exc:
+                self._global_auth_session = None
+                self._global_auth_result = None
+                try:
+                    session.close()
+                except Exception:
+                    pass
+                if isinstance(exc, ChatError):
+                    raise
+                raise ChatError("Codex login flow is unavailable") from exc
+
     def cancel_login(self, project: str, session_id: str, login_id: str) -> bool:
         if not isinstance(login_id, str) or not login_id or len(login_id) > 256:
             raise ChatError("invalid login ID")
@@ -845,11 +899,19 @@ class ChatSupervisor:
         with self._lock:
             self._shutting_down = True
             records = list(self._sessions.values())
+            global_auth_session = self._global_auth_session
+            self._global_auth_session = None
+            self._global_auth_result = None
             for record in records:
                 record["closed"] = True
         for record in records:
             try:
                 record["session"].close()
+            except Exception:
+                pass
+        if global_auth_session is not None:
+            try:
+                global_auth_session.close()
             except Exception:
                 pass
 

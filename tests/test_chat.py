@@ -158,6 +158,54 @@ def test_login_url_is_validated_and_never_auto_opened(tmp_path):
             supervisor.login("project", started["session_id"])
 
 
+def test_global_login_needs_no_project_worktree_and_restarts_attempts(tmp_path):
+    made = []
+    def factory(cwd, **kwargs):
+        attempt = len(made) + 1
+        class LoginSession(FakeSession):
+            def login(self):
+                self.calls.append(("login",))
+                return {"authUrl": f"https://auth.openai.com/oauth/authorize?attempt={attempt}",
+                        "loginId": f"login-{attempt}"}
+            def cancel_login(self, login_id):
+                self.calls.append(("cancel_login", login_id))
+                return True
+        session = LoginSession(cwd, **kwargs)
+        made.append(session)
+        return session
+    supervisor = ChatSupervisor({}, session_factory=factory)
+
+    first = supervisor.login_global()
+    second = supervisor.login_global()
+    assert first == {"url": "https://auth.openai.com/oauth/authorize?attempt=1", "login_id": "login-1"}
+    assert second == {"url": "https://auth.openai.com/oauth/authorize?attempt=2", "login_id": "login-2"}
+    assert len(made) == 2
+    assert made[0].cwd == pathlib.Path.cwd()
+    assert made[0].calls == [("login",), ("cancel_login", "login-1")]
+    assert made[0].closed
+    assert made[1].calls == [("login",)]  # no coding-thread start or turn
+    supervisor.shutdown()
+    assert made[1].closed
+
+
+def test_global_login_failure_closes_session_and_allows_retry():
+    made = []
+    class InvalidLoginSession(FakeSession):
+        def login(self): return {"authUrl": "https://evil.example/", "loginId": "bad"}
+    def factory(cwd, **kwargs):
+        session = InvalidLoginSession(cwd, **kwargs)
+        made.append(session)
+        return session
+    supervisor = ChatSupervisor({}, session_factory=factory)
+
+    with pytest.raises(ChatError, match="unsupported login URL"):
+        supervisor.login_global()
+    assert made[0].closed
+    supervisor._session_factory = lambda cwd, **kwargs: FakeSession(cwd, **kwargs)
+    assert supervisor.login_global()["url"].startswith("https://auth.openai.com/")
+    supervisor.shutdown()
+
+
 def test_login_events_filter_untrusted_urls(tmp_path):
     root, supervisor, _ = setup_supervisor(tmp_path)
     started = supervisor.start("project", root)
