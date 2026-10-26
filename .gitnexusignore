@@ -1,0 +1,6 @@
+/tools/gitnexus/dist/
+/tools/gitnexus/scripts/
+/tools/gitnexus/vendor/
+/tools/gitnexus/node_modules/
+/tools/gitnexus/package.json
+/tools/gitnexus/package-lock.json
