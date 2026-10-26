@@ -1,4 +1,4 @@
-import io, json, threading, urllib.request, urllib.error
+import io, json, pathlib, threading, urllib.request, urllib.error
 import pytest
 from conftest import run
 from strata import codemap, db, server
@@ -57,10 +57,79 @@ def test_snapshot_raw_atomic(env):
     assert not any(isinstance(x, list) and "analyze" in x for x in calls) and calls[-1].endswith("/graph?repo=r")
 
 
+def test_snapshot_write_uses_unique_temp_and_preserves_previous_file_on_replace_error(tmp_path, monkeypatch):
+    path = tmp_path / "snapshots/p.json"
+    path.parent.mkdir(); path.write_bytes(b"previous valid snapshot")
+    temp_paths = []
+    def fail_replace(src, dst):
+        temp_paths.append(src)
+        raise OSError("replace failed")
+    monkeypatch.setattr(codemap.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="replace failed"):
+        codemap.write_snapshot(path, b"new snapshot")
+    assert path.read_bytes() == b"previous valid snapshot"
+    assert len(temp_paths) == 1 and pathlib.Path(temp_paths[0]).name != "p.json.tmp"
+    assert not list(path.parent.glob("*.tmp"))
+
+
 def test_reindex_uses_index_only(env):
     p, c, root = env; calls, _, kw = fakes(root)
     codemap.snapshot(c, p, "p", True, **kw)
-    assert calls[0] == ["gx", "analyze", "--index-only", str(root)]
+    assert calls[0] == ["gx", "analyze", "--index-only", "--", str(root)]
+
+
+def test_reindex_passes_a_dash_prefixed_root_as_a_positional_argument(env):
+    p, c, root = env
+    c.execute("UPDATE project SET root=? WHERE id='p'", ("-project-root",)); c.commit()
+    calls, _, kw = fakes("-project-root")
+    codemap.snapshot(c, p, "p", True, **kw)
+    assert calls[0] == ["gx", "analyze", "--index-only", "--", "-project-root"]
+
+
+def test_gitnexus_binary_precedence(monkeypatch, tmp_path):
+    vendor = tmp_path / "tools/gitnexus/node_modules"
+    vendor.mkdir(parents=True)
+    monkeypatch.setattr(codemap, "HERE", tmp_path)
+    monkeypatch.setattr(codemap.shutil, "which", lambda name: "/path/gitnexus")
+    monkeypatch.setenv("STRATA_GITNEXUS", "/env/gitnexus.js")
+    assert codemap.gitnexus_cmd() == ["node", "/env/gitnexus.js"]
+    monkeypatch.delenv("STRATA_GITNEXUS")
+    assert codemap.gitnexus_cmd() == ["node", str(tmp_path / "tools/gitnexus/dist/cli/index.js")]
+    vendor.rmdir()
+    assert codemap.gitnexus_cmd() == ["gitnexus"]
+
+
+def test_serve_startup_retries_port_race_with_bounded_child_cleanup(env, monkeypatch):
+    p, c, root = env
+    ports = iter((41001, 41002, 41003, 41004))
+    monkeypatch.setattr(codemap, "free_port", lambda: next(ports))
+    calls, children = [], []
+    def spawn(cmd, stdout=None, stderr=None):
+        child = Child(exit_code=1 if len(children) < 2 else None)
+        child.output = stdout; child.stderr = stderr
+        children.append(child); calls.append(cmd); return child
+    def fetch(url):
+        if url.endswith("/health") and len(children) < 3: raise OSError("port raced")
+        if url.endswith("/health"): return b"{}"
+        if url.endswith("/repos"): return json.dumps([{"name": "r", "path": str(root)}]).encode()
+        return json.dumps(G).encode()
+    path, graph = codemap.snapshot(c, p, "p", spawn=spawn, fetch=fetch)
+    assert graph == G and path.exists()
+    assert [x[3] for x in calls] == ["41001", "41002", "41003"]
+    assert all(child.terminated and child.waited for child in children)
+
+
+def test_serve_port_race_retries_are_bounded_and_reaped(env, monkeypatch):
+    p, c, _ = env
+    ports = iter((41001, 41002, 41003, 41004))
+    monkeypatch.setattr(codemap, "free_port", lambda: next(ports))
+    children = []
+    def spawn(cmd, stdout=None, stderr=None):
+        child = Child(exit_code=1); child.output = stdout; children.append(child); return child
+    def fetch(url): raise OSError("port raced")
+    with pytest.raises(RuntimeError, match="serve exited during startup"):
+        codemap.snapshot(c, p, "p", spawn=spawn, fetch=fetch)
+    assert len(children) == 3 and all(child.terminated and child.waited for child in children)
 
 
 def test_subprocess_output_is_quiet_on_success(env, capsys):
@@ -177,6 +246,17 @@ def test_errors(env):
     _, children, kw = fakes(root, repos=[])
     with pytest.raises(RuntimeError, match="--reindex"): codemap.snapshot(c, p, "p", **kw)
     assert children[-1].terminated and not (root / "t.codemap" / "p.json").exists()
+    for bad_g in [
+        {"nodes": "not-a-list", "relationships": []},
+        {"nodes": [], "relationships": "not-a-list"},
+        {"nodes": []},
+        {"relationships": []},
+        [],
+    ]:
+        _, _, kw = fakes(root)
+        kw["fetch"] = lambda url, _bg=bad_g, _orig=kw["fetch"]: json.dumps(_bg).encode() if "/graph?" in url else _orig(url)
+        with pytest.raises(RuntimeError, match="unexpected gitnexus graph shape"):
+            codemap.snapshot(c, p, "p", **kw)
 
 
 def test_cli_unknown_project(env):
@@ -198,4 +278,18 @@ def test_route(env):
         codemap.write_snapshot(codemap.snapshot_path(p, "p"), json.dumps(G).encode())
         st, ct, body = get("/api/codemap?project=p")
         assert st == 200 and ct.startswith("application/json") and body == G
+        for malformed in [
+            b"{broken json",
+            b"[]",
+            b"\"string\"",
+            b"42",
+            b'{"nodes": "not-a-list", "relationships": []}',
+            b'{"nodes": [{"id": "a"}], "relationships": "not-a-list"}',
+            b'{"nodes": {}}',
+            b'{"relationships": []}',
+            b'{"nodes": [{"id": "a"}]}',
+        ]:
+            codemap.write_snapshot(codemap.snapshot_path(p, "p"), malformed)
+            st, _, body = get("/api/codemap?project=p")
+            assert st == 503 and body == {"error": "corrupt code map snapshot", "building": False}
     finally: srv.shutdown(); srv.server_close()

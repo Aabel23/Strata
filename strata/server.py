@@ -124,7 +124,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             with lock: root = codemap.project_root(conn, pid)
             body = build(root, reindex=True, cancel=stopping)  # slow: no DB lock held
             g = json.loads(body)
-            if not isinstance(g, dict) or "nodes" not in g or "relationships" not in g: raise RuntimeError("unexpected gitnexus graph shape")
+            if not isinstance(g, dict) or not isinstance(g.get("nodes"), list) or not isinstance(g.get("relationships"), list): raise RuntimeError("unexpected gitnexus graph shape")
             with lifecycle:
                 if stopping.is_set(): return
                 codemap.write_snapshot(codemap.snapshot_path(db.db_path(db_path), pid), body)
@@ -536,7 +536,13 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             if not q.get("project"): return self.json({"error": "missing project"}, 400)
             with lock:
                 if not conn.execute("SELECT 1 FROM project WHERE id=?", (q["project"],)).fetchone(): return self.json({"error": "unknown project"}, 400)
-            try: return self.json(codemap.load_snapshot(db.db_path(db_path), q["project"]))
+            try:
+                graph = codemap.load_snapshot(db.db_path(db_path), q["project"])
+                if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list) or not isinstance(graph.get("relationships"), list):
+                    return self.json({"error": "corrupt code map snapshot", "building": False}, 503)
+                return self.json(graph)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return self.json({"error": "corrupt code map snapshot", "building": False}, 503)
             except FileNotFoundError: pass
             key = code_key(q["project"])
             with _CODEMAP_BUILD_LOCK: busy, why = key in _CODEMAP_BUILDS, _CODEMAP_FAILURES.get(key)
