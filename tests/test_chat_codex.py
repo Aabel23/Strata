@@ -26,6 +26,30 @@ class FakeStdin:
         method, request_id = message.get("method"), message.get("id")
         if request_id is None: return len(raw)
         if method == "initialize": result = {"userAgent": "fake"}
+        elif method == "thread/start" and self.proc.protocol == "camel":
+            params = message["params"]
+            if params["approvalPolicy"] != "onRequest":
+                self.proc.stdout.put({"jsonrpc": "2.0", "id": request_id, "error": {
+                    "code": -32602, "message": "unknown variant `on-request`, expected one of `untrusted`, `onRequest`, `never`"}})
+                return len(raw)
+            if params["sandbox"] != "readOnly":
+                self.proc.stdout.put({"jsonrpc": "2.0", "id": request_id, "error": {
+                    "code": -32602, "message": "unknown variant `read-only`, expected one of `readOnly`, `workspaceWrite`"}})
+                return len(raw)
+            result = {"thread": {"id": "thread-1"}}
+            self.proc.stdout.put({"jsonrpc": "2.0", "method": "thread/started", "params": result})
+        elif method == "thread/start" and self.proc.protocol == "legacy":
+            params = message["params"]
+            if params["approvalPolicy"] != "on-request":
+                self.proc.stdout.put({"jsonrpc": "2.0", "id": request_id, "error": {
+                    "code": -32602, "message": "unknown variant `onRequest`, expected one of `on-request`, `never`"}})
+                return len(raw)
+            if params["sandbox"] != "read-only":
+                self.proc.stdout.put({"jsonrpc": "2.0", "id": request_id, "error": {
+                    "code": -32602, "message": "unknown variant `readOnly`, expected one of `read-only`, `workspace-write`"}})
+                return len(raw)
+            result = {"thread": {"id": "thread-1"}}
+            self.proc.stdout.put({"jsonrpc": "2.0", "method": "thread/started", "params": result})
         elif method in ("thread/start", "thread/resume"):
             result = {"thread": {"id": "thread-1" if method == "thread/start" else message["params"]["threadId"]}}
             self.proc.stdout.put({"jsonrpc": "2.0", "method": "thread/started", "params": result})
@@ -43,7 +67,8 @@ class FakeStdin:
 
 
 class FakeProc:
-    def __init__(self):
+    def __init__(self, protocol="legacy"):
+        self.protocol = protocol
         self.stdout = FakeStdout(); self.stdin = FakeStdin(self); self.terminated = False
         self.waited = False; self.killed = False
     def terminate(self):
@@ -53,9 +78,9 @@ class FakeProc:
     def kill(self): self.killed = True; self.terminate()
 
 
-def factory(children):
+def factory(children, protocol="legacy"):
     def popen(args, **kwargs):
-        child = FakeProc(); children.append((args, kwargs, child)); return child
+        child = FakeProc(protocol); children.append((args, kwargs, child)); return child
     return popen
 
 
@@ -85,6 +110,39 @@ def test_lifecycle_streaming_and_ordered_replay(tmp_path):
     assert thread_start["params"]["approvalPolicy"] == "on-request"
     session.close()
     assert children[0][2].terminated
+
+
+def test_thread_start_retries_only_for_named_camel_enum_variants(tmp_path):
+    children = []
+    session = CodexSession(tmp_path, popen=factory(children, "camel"), rpc_timeout=1)
+    assert session.start() == "thread-1"
+    starts = [m["params"] for m in children[0][2].stdin.messages if m.get("method") == "thread/start"]
+    assert [p["approvalPolicy"] for p in starts] == ["on-request", "onRequest", "onRequest"]
+    assert [p["sandbox"] for p in starts] == ["read-only", "read-only", "readOnly"]
+    assert all(p["approvalPolicy"] in {"on-request", "onRequest"} for p in starts)
+    assert all(p["sandbox"] in {"read-only", "readOnly"} for p in starts)
+    session.close()
+
+
+def test_thread_start_does_not_retry_unrecognized_errors(tmp_path):
+    class ErrorProc(FakeProc):
+        def __init__(self):
+            super().__init__()
+            original = self.stdin.write
+            def write(raw):
+                message = json.loads(raw)
+                if message.get("method") == "thread/start":
+                    self.stdin.messages.append(message)
+                    self.stdout.put({"jsonrpc": "2.0", "id": message["id"], "error": {
+                        "code": -32602, "message": "invalid params: sandbox unavailable"}})
+                    return len(raw)
+                return original(raw)
+            self.stdin.write = write
+    children = []
+    session = CodexSession(tmp_path, popen=lambda *a, **kw: children.append(ErrorProc()) or children[-1], rpc_timeout=1)
+    with pytest.raises(CodexError, match="sandbox unavailable"):
+        session.start()
+    assert len([m for m in children[0].stdin.messages if m.get("method") == "thread/start"]) == 1
 
 
 def test_resume_persisted_thread_and_bound_replay(tmp_path):

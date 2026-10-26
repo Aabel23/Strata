@@ -37,6 +37,25 @@ _PROVIDERS = {
 }
 
 
+def _camel_protocol_retry(error: CodexError) -> str | None:
+    """Return the enum field whose legacy spelling a newer server rejected.
+
+    App-server versions have used two spellings for these enums. Retry only
+    when the server explicitly reports the legacy value as unknown and names
+    the corresponding camelCase value in its expected variants. This keeps
+    arbitrary RPC failures from causing a second thread/start request.
+    """
+    message = str(error)
+    for legacy, modern, field in (
+        ("on-request", "onRequest", "approvalPolicy"),
+        ("read-only", "readOnly", "sandbox"),
+    ):
+        if (f"unknown variant `{legacy}`" in message
+                and f"`{modern}`" in message):
+            return field
+    return None
+
+
 class CodexError(RuntimeError):
     """Safe, user-facing failure from the local Codex adapter."""
 
@@ -256,11 +275,24 @@ class CodexSession:
         self._launch()
         # Read-only is required for write attempts to surface as server approval
         # requests. workspace-write could let in-worktree writes bypass the UI.
+        # Codex CLI 0.114 uses kebab-case enum values. Newer app-server
+        # protocols document camelCase, so start with the installed-compatible
+        # values and retry only for an explicit unknown-variant response.
         params: dict[str, Any] = {"cwd": self.cwd, "approvalPolicy": "on-request", "sandbox": "read-only"}
         if self.model:
             params["model"] = self.model
         try:
-            result = self._rpc("thread/start", params)
+            retried: set[str] = set()
+            while True:
+                try:
+                    result = self._rpc("thread/start", params)
+                    break
+                except CodexError as exc:
+                    field = _camel_protocol_retry(exc)
+                    if field is None or field in retried:
+                        raise
+                    params[field] = {"approvalPolicy": "onRequest", "sandbox": "readOnly"}[field]
+                    retried.add(field)
             thread = result.get("thread") if isinstance(result, dict) else None
             thread_id = thread.get("id") if isinstance(thread, dict) else None
             if not isinstance(thread_id, str):
@@ -702,4 +734,3 @@ class CodexSession:
 
     def __enter__(self): return self
     def __exit__(self, *_): self.close()
-
