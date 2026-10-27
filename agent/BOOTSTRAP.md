@@ -12,7 +12,7 @@ Delegated workers follow their supplied task and selected role. Do not read priv
 
 Before any Strata task, issue, document, or C4 operation, read its canonical tool skill at `/home/abel/project/tools/strata/agent/skills/strata/SKILL.md` and [STRATA_POLICY.md](STRATA_POLICY.md).
 
-Read [WORKFLOW.md](WORKFLOW.md) for a new feature/system or implementation delivery, [TASK_CONTRACT.md](TASK_CONTRACT.md) when assigning work, and [MIGRATION.md](MIGRATION.md) only for maintenance/setup. Skills are loaded when their task applies.
+Read [WORKFLOW.md](WORKFLOW.md) for a new feature/system or implementation delivery, [TASK_CONTRACT.md](TASK_CONTRACT.md) when assigning work, [GITHUB_FLOW.md](GITHUB_FLOW.md) before any branch/PR/merge operation on a repo with a GitHub remote, and [MIGRATION.md](MIGRATION.md) only for maintenance/setup. Skills are loaded when their task applies.
 
 ## Edit scope hook
 
