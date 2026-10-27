@@ -220,13 +220,15 @@ version.
 
 - One link per real call; name what flows, plus the protocol on cross-unit links. Replies are `reverse: true` steps, never
   reverse links.
-- **Endpoint links.** Zoomed into a unit, the viewer shows every outside object as its top unit and drops links whose two ends
-  are both outside (`lift()` in `viewer/index.html`). So a unit-to-unit hop (for example `app -> server`) vanishes once you zoom
-  in. For each cross-unit hop keep the unit-level link that flows use, and add display-only links with an `ep_` prefix:
-  - sender side: inner block -> the other side's **top unit** (`a_cloud -> server`);
-  - receiver side: the other side's **top unit** -> inner block (`app -> transport`).
-  Target the top unit, not the other block: a component-to-component link across apps raises `C4-COMP-CROSS`, and a deeper
-  target would show the link twice in the wrong views. Reuse the hop's contract as `detail`.
+- **Endpoint links.** Zoomed into a unit, the viewer draws the outside end of a link as a dashed ghost card of the real
+  object, labelled with its parent path (`Machine API ›` under the name `Machine registry`); clicking it opens the level that
+  holds that object, with it selected. Above 8 distinct outside cards in one view, the surplus groups under an ancestor card
+  marked `N grouped` (`lift()` / `outMap()` in `viewer/index.html`). Links whose two ends are both outside the view are still
+  dropped, so a unit-to-unit hop (for example `app -> server`) vanishes once you zoom into either unit; only a link with one
+  end inside the view shows there.
+  Display-only `ep_` links (inner block -> the other side's top unit, or back) are therefore no longer needed for display: do
+  not add new ones just so a hop shows when zoomed in. Existing `ep_` links stay valid; leave them in place. A
+  component-to-component link across apps still raises `C4-COMP-CROSS`.
 - An actor may link straight to the component it touches (screen, CLI) as an endpoint link; accept that `C4-PERSON-TARGET`.
 - Check the result per view: for the top level and each unit or container with children, list the links that have one end
   outside. Every outside unit the code talks to must appear there.

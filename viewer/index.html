@@ -95,6 +95,9 @@ body.nomodel,body.nomodel main{grid-template-rows:1fr;grid-template-columns:minm
 .node.issue .box{stroke:var(--err);fill:color-mix(in srgb,var(--err) 14%,var(--card))}
 .node.issue.sel .box{stroke:var(--accent)}
 .node.hot .box{stroke:var(--hot);stroke-width:2.4}
+.node.from .box{fill:color-mix(in srgb,var(--hot) 9%,var(--card))}
+.node.to .box{fill:color-mix(in srgb,var(--hot) 22%,var(--card))}
+.node .fe rect{fill:var(--hot)}.node .fe text{fill:var(--bg);font-size:10px;font-weight:700;letter-spacing:.06em}
 .node .sdot{stroke:var(--card);stroke-width:2}
 .node .bdg circle{fill:var(--err)}.node .bdg text{fill:#fff;font-weight:700;font-size:11px;text-anchor:middle}
 #q{width:150px;background:var(--bar);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font:inherit}
@@ -318,7 +321,7 @@ const ICON={
 
 function load(m){
   document.body.classList.remove("nomodel");
-  M=m; byId={}; M.links=m.links||{}; M.open_issues=m.open_issues||[];
+  M=m; byId={}; outC=new Map(); M.links=m.links||{}; M.open_issues=m.open_issues||[];
   $("#qlist").innerHTML=(m.objects||[]).map(o=>`<option value="${esc(o.id)}">${esc(o.name||"")}</option>`).join("");
   (m.objects||[]).forEach(o=>byId[o.id]=o);
   (m.connections||[]).forEach((c,i)=>c.id=c.id||`c${i}`);
@@ -332,12 +335,45 @@ function load(m){
 const kids=id=>(M.objects||[]).filter(o=>(o.parent||null)===id);
 const chain=id=>{const r=[];for(let o=byId[id];o;o=byId[o.parent])r.unshift(o.id);return r};
 const nm=id=>byId[id]?.name||id;
-// Map an endpoint to the object visible in the view focused on F.
+// Map an endpoint to the object visible in the view focused on F. An outside end is drawn as the real object
+// (a dashed ghost card), unless the level would show more than OUTCAP of them: then the surplus groups under an ancestor.
 function lift(id,F){
   const fc=new Set(F?chain(F):[]); let o=byId[id];
-  while(o){const p=o.parent||null; if(p===F) return {id:o.id,ext:false}; if(p===null||fc.has(p)) return {id:o.id,ext:true}; o=byId[p];}
-  return null;
+  while(o){const p=o.parent||null; if(p===F) return {id:o.id,ext:false}; if(p===null||fc.has(p)) break; o=byId[p];}
+  if(!o) return null; if(fc.has(id)) return {id:o.id,ext:true}; // the scope itself or one of its ancestors
+  const m=outMap(F); let g=m.map.get(id);
+  if(!g){g=o.id; for(let x=byId[id];x&&x!==o;x=byId[x.parent]) if(m.n.has(x.id)){g=x.id;break}} // not on a link of this level
+  return {id:g,ext:true,n:m.n.get(g)||0,grp:m.grp.has(g)};
 }
+// Outside ends of the links drawn at level F -> the card each one lands on. Over OUTCAP distinct cards, merge the ends
+// under the deepest ancestor that alone brings the count to OUTCAP (else the one that merges most) and repeat;
+// at worst every end sits on its top unit, as before.
+const OUTCAP=8; let outC=new Map(), navAt=0;
+function outMap(F){
+  if(outC.has(F)) return outC.get(F);
+  const fc=new Set(F?chain(F):[]), top=id=>{for(let o=byId[id];o;o=byId[o.parent]){const p=o.parent||null; if(p===F) return {in:1}; if(p===null||fc.has(p)) return {o}} return null};
+  const P=new Map(), d=new Map();
+  for(const c of M.connections||[]){const a=top(c.from), b=top(c.to); if(!a||!b||!!a.in===!!b.in) continue;
+    const x=a.in?c.to:c.from; if(fc.has(x)||P.has(x)) continue;
+    const p=[]; for(let o=byId[x];o;o=byId[o.parent]){p.unshift(o.id); if(o===(a.in?b:a).o) break}
+    P.set(x,p); d.set(x,p.length-1)}
+  const at=x=>P.get(x)[d.get(x)];
+  for(let s=new Set([...P.keys()].map(at));s.size>OUTCAP;s=new Set([...P.keys()].map(at))){
+    const cand=new Map(), need=s.size-OUTCAP; let best=null;
+    P.forEach((p,x)=>{for(let i=0;i<=d.get(x);i++){const c=cand.get(p[i])||{k:i,s:new Set()}; c.s.add(at(x)); cand.set(p[i],c)}});
+    cand.forEach((c,id)=>{const r=c.s.size-1, ok=r>=need, b=best; if(r<1) return;
+      if(!b||ok&&!b.ok||ok===b.ok&&(ok?c.k>b.k||c.k===b.k&&r<b.r:r>b.r||r===b.r&&c.k>b.k)) best={id,k:c.k,r,ok}});
+    if(!best) break;
+    P.forEach((p,x)=>{const i=p.indexOf(best.id); if(i>-1&&i<=d.get(x)) d.set(x,i)});
+  }
+  const m={map:new Map(),n:new Map(),grp:new Set()};
+  P.forEach((p,x)=>{const g=at(x); m.map.set(x,g); m.n.set(g,(m.n.get(g)||0)+1); if(g!==x) m.grp.add(g)});
+  outC.set(F,m); return m;
+}
+// Parent path of an outside object, below the levels the view already shows ("Machine API").
+const outPath=(id,F)=>{const fc=new Set(F?chain(F):[]); return chain(id).slice(0,-1).filter(x=>!fc.has(x)).map(nm).join(" › ")};
+// Open the level that holds an object, with it selected and centred.
+function jumpTo(id){const o=byId[id]; if(!o) return; navAt=performance.now(); return go(o.parent||null).then(()=>{selected=o.id;showObj(o);render(true);centerOn(o.id)})}
 // Flat mode: every object except functions on one map; endpoints inside a function lift to its nearest non-function ancestor.
 let flat=false;
 const unfn=id=>byId[id];
@@ -365,7 +401,7 @@ function view(F){
   kids(F).forEach(o=>nodes.set(o.id,{o,ext:false}));
   for(const c of M.connections||[]){
     const a=lift(c.from,F), b=lift(c.to,F); if(!a||!b||a.id===b.id||(a.ext&&b.ext)) continue;
-    [a,b].forEach(x=>{if(!nodes.has(x.id))nodes.set(x.id,{o:byId[x.id],ext:x.ext})});
+    [a,b].forEach(x=>{if(!nodes.has(x.id))nodes.set(x.id,{o:byId[x.id],ext:x.ext,n:x.n,grp:x.grp})});
     const k=a.id+"→"+b.id; const e=edges.get(k)||{from:a.id,to:b.id,list:[]}; e.list.push(c); edges.set(k,e);
   }
   return {nodes,edges};
@@ -403,6 +439,10 @@ function render(keepCam,keepOld){
   for(const cid of hot.keys()){const c=M.connections.find(x=>x.id===cid); if(!c) continue;
     const a=lf(c.from), b=lf(c.to); if(a&&b&&a.id===b.id) hotNode=a.id;
     else if(a&&!b) hotNode=a.id; else if(b&&!a) hotNode=b.id;}
+  // A link step lights both of its cards: where it starts and where it ends (reverse steps swap them).
+  let hotFrom=null, hotTo=null; const se=cur&&stepEnds(cur);
+  if(se?.from&&se?.to){hotFrom=lf(se.from)?.id||null; hotTo=lf(se.to)?.id||null}
+  const isEnd=id=>hotFrom===id||hotTo===id;
   let s=`<svg><defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 1L9 5L0 9z" fill="context-stroke"/></marker></defs><g id="cam">`;
   if(focus){
     const sc=g.node("__scope"), o=byId[focus];
@@ -410,7 +450,7 @@ function render(keepCam,keepOld){
     s+=`<g class="scope"><rect x="${sc.x-sc.width/2}" y="${sc.y-sc.height/2-14}" width="${sc.width}" height="${sc.height+14}" rx="10"/><text x="${sc.x-sc.width/2+12}" y="${sc.y-sc.height/2+2}">${esc(o.name||o.id)} · ${esc(TYPE_LABEL[o.type]||o.type)}</text></g>`;
   }
   if(flat){const dep=id=>chain(id).length;[...nodes].filter(([,n])=>n.box).sort((a,b)=>dep(a[0])-dep(b[0])).forEach(([id,n])=>{const p=g.node(id),x=p.x-p.width/2,y=p.y-p.height/2;
-    s+=`<g class="fbox ${hotNode===id?"hot":""}"><rect x="${x}" y="${y}" width="${p.width}" height="${p.height}" rx="10"/><text x="${x+12}" y="${y+18*K}" style="font-size:${12*K}px">${esc(n.o.name||id)} · ${esc(TYPE_LABEL[n.o.type]||n.o.type)}</text></g>`})}
+    s+=`<g class="fbox ${hotNode===id||isEnd(id)?"hot":""}"><rect x="${x}" y="${y}" width="${p.width}" height="${p.height}" rx="10"/><text x="${x+12}" y="${y+18*K}" style="font-size:${12*K}px">${esc(n.o.name||id)} · ${esc(TYPE_LABEL[n.o.type]||n.o.type)}</text></g>`})}
   edges.forEach(e=>{
     const ge=g.edge(e.from,e.to), c0=e.list[0], ek=e.from+"→"+e.to;
     if(e.list.length>1&&expanded.has(ek)){s+=laneEdges(e,ek,ge.points,springKey===ek?0:1,hot);return}
@@ -431,8 +471,9 @@ function render(keepCam,keepOld){
     const col=(o.tags||[]).map(t=>M.tags?.[t]?.color).find(Boolean);
     const dim=tag&&!(o.tags||[]).includes(tag), nk=kids(id).length, deep=nk>0&&!n.ext&&!flat, st=o.status&&o.status!=="live";
     const dl=wrap(o.description,34,2);
-    const tl=TYPE_LABEL[t]||t, sub=[(o.name||"").trim().toLowerCase()!==tl.toLowerCase()&&tl,o.tech&&clip(o.tech,16)].filter(Boolean).join(" · ");
-    s+=`<g class="node ${n.ext?"ext":""} ${dim?"dim":""} ${M.open_issues.includes(id)?"issue":""} ${hotNode===id?"hot":""}" data-id="${esc(id)}">
+    const tl=TYPE_LABEL[t]||t, op=n.ext&&!flat&&outPath(id,focus), sub=op?clip(op+" ›",30):[(o.name||"").trim().toLowerCase()!==tl.toLowerCase()&&tl,o.tech&&clip(o.tech,16)].filter(Boolean).join(" · ");
+    s+=`<g class="node ${n.ext?"ext":""} ${dim?"dim":""} ${M.open_issues.includes(id)?"issue":""} ${hotNode===id||isEnd(id)?"hot":""} ${hotFrom===id&&hotTo!==id?"from":""} ${hotTo===id&&hotFrom!==id?"to":""}" data-id="${esc(id)}">
+      ${hotFrom!==hotTo&&isEnd(id)?`<g class="fe"><rect x="${x}" y="${y-19}" width="${hotFrom===id?44:36}" height="16" rx="8"/><text x="${x+(hotFrom===id?22:18)}" y="${y-7.5}" text-anchor="middle">${hotFrom===id?"START":"END"}</text></g>`:""}
       ${deep?`<rect class="stk" x="${x+8}" y="${y+8}" width="${NW}" height="${NH}" rx="${rx}"/><rect class="stk" x="${x+4}" y="${y+4}" width="${NW}" height="${NH}" rx="${rx}"/>`:""}
       <rect class="box" x="${x}" y="${y}" width="${NW}" height="${NH}" rx="${rx}"/>
       ${col?`<rect x="${x+rx}" y="${y}" width="${NW-2*rx}" height="3" rx="1.5" fill="${esc(col)}"/>`:""}
@@ -442,7 +483,7 @@ function render(keepCam,keepOld){
       <text class="s" x="${x+44}" y="${y+42}">${esc(sub)}</text>
       ${dl.length?dl.map((l,i)=>`<text class="d" x="${x+14}" y="${y+62+i*14}">${esc(l)}</text>`).join(""):`<text class="d none" x="${x+14}" y="${y+62}">No description</text>`}
       ${n.ext||deep||st?`<line class="fl" x1="${x+1}" x2="${x+NW-1}" y1="${fy}" y2="${fy}"/>`:""}
-      ${n.ext?`<text class="ft" x="${x+14}" y="${y+NH-9}">Outside this level</text>`:""}
+      ${n.ext?`<text class="ft" x="${x+14}" y="${y+NH-9}">Outside this level${n.grp?` · ${n.n} grouped`:""}</text>`:""}
       ${deep?`<g class="zbtn" data-z="${esc(id)}"><path class="zhit" d="M${x+1} ${fy}H${x+NW-1}V${y+NH-rx}a${rx-1} ${rx-1} 0 0 1 -${rx-1} ${rx-1}H${x+rx}a${rx-1} ${rx-1} 0 0 1 -${rx-1} -${rx-1}z"/><text class="zt" x="${x+14}" y="${y+NH-9}">${`${nk} components inside ›`}</text></g>`:""}
       ${st?`<text class="ft" x="${x+NW-12}" y="${y+NH-9}" text-anchor="end">${esc(o.status)}</text>`:""}</g>`;
   }
@@ -451,8 +492,8 @@ function render(keepCam,keepOld){
   $("#stage").insertAdjacentHTML("afterbegin",s+"</g></svg>");
   if(!keepCam) fit(); else applyCam();
   $("#stage").querySelectorAll(".node").forEach(el=>{
-    el.onclick=ev=>{if(linkPick) return linkPicked(el.dataset.id); if(ev.target.closest(".zbtn")) return go(el.dataset.id); selected=el.dataset.id;showObj(byId[selected]);paint()};
-    el.ondblclick=()=>{if(linkPick)return;const id=el.dataset.id;if(kids(id).length)go(id);else if(byId[id]?.type==="component"){selected=id;showObj(byId[id]);paint();openCode(id)}};
+    el.onclick=ev=>{if(linkPick) return linkPicked(el.dataset.id); if(performance.now()-navAt<500) return; if(el.classList.contains("ext")) return jumpTo(el.dataset.id); if(ev.target.closest(".zbtn")) return go(el.dataset.id); selected=el.dataset.id;showObj(byId[selected]);paint()};
+    el.ondblclick=()=>{if(linkPick||el.classList.contains("ext")||performance.now()-navAt<500)return;const id=el.dataset.id;if(kids(id).length)go(id);else if(byId[id]?.type==="component"){selected=id;showObj(byId[id]);paint();openCode(id)}};
   });
   paint();
   $("#stage").querySelectorAll(".edge").forEach(el=>el.onclick=()=>{if(el.dataset.c){const c=conns().find(x=>x.id===el.dataset.c);if(c)showConn(c)}else showEdge(edges.get(el.dataset.e),el.dataset.e)});
@@ -801,7 +842,7 @@ $("#q").onchange=e=>{
   if(!M||!e.target.value.trim()) return; const o=findObj(e.target.value);
   $("#smsg").textContent=o?"":"Not found"; clearTimeout(smt); smt=setTimeout(()=>$("#smsg").textContent="",2500);
   if(!o) return;
-  go(o.parent||null).then(()=>{selected=o.id; showObj(o); render(true); centerOn(o.id)});
+  jumpTo(o.id);
 };
 $("#theme").onclick=()=>{const r=document.documentElement;r.dataset.theme=r.dataset.theme==="light"?"dark":"light";try{localStorage.setItem("strata-theme",r.dataset.theme)}catch{}};
 try{const t=localStorage.getItem("strata-theme");if(t)document.documentElement.dataset.theme=t}catch{}
@@ -820,7 +861,8 @@ $("#stage").addEventListener("mousemove",e=>{
   const n=!drag&&!busy&&e.target.closest?.(".node"), o=n&&byId[n.dataset.id];
   if(!o){tip.hidden=true;tipId=null;return}
   if(tipId!==o.id){tipId=o.id; const nk=kids(o.id).length;
-    tip.innerHTML=`<b>${esc(o.name||o.id)}</b><div class="m">${esc(TYPE_LABEL[o.type]||o.type)}${n.classList.contains("ext")?" · outside this level":""}</div>${o.description?`<div>${esc(o.description)}</div>`:'<div class="m">No description</div>'}${nk?`<div class="m">${nk} components inside</div>`:""}`;
+    const ex=n.classList.contains("ext"), op=ex&&outPath(o.id,focus);
+    tip.innerHTML=`<b>${op?esc(op)+" › ":""}${esc(o.name||o.id)}</b><div class="m">${esc(TYPE_LABEL[o.type]||o.type)}${ex?" · outside this level, click to open its level":""}</div>${o.description?`<div>${esc(o.description)}</div>`:'<div class="m">No description</div>'}${nk?`<div class="m">${nk} components inside</div>`:""}`;
     tip.hidden=false}
   const w=tip.offsetWidth,h=tip.offsetHeight; tip.style.left=Math.min(e.clientX+14,innerWidth-w-8)+"px"; tip.style.top=(e.clientY+16+h>innerHeight?e.clientY-h-12:e.clientY+16)+"px";
 });
