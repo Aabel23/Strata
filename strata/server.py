@@ -4,6 +4,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from strata import blocks, c4_edit, c4_layered, codemap, db, service, symbols
 from strata import agents, claude_models, term
 from strata.chat import ChatError, ChatSupervisor
+from strata.chat_claude import check_images
 
 SERVE_EXT = set(".py .js .mjs .ts .tsx .css .html .htm .md .txt .yaml .yml .json .toml .c .h .cpp .hpp .dart .java .kt .go .rs .svg .png .jpg .jpeg .gif .webp".split())
 
@@ -44,6 +45,7 @@ AGENT_LOG_PATH = "/api/agent/log"
 POST_PATHS = (EDIT_PATH, PROJECT_PATH, ITEM_PATH, CHAT_PATH, TERM_PATH, AGENT_PATH)
 TERM_ID = re.compile(r"^[A-Za-z0-9_-]{8,40}$")
 MAX_BODY = 65536
+MAX_CHAT_BODY = 24 * 1024 * 1024  # a chat turn may carry up to four pasted images
 CHAT_PROJECT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
 CHAT_SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _CODEMAP_BUILD_SLOT = threading.Semaphore(1)
@@ -196,7 +198,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             if not (h.get("Content-Type") or "").lower().startswith("application/json"): return self.json({"error": "Content-Type must be application/json"}, 415)
             n = h.get("Content-Length")
             if n is None or not n.isdigit(): return self.json({"error": "Content-Length required"}, 413)
-            if int(n) > MAX_BODY: return self.json({"error": "body too large"}, 413)
+            if int(n) > (MAX_CHAT_BODY if u.path == CHAT_PATH else MAX_BODY): return self.json({"error": "body too large"}, 413)
             try: op = json.loads(self.rfile.read(int(n)))
             except ValueError: op = None
             if not isinstance(op, dict): return self.json({"error": "JSON object body required"}, 400)
@@ -309,9 +311,12 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 if not isinstance(session_id, str) or not CHAT_SESSION_ID.fullmatch(session_id):
                     raise ValueError("invalid session ID")
                 if operation == "turn":
-                    if set(op) != required | {"message"} or not isinstance(op.get("message"), str) or not op["message"].strip() or len(op["message"]) > 100_000:
+                    images = check_images(op.get("images"))  # ValueError for anything but real PNG/JPEG/GIF/WebP
+                    if not set(op) - {"images"} == required | {"message"} or not isinstance(op.get("message"), str) or len(op["message"]) > 100_000 or not (op["message"].strip() or images):
                         raise ValueError("invalid turn message")
-                    return self.json({"ok": True, "turn_id": chat_supervisor.turn(project_id, session_id, op["message"])})
+                    if not images:
+                        return self.json({"ok": True, "turn_id": chat_supervisor.turn(project_id, session_id, op["message"])})
+                    return self.json({"ok": True, "turn_id": chat_supervisor.turn(project_id, session_id, op["message"], op["images"])})
                 if operation == "decide":
                     if set(op) != required | {"approval_id", "allow"} or not isinstance(op.get("approval_id"), str) or not op["approval_id"] or len(op["approval_id"]) > 128 or not isinstance(op.get("allow"), bool):
                         raise ValueError("invalid approval decision")

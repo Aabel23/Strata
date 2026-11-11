@@ -2,9 +2,10 @@
    Strata runs one `claude -p` per chat in a git worktree of the open project (strata/chat_claude.py);
    this file sends messages through POST /api/chat and draws the reply from GET /api/chat/events.
    Claude asks before it runs a tool: those requests show up as cards with Allow / Deny. */
-const CV={key:"strata-claude-chat-v1",sessions:{},cur:null,auth:null,authChecked:false,banner:null,stick:true};
+const CV={key:"strata-claude-chat-v1",sessions:{},cur:null,auth:null,authChecked:false,banner:null,stick:true,images:[]};
 const cvSleep=ms=>new Promise(r=>setTimeout(r,ms));
-const CV_MAX_MESSAGE=100000, CV_MAX_TURNS=200;
+const CV_MAX_MESSAGE=100000, CV_MAX_TURNS=200, CV_MAX_IMAGES=4;
+const CV_IMAGE_TYPES=["image/png","image/jpeg","image/gif","image/webp"], CV_IMAGE_EDGE=1568, CV_IMAGE_BYTES=3.5*1024*1024;
 
 function cvRecord(project,saved={}){
   return {project,sid:saved.sid||null,worktree:saved.worktree||"",turns:saved.turns&&typeof saved.turns==="object"?saved.turns:{},
@@ -35,7 +36,14 @@ function cvScroll(s){
   if(CV.cur!==s||!CV.stick)return;
   const box=$("cv-log");box.scrollTop=box.scrollHeight;
 }
-function cvUser(s,text){return cvAdd(s,el("div","cv-msg cv-user",text))}
+function cvUser(s,text,images=[]){
+  const bubble=el("div","cv-msg cv-user");
+  if(images.length){const row=el("div","cv-user-images");
+    for(const i of images){const img=document.createElement("img");img.src=i.url;img.alt="Pasted image";row.append(img)}
+    bubble.append(row)}
+  if(text)bubble.append(document.createTextNode(text));
+  return cvAdd(s,bubble);
+}
 function cvNote(s,text,kind=""){cvScroll(s);return cvAdd(s,el("div","cv-note"+(kind?" "+kind:""),text))}
 function cvWorking(s,on,label="Claude is working…"){
   if(on){
@@ -167,12 +175,14 @@ async function cvPoll(s,replay=false){
   }finally{s.polling=false;cvControls()}
 }
 async function cvSend(){
-  const s=CV.cur,input=$("cv-input"),text=input.value;
-  if(!s||s.busy||s.sending||!text.trim())return;
+  const s=CV.cur,input=$("cv-input"),text=input.value,images=CV.images;
+  if(!s||s.busy||s.sending||(!text.trim()&&!images.length))return;
   if(text.length>CV_MAX_MESSAGE){cvNote(s,"That message is too long (over 100,000 characters).","bad");return}
   s.sending=true;CV.stick=true;cvControls();
-  const bubble=cvUser(s,text);input.value="";cvGrow();cvScroll(s);
-  const turn=()=>api("/api/chat",{op:"turn",project:s.project,session_id:s.sid,message:text});
+  const bubble=cvUser(s,text,images);input.value="";CV.images=[];cvAttachDraw();cvGrow();cvScroll(s);
+  const shown=text+(images.length?(text?"\n":"")+"["+images.length+(images.length===1?" image]":" images]"):"");
+  const turn=()=>api("/api/chat",{op:"turn",project:s.project,session_id:s.sid,message:text,
+    ...(images.length?{images:images.map(i=>({media_type:i.type,data:i.data}))}:{})});
   try{
     if(!s.sid)await cvStart(s);
     let r;
@@ -181,11 +191,11 @@ async function cvSend(){
       if(await cvAlive(s))throw error;
       cvForget(s,"The previous chat had ended, so this message starts a new one.");await cvStart(s);r=await turn();
     }
-    bubble.dataset.turn=r.turn_id;s.turns[r.turn_id]=text;s.busy=true;cvSave();
+    bubble.dataset.turn=r.turn_id;s.turns[r.turn_id]=shown;s.busy=true;cvSave();
     cvWorking(s,true);cvPoll(s);
   }catch(error){
     bubble.classList.add("failed");cvNote(s,"Message not sent: "+error.message,"bad");
-    if(!input.value)input.value=text;cvGrow();
+    if(!input.value)input.value=text;if(!CV.images.length){CV.images=images;cvAttachDraw()}cvGrow();
   }finally{s.sending=false;cvControls()}
 }
 async function cvStop(){
@@ -201,6 +211,45 @@ async function cvNew(){
   if(old&&old.sid)api("/api/chat",{op:"close",project:p,session_id:old.sid}).catch(()=>{});
   CV.sessions[p]=cvRecord(p);cvSave();chatViewShow();$("cv-input").focus();
 }
+
+/* ---------- pasted / dropped images ---------- */
+// Big images are scaled to CV_IMAGE_EDGE on the long side (what Claude sees anyway) and sent as JPEG.
+function cvImageLoad(file){
+  return new Promise((ok,fail)=>{const url=URL.createObjectURL(file),img=new Image();
+    img.onload=()=>ok({img,url});img.onerror=()=>{URL.revokeObjectURL(url);fail(new Error("not an image"))};img.src=url});
+}
+const cvB64=blob=>new Promise((ok,fail)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(",")[1]||"");r.onerror=()=>fail(r.error);r.readAsDataURL(blob)});
+async function cvImagePrepare(file){
+  const {img,url}=await cvImageLoad(file),w=img.naturalWidth,h=img.naturalHeight;
+  if(CV_IMAGE_TYPES.includes(file.type)&&file.size<=CV_IMAGE_BYTES&&Math.max(w,h)<=CV_IMAGE_EDGE)
+    return {type:file.type,data:await cvB64(file),url};
+  const k=Math.min(1,CV_IMAGE_EDGE/Math.max(w,h)),c=document.createElement("canvas");
+  c.width=Math.max(1,Math.round(w*k));c.height=Math.max(1,Math.round(h*k));
+  const g=c.getContext("2d");g.fillStyle="#fff";g.fillRect(0,0,c.width,c.height);g.drawImage(img,0,0,c.width,c.height);
+  URL.revokeObjectURL(url);
+  const blob=await new Promise(r=>c.toBlob(r,"image/jpeg",.88));if(!blob)throw new Error("could not convert the image");
+  return {type:"image/jpeg",data:await cvB64(blob),url:URL.createObjectURL(blob)};
+}
+async function cvAttach(files){
+  const s=CV.cur;if(!s)return;
+  for(const f of files){
+    if(CV.images.length>=CV_MAX_IMAGES){cvNote(s,"Up to "+CV_MAX_IMAGES+" images per message.","bad");break}
+    try{CV.images.push(await cvImagePrepare(f))}catch(error){cvNote(s,"Could not attach that image: "+error.message,"bad")}
+    cvAttachDraw();
+  }
+  $("cv-input").focus();
+}
+function cvAttachDraw(){
+  const box=$("cv-attach");box.hidden=!CV.images.length;
+  box.replaceChildren(...CV.images.map((i,n)=>{
+    const t=el("div","cv-thumb"),img=document.createElement("img"),x=el("button","","×");
+    img.src=i.url;img.alt="Image "+(n+1);x.type="button";x.title="Remove image";x.setAttribute("aria-label","Remove image "+(n+1));
+    x.onclick=()=>{CV.images.splice(n,1);cvAttachDraw();$("cv-input").focus()};
+    t.append(img,x);return t;
+  }));
+  cvControls();
+}
+const cvImageFiles=list=>[...(list||[])].filter(f=>f&&f.type&&f.type.startsWith("image/"));
 
 /* ---------- sign-in ---------- */
 async function cvCheckAuth(){
@@ -342,6 +391,16 @@ $("cv-input").addEventListener("keydown",e=>{
   if(e.key==="Tab"&&e.shiftKey&&!e.altKey&&!e.ctrlKey&&!e.metaKey){e.preventDefault();cvCycleMode()}
 });
 $("cv-input").addEventListener("input",cvGrow);
+$("cv-input").addEventListener("paste",e=>{
+  const d=e.clipboardData;if(!d||!CV.cur)return;
+  const files=cvImageFiles([...d.items].filter(i=>i.kind==="file").map(i=>i.getAsFile()));
+  if(!files.length)return;
+  if(!d.types.includes("text/plain"))e.preventDefault();  // a screenshot: attach it; copied text with an image still pastes the text
+  cvAttach(files);
+});
+$("cv-form").addEventListener("dragover",e=>{if(CV.cur&&[...e.dataTransfer.types].includes("Files")){e.preventDefault();$("cv-form").classList.add("drop")}});
+$("cv-form").addEventListener("dragleave",e=>{if(!$("cv-form").contains(e.relatedTarget))$("cv-form").classList.remove("drop")});
+$("cv-form").addEventListener("drop",e=>{$("cv-form").classList.remove("drop");const files=cvImageFiles(e.dataTransfer.files);if(files.length&&CV.cur){e.preventDefault();cvAttach(files)}});
 $("cv-new").onclick=cvNew;
 $("cv-model").onchange=$("cv-effort").onchange=$("cv-perm").onchange=cvApplyPicks;
 $("cv-log").addEventListener("scroll",()=>{const b=$("cv-log");CV.stick=b.scrollHeight-b.scrollTop-b.clientHeight<60});
