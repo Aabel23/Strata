@@ -54,9 +54,6 @@ body.dock-resizing{cursor:row-resize;user-select:none}
 .as-row:hover{background:var(--hover)}
 .as-text{display:grid;gap:1px;min-width:0}
 .as-text small{overflow:hidden;color:var(--faint);font-size:11px;text-overflow:ellipsis;white-space:nowrap}
-.as-sep{height:1px;margin:6px 2px;background:var(--line)}
-.as-row select{width:150px;height:26px;padding:0 6px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg);color:var(--fg);font-size:12px}
-.as-row select:hover{border-color:color-mix(in srgb,var(--fg) 18%,var(--line))}
 .as-switch input{appearance:none;position:relative;flex:none;width:28px;height:16px;margin:0;border-radius:999px;background:var(--line);cursor:pointer;transition:background 120ms}
 .as-switch input::after{content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--fg);transition:transform 120ms}
 .as-switch input:checked{background:var(--accent)}

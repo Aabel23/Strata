@@ -260,6 +260,55 @@ function cvAttachDraw(){
 }
 const cvImageFiles=list=>[...(list||[])].filter(f=>f&&f.type&&f.type.startsWith("image/"));
 
+/* ---------- saved chat history ---------- */
+const cvWhen=t=>new Date(t*1000).toLocaleString([],{dateStyle:"medium",timeStyle:"short"});
+const cvHistUrl=(p,id,image)=>"/api/chat/history?project="+encodeURIComponent(p)+(id?"&id="+encodeURIComponent(id):"")+(image?"&image="+encodeURIComponent(image):"");
+async function cvHistory(){
+  const p=CUR.p;if(!p)return;
+  if(CV.hist){CV.hist=null;cvRender();cvControls();return}
+  const box=CV.hist=el("div","cv-hist");box.append(el("p","cv-note","Loading…"));cvRender();cvControls();
+  try{
+    const r=await liveGet(cvHistUrl(p));
+    if(CV.hist!==box)return;
+    if(!r.enabled){box.replaceChildren(el("p","cv-hist-info","Chat history is off: Strata found no vault folder on the server (~/.secondbrain, or the folder named by STRATA_CHAT_VAULT)."));return}
+    const where=el("p","cv-hist-info","Chats are saved as notes in "+r.folder);
+    if(!r.chats.length){box.replaceChildren(where,el("p","cv-hist-info","No saved chats for this project yet. A chat is saved from its first message."));return}
+    box.replaceChildren(where,...r.chats.map(c=>{
+      const row=el("button","cv-hist-row");row.type="button";
+      row.append(el("span","cv-hist-title",c.title),el("span","cv-hist-when",(c.live?"open now · ":"")+cvWhen(c.updated)));
+      row.onclick=()=>cvOpen(p,c.id,box);return row;
+    }));
+  }catch(error){if(CV.hist===box)box.replaceChildren(el("p","cv-note bad","Could not load the history: "+error.message))}
+}
+function cvPaint(s,chat){
+  let bubble=null;
+  for(const b of chat.blocks||[]){
+    if(b.kind==="user")bubble=cvUser(s,b.text||"");
+    else if(b.kind==="image"){
+      if(!bubble)bubble=cvUser(s,"");
+      let row=bubble.querySelector(".cv-user-images");
+      if(!row){row=el("div","cv-user-images");bubble.prepend(row)}
+      const img=document.createElement("img");img.alt="Saved image";row.append(img);
+      liveGet(cvHistUrl(s.project,chat.id,b.image)).then(r=>{img.src="data:"+r.media_type+";base64,"+r.data}).catch(()=>{img.alt="Image not available"});
+    }
+    else if(b.kind==="claude"){cvAdd(s,el("div","cv-msg cv-claude")).append(md(b.text||""));bubble=null}
+    else if(b.kind==="tool")cvAdd(s,el("div","cv-hist-tool",String(b.text||"").replace(/`/g,"")));
+    else cvNote(s,b.text||"");
+  }
+}
+async function cvOpen(p,hid,box){
+  const old=CV.sessions[p],say=text=>box.prepend(el("p","cv-note bad",text));
+  if(old&&old.hid===hid&&(old.sid||old.log.childElementCount)){CV.hist=null;chatViewShow();return}
+  if(old&&(old.busy||old.sending)){say("Claude is still working in the open chat. Stop it or wait, then pick a chat.");return}
+  let chat;
+  try{chat=await liveGet(cvHistUrl(p,hid))}catch(error){say("Could not open that chat: "+error.message);return}
+  if(CUR.p!==p||CV.hist!==box)return;
+  if(old&&old.sid)api("/api/chat",{op:"close",project:p,session_id:old.sid}).catch(()=>{});
+  const s=CV.sessions[p]=cvRecord(p,{hid});
+  cvPaint(s,chat);cvNote(s,"Saved chat from "+(chat.started||"earlier").replace("T"," ")+". Your next message continues it.");
+  CV.hist=null;cvSave();chatViewShow();$("cv-input").focus();
+}
+
 /* ---------- sign-in ---------- */
 async function cvCheckAuth(){
   CV.authChecked=true;

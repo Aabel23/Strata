@@ -57,18 +57,12 @@ $("agent-popup").addEventListener("close",()=>{
 document.addEventListener("keydown",e=>{if(e.ctrlKey&&!e.altKey&&!e.metaKey&&e.key==="`"){e.preventDefault();e.stopPropagation();chatSet(!CHAT.open)}},true);
 
 /* ---------- cards ---------- */
-function agentOptions(select,values,current){
-  if(select.options.length!==values.length)select.replaceChildren(...values.map(v=>new Option(v||"Default",v)));
-  if(document.activeElement!==select)select.value=current||"";
-}
 function agentRender(){
   const d=AG.data;if(!d)return;
   const cards=d.sessions||[],p=CUR.p,auto=$("agent-auto");
   $("dock-agent-count").textContent=String(cards.length);$("dock-agent-count").classList.toggle("on",cards.length>0);
   auto.disabled=!p||!DOCK.session||!DOCK.session.edit;auto.checked=!!(p&&d.auto[p]);
   $("agent-auto-text").textContent=p?"Approved tasks in "+p:"Choose a project first";
-  agentOptions($("agent-model"),d.models,d.model);agentOptions($("agent-effort"),d.efforts,d.effort);
-  $("agent-settings-sum").textContent=(d.model||"default")+" · "+(d.effort||"default");
   $("agent-auto-dot").hidden=!auto.checked;$("agent-settings").querySelector("summary").title="Task agent settings"+(auto.checked?" · auto-run on":"");
   if(!$("dock-status").classList.contains("bad"))dockNote("");
   const byId=new Map(cards.map(c=>[c.id,c]));
@@ -152,7 +146,6 @@ async function agentRun(item,button){const result=await agentOp({op:"run",item},
 $("agent-auto").onchange=()=>{if(CUR.p)agentOp({op:"auto",project:CUR.p,on:$("agent-auto").checked})};
 document.addEventListener("pointerdown",e=>{const d=$("agent-settings");if(d.open&&!d.contains(e.target))d.open=false});
 $("agent-settings").addEventListener("keydown",e=>{if(e.key==="Escape"){const d=$("agent-settings");d.open=false;d.querySelector("summary").focus()}});
-$("agent-model").onchange=$("agent-effort").onchange=()=>agentOp({op:"settings",model:$("agent-model").value,effort:$("agent-effort").value});
 function dockProjectChanged(){agentRender();if(CHAT.open&&PANEL.mode==="chat"&&typeof chatViewShow==="function")chatViewShow()}
 
 /* ---------- terminal ---------- */
