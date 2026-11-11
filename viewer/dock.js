@@ -66,8 +66,11 @@ function agentRender(){
   const cards=d.sessions||[],p=CUR.p,auto=$("agent-auto");
   $("dock-agent-count").textContent=String(cards.length);$("dock-agent-count").classList.toggle("on",cards.length>0);
   auto.disabled=!p||!DOCK.session||!DOCK.session.edit;auto.checked=!!(p&&d.auto[p]);
-  $("agent-auto-text").textContent=p?"Auto-run approved tasks in "+p:"Choose a project to switch on auto-run";
-  if(!$("dock-status").classList.contains("bad"))dockNote(cards.length?cards.length+" active session"+(cards.length===1?"":"s"):"No active agents");
+  $("agent-auto-text").textContent=p?"Approved tasks in "+p:"Choose a project first";
+  agentOptions($("agent-model"),d.models,d.model);agentOptions($("agent-effort"),d.efforts,d.effort);
+  $("agent-settings-sum").textContent=(d.model||"default")+" · "+(d.effort||"default");
+  $("agent-auto-dot").hidden=!auto.checked;$("agent-settings").querySelector("summary").title="Task agent settings"+(auto.checked?" · auto-run on":"");
+  if(!$("dock-status").classList.contains("bad"))dockNote("");
   const byId=new Map(cards.map(c=>[c.id,c]));
   const children=new Map(),roots=[];
   for(const c of cards){
@@ -75,11 +78,15 @@ function agentRender(){
     else roots.push(c);
   }
   const makeCard=c=>{
-    const b=el("button","agent-card");b.type="button";
-    const head=el("span","agent-card-title"),dot=el("i");head.append(dot,c.kind+" · "+(c.status==="running"?"working":c.status));
-    const task=el("span","agent-card-task",c.task?"Task: #"+c.task.id+" "+c.task.title:"Task: —");
-    const branch=el("span","agent-card-branch","Branch: "+(c.branch||"—"));
-    b.append(head,task,branch);b.title=c.terminal?"Open live terminal":"Open agent details";
+    const live=c.status==="running",b=el("button","agent-card"+(live?" live":""));b.type="button";
+    const head=el("span","agent-card-title"),dot=el("i");
+    head.append(dot,el("span","agent-card-kind",c.kind),el("span","agent-card-state",live?"Working":c.status||"idle"));
+    const task=el("span","agent-card-task"+(c.task?"":" none"));
+    if(c.task)task.append(el("span","agent-card-id","#"+c.task.id),document.createTextNode(c.task.title));else task.textContent="No task";
+    const meta=el("span","agent-card-meta");
+    meta.append(svg(S("0 0 16 16",'<circle cx="5" cy="4" r="1.5"/><circle cx="5" cy="12" r="1.5"/><circle cx="11" cy="6" r="1.5"/><path d="M5 5.5v5M11 7.5c0 2-2 2.5-6 3"/>','stroke-width="1.3" stroke-linecap="round"')),el("span","",c.branch||"—"));
+    if(c.source)meta.append(el("span","agent-card-src",c.source==="run"?"headless":c.source));
+    b.append(head,task,meta);b.title=c.terminal?"Open live terminal":"Open agent details";
     b.onclick=()=>agentOpen(c);return b;
   };
   const seen=new Set();
@@ -93,8 +100,15 @@ function agentRender(){
   };
   const rows=roots.map(makeNode).filter(Boolean);
   for(const c of cards)if(!seen.has(c.id))rows.push(makeNode(c));
-  $("agent-cards").replaceChildren(...(rows.length?rows:[el("p","agent-empty","No active agents. Start Claude or Codex in the AI chat terminal to see a card here.")]));
+  $("agent-cards").replaceChildren(...(rows.length?rows:[agentEmpty()]));
 }
+function agentEmpty(){
+  const box=el("div","agent-empty");
+  box.append(el("strong","","No active agents"),el("span","","Start Claude or Codex in the AI chat terminal, or switch on auto-run in settings."));
+  return box;
+}
+document.addEventListener("click",e=>{const d=$("agent-settings");if(d.open&&!d.contains(e.target))d.open=false});
+document.addEventListener("keydown",e=>{const d=$("agent-settings");if(e.key==="Escape"&&d.open){d.open=false;d.querySelector("summary").focus()}});
 async function agentPoll(){
   if(AG.pollBusy||document.hidden)return;AG.pollBusy=true;
   try{await dockSession();AG.data=await liveGet("/api/agents");$("dock-status").classList.remove("bad");agentRender()}

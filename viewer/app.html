@@ -33,13 +33,16 @@
     <section id="dock" aria-label="Agents">
       <div id="dock-resize" role="separator" aria-label="Resize panel" aria-orientation="horizontal" tabindex="0"></div>
       <header id="dock-bar">
-        <strong>Agents <span id="dock-agent-count" aria-label="Running agents">0</span></strong>
+        <strong id="dock-title">Agents <span id="dock-agent-count" aria-label="Running agents">0</span></strong>
         <span id="dock-status" role="status" aria-live="polite"></span>
-        <details id="agent-settings"><summary>Task agent settings</summary>
-          <div id="agent-settings-pop">
-            <label id="agent-auto-label"><input id="agent-auto" type="checkbox" disabled> <span id="agent-auto-text">Auto-run approved tasks</span></label>
-            <label for="agent-model">Model</label><select id="agent-model"></select>
-            <label for="agent-effort">Effort</label><select id="agent-effort"></select>
+        <details id="agent-settings">
+          <summary title="Task agent settings"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h7M12.5 4.5h1M2.5 11.5h1M6.5 11.5h7"/><circle cx="11" cy="4.5" r="1.5"/><circle cx="5" cy="11.5" r="1.5"/></svg><span id="agent-settings-sum">Task agents</span><i id="agent-auto-dot" hidden></i></summary>
+          <div class="as-pop" role="group" aria-label="Task agent settings">
+            <div class="as-head">Task agents</div>
+            <label class="as-row as-switch"><span class="as-text"><span>Auto-run</span><small id="agent-auto-text">Approved tasks</small></span><input id="agent-auto" type="checkbox" role="switch" disabled></label>
+            <div class="as-sep"></div>
+            <label class="as-row"><span>Model</span><select id="agent-model"></select></label>
+            <label class="as-row"><span>Effort</span><select id="agent-effort"></select></label>
           </div>
         </details>
         <button id="dock-toggle" class="ib" type="button" aria-expanded="false" aria-controls="dock-body" aria-label="Show or hide Agents" title="Show or hide Agents"></button>
