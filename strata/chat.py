@@ -758,9 +758,14 @@ class ChatSupervisor:
                 raise ChatError("chat session is closed")
             return record
 
-    def turn(self, project: str, session_id: str, message: str) -> str:
+    def turn(self, project: str, session_id: str, message: str, images: list | None = None) -> str:
         with self._lock:
-            return self._get(project, session_id)["session"].turn(message)
+            session = self._get(project, session_id)["session"]
+            if not images:
+                return session.turn(message)
+            if getattr(session, "provider", "") != "claude":
+                raise ChatError("only Claude chats take images")
+            return session.turn(message, images)
 
     def events(self, project: str, session_id: str, after: int = 0) -> list[dict[str, Any]]:
         with self._lock:

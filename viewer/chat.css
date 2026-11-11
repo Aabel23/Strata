@@ -80,3 +80,13 @@ button.cv-allow:hover{background:var(--accent-soft)}
 #cv-send.stop{border-color:var(--st-block);color:var(--st-block)}
 #cv-send:disabled{opacity:.5;cursor:default}
 @media(prefers-reduced-motion:reduce){.cv-working i{animation:none;opacity:.7}}
+#cv-attach{display:flex;flex-wrap:wrap;gap:6px}
+#cv-attach[hidden]{display:none}
+.cv-thumb{position:relative;width:56px;height:56px;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--bg)}
+.cv-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.cv-thumb button{position:absolute;top:2px;right:2px;width:18px;height:18px;padding:0;border:0;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:13px;line-height:18px;cursor:pointer}
+.cv-thumb button:hover,.cv-thumb button:focus-visible{background:var(--st-block)}
+#cv-form.drop{outline:2px dashed var(--accent);outline-offset:-4px}
+.cv-user-images{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px}
+.cv-user-images img{max-width:160px;max-height:120px;border-radius:var(--r);border:1px solid var(--line);display:block}
+.cv-user-images:last-child{margin-bottom:0}
