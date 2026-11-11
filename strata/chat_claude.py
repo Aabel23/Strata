@@ -101,12 +101,15 @@ class ClaudeSession:
     """One Claude Code conversation in `cwd`. The child starts on the first turn and stays for the following ones."""
 
     def __init__(self, cwd, provider: str = "claude", model: str | None = None, *, effort: str | None = None,
-                 permission: str = DEFAULT_PERMISSION, popen=subprocess.Popen,
+                 permission: str = DEFAULT_PERMISSION, resume: str | None = None, on_event=None, popen=subprocess.Popen,
                  environ: dict[str, str] | None = None, approval_timeout: int = APPROVAL_TIMEOUT, replay_limit: int = MAX_REPLAY):
         if provider != "claude":
             raise ValueError("provider must be claude")
         _check_settings(model, effort, permission)
+        if resume is not None and not (isinstance(resume, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", resume)):
+            raise ValueError("invalid conversation to resume")
         self.cwd, self.provider = os.fspath(cwd), provider
+        self.on_event = on_event  # called with every event as it is emitted (chat history)
         self.model, self.effort, self.permission = model or None, effort or None, permission
         self._popen, self._source_env = popen, dict(os.environ if environ is None else environ)
         self._env = _child_env(self._source_env)
@@ -120,7 +123,8 @@ class ClaudeSession:
         self._active_turn: str | None = None
         self._closed = self._verified = False
         self._skip_results = 0  # an interrupted turn still ends with one result message; it was already reported as cancelled
-        self._thread_id: str | None = None
+        self._thread_id: str | None = resume  # an earlier conversation in this cwd: the first launch resumes it
+        self._init_seen = False
 
     # ---- status and sign-in (no session needed) ----
     @classmethod
@@ -161,6 +165,7 @@ class ClaudeSession:
             args += ["--effort", self.effort]
         if self._thread_id:  # relaunched after a settings change: carry on the same conversation
             args += ["--resume", self._thread_id]
+        self._init_seen = False
         try:
             self._proc = self._popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                      text=True, bufsize=1, cwd=self.cwd, env=self._env)
@@ -168,9 +173,15 @@ class ClaudeSession:
             raise ClaudeError("could not start Claude Code") from exc
         threading.Thread(target=self._read_loop, args=(self._proc,), daemon=True).start()
 
-    def turn(self, message: str) -> str:
-        if not isinstance(message, str) or not message.strip() or len(message) > MAX_MESSAGE:
+    def turn(self, message: str, images: list[dict[str, str]] | None = None) -> str:
+        """`images`: [{media_type, data(base64)}], already validated by the caller; they go to Claude before the text."""
+        if not isinstance(message, str) or len(message) > MAX_MESSAGE or not (message.strip() or images):
             raise ClaudeError("invalid message")
+        content: Any = message
+        if images:
+            content = [{"type": "image", "source": {"type": "base64", "media_type": i["media_type"], "data": i["data"]}} for i in images]
+            if message.strip():
+                content.append({"type": "text", "text": message})
         with self._lock:
             if self._closed:
                 raise ClaudeError("session is closed")
@@ -181,7 +192,7 @@ class ClaudeSession:
             turn_id = secrets.token_urlsafe(12)
             self._active_turn = turn_id
             try:
-                self._send({"type": "user", "message": {"role": "user", "content": message}})
+                self._send({"type": "user", "message": {"role": "user", "content": content}})
             except ClaudeError:
                 self._active_turn = None
                 raise
@@ -299,12 +310,17 @@ class ClaudeSession:
                 self._proc = None
             if self._active_turn and not self._closed:  # the child died mid-turn
                 self._active_turn = None
-                self._emit("error", {"message": "Claude Code stopped unexpectedly. Check that you are signed in, then send the message again."})
+                if self._thread_id and not self._init_seen:  # it never got going while resuming: do not retry that forever
+                    self._thread_id = None
+                    self._emit("error", {"message": "Claude Code could not reopen the earlier conversation. Send the message again to continue without its memory."})
+                else:
+                    self._emit("error", {"message": "Claude Code stopped unexpectedly. Check that you are signed in, then send the message again."})
                 self._emit("turn_completed", {"turn": {"status": "failed"}})
 
     def _handle(self, m: dict[str, Any]) -> None:
         kind = m.get("type")
         if kind == "system" and m.get("subtype") == "init":
+            self._init_seen = True
             if isinstance(m.get("session_id"), str):
                 self._thread_id = m["session_id"][:128]
         elif kind == "stream_event":
@@ -386,6 +402,11 @@ class ClaudeSession:
             while len(self._events) > self._replay_limit or self._event_bytes > MAX_REPLAY_BYTES:
                 self._event_bytes -= self._events.popleft()[1]
             self._changed.notify_all()
+            if self.on_event is not None:
+                try:
+                    self.on_event(event)
+                except Exception:
+                    pass  # history must never break the chat
 
     @property
     def inference_status(self) -> dict[str, Any]:

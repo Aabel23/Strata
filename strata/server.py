@@ -2,7 +2,7 @@
 import base64, hmac, http.server, json, mimetypes, pathlib, re, secrets, socket, threading
 from urllib.parse import parse_qs, unquote, urlsplit
 from strata import blocks, c4_edit, c4_layered, codemap, db, service, symbols
-from strata import agents, claude_models, term
+from strata import agents, chat_history, claude_models, term
 from strata.chat import ChatError, ChatSupervisor
 
 SERVE_EXT = set(".py .js .mjs .ts .tsx .css .html .htm .md .txt .yaml .yml .json .toml .c .h .cpp .hpp .dart .java .kt .go .rs .svg .png .jpg .jpeg .gif .webp".split())
@@ -36,6 +36,8 @@ CHAT_PATH = "/api/chat"
 CHAT_EVENTS_PATH = "/api/chat/events"
 CHAT_AUTH_PATH = "/api/chat/auth"
 CHAT_DIFF_PATH = "/api/chat/diff"
+CHAT_HISTORY_PATH = "/api/chat/history"
+CHAT_MAX_BODY = 24 * 1024 * 1024  # a chat turn may carry pasted images (chat_history.MAX_IMAGES x MAX_IMAGE_BYTES, base64)
 TERM_PATH = "/api/term"
 TERM_READ_PATH = "/api/term/read"
 AGENT_PATH = "/api/agent"
@@ -196,7 +198,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             if not (h.get("Content-Type") or "").lower().startswith("application/json"): return self.json({"error": "Content-Type must be application/json"}, 415)
             n = h.get("Content-Length")
             if n is None or not n.isdigit(): return self.json({"error": "Content-Length required"}, 413)
-            if int(n) > MAX_BODY: return self.json({"error": "body too large"}, 413)
+            if int(n) > (CHAT_MAX_BODY if u.path == CHAT_PATH else MAX_BODY): return self.json({"error": "body too large"}, 413)
             try: op = json.loads(self.rfile.read(int(n)))
             except ValueError: op = None
             if not isinstance(op, dict): return self.json({"error": "JSON object body required"}, 400)
@@ -280,8 +282,11 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 if not isinstance(project_id, str) or not CHAT_PROJECT_ID.fullmatch(project_id):
                     raise ValueError("invalid project")
                 if operation == "start":
-                    if set(op) - {"op", "project", "provider", "model", "effort", "permission"}:
+                    if set(op) - {"op", "project", "provider", "model", "effort", "permission", "resume"}:
                         raise ValueError("unexpected start field")
+                    resume = op.get("resume")  # id of a chat in the history to continue
+                    if resume is not None and (op.get("provider") != "claude" or not isinstance(resume, str) or not chat_history.HISTORY_ID.fullmatch(resume)):
+                        raise ValueError("invalid chat to resume")
                     provider = op.get("provider", "codex")
                     model = op.get("model")
                     if provider not in ("claude", "codex", "openrouter", "omniroute"):
@@ -298,6 +303,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                     root = roots.get(project_id)
                     if not root:
                         return self.json({"error": "project is not registered for chat"}, 404)
+                    if resume is not None: settings["resume"] = resume
                     result = chat_supervisor.start(project_id, root, provider=provider, model=model, **settings)
                     return self.json({"ok": True, **result})
 
@@ -309,9 +315,13 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 if not isinstance(session_id, str) or not CHAT_SESSION_ID.fullmatch(session_id):
                     raise ValueError("invalid session ID")
                 if operation == "turn":
-                    if set(op) != required | {"message"} or not isinstance(op.get("message"), str) or not op["message"].strip() or len(op["message"]) > 100_000:
+                    if set(op) - {"images"} != required | {"message"} or not isinstance(op.get("message"), str) or len(op["message"]) > 100_000:
                         raise ValueError("invalid turn message")
-                    return self.json({"ok": True, "turn_id": chat_supervisor.turn(project_id, session_id, op["message"])})
+                    images = chat_history.check_images(op.get("images"))  # pasted images; ValueError when one is not a real image
+                    if not op["message"].strip() and not images:
+                        raise ValueError("invalid turn message")
+                    turn_args = (project_id, session_id, op["message"], images) if images else (project_id, session_id, op["message"])
+                    return self.json({"ok": True, "turn_id": chat_supervisor.turn(*turn_args)})
                 if operation == "decide":
                     if set(op) != required | {"approval_id", "allow"} or not isinstance(op.get("approval_id"), str) or not op["approval_id"] or len(op["approval_id"]) > 128 or not isinstance(op.get("allow"), bool):
                         raise ValueError("invalid approval decision")
@@ -430,7 +440,8 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             try:
                 parsed = parse_qs(raw_query, keep_blank_values=True, strict_parsing=True)
                 allowed = {CHAT_EVENTS_PATH: {"project", "session_id", "after"},
-                           CHAT_AUTH_PATH: {"provider"}, CHAT_DIFF_PATH: {"project", "session_id"}}[path]
+                           CHAT_AUTH_PATH: {"provider"}, CHAT_DIFF_PATH: {"project", "session_id"},
+                           CHAT_HISTORY_PATH: {"project", "id", "image"}}[path]
                 if any(k not in allowed or len(v) != 1 for k, v in parsed.items()):
                     raise ValueError
                 q = {k: values[0] for k, values in parsed.items()}
@@ -441,6 +452,15 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                         raise ValueError
                     status = chat_supervisor.auth_status(provider)
                     return self.json({**status, **claude_models.chat_catalog()} if provider == "claude" else status)
+                if path == CHAT_HISTORY_PATH:  # the list of saved chats, one chat (id), or one of its images (id + image)
+                    project_id, hid, image = q.get("project"), q.get("id"), q.get("image")
+                    if (not project_id or not CHAT_PROJECT_ID.fullmatch(project_id) or (hid is None and image is not None)
+                            or (hid is not None and not chat_history.HISTORY_ID.fullmatch(hid))
+                            or (image is not None and not chat_history.IMAGE_NAME.fullmatch(image))):
+                        raise ValueError
+                    if project_id not in chat_projects(): raise ValueError
+                    if hid is None: return self.json(chat_supervisor.history_list(project_id))
+                    return self.json(chat_supervisor.history_read(project_id, hid, image), **{"Cache-Control": "no-store"})
                 project_id, session_id = q.get("project"), q.get("session_id")
                 if not project_id or not CHAT_PROJECT_ID.fullmatch(project_id) or not session_id or not CHAT_SESSION_ID.fullmatch(session_id):
                     raise ValueError
@@ -501,7 +521,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             q = {k: v[-1] for k, v in parse_qs(u.query, keep_blank_values=True).items()}
             parts = [unquote(x) for x in u.path.split("/")]  # ['', 'api', ...]
             p = u.path
-            if p in (CHAT_EVENTS_PATH, CHAT_AUTH_PATH, CHAT_DIFF_PATH):
+            if p in (CHAT_EVENTS_PATH, CHAT_AUTH_PATH, CHAT_DIFF_PATH, CHAT_HISTORY_PATH):
                 return self.chat_get(p, u.query)
             if p in (TERM_READ_PATH, AGENTS_PATH, AGENT_LOG_PATH): return self.live_get(p, q)
             if p in STATIC: return self.file(VIEWER / STATIC[p])

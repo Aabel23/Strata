@@ -319,3 +319,28 @@ def test_claude_provider_start_auth_and_sign_in(chat_server):
                 {"op": "login", "provider": "claude", "extra": 1}, {"op": "login", "provider": "gemini"}):
         assert post(base, token, bad)[0] == 400
     assert calls == [None, "abc#123"]
+
+
+def test_history_route_and_turn_images(chat_server):
+    import base64
+    base, token, _, supervisor, *_ = chat_server
+    png = {"media_type": "image/png", "data": base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\0" * 16).decode()}
+    hid, seen = "20261111-101500-0a1b2c3d", []
+    supervisor.history_list = lambda project: {"enabled": True, "folder": "/vault/strata-chat/p", "chats": [{"id": hid, "title": "t", "live": False}]}
+    supervisor.history_read = lambda project, chat, image=None: seen.append((project, chat, image)) or {"id": chat, "blocks": []}
+    supervisor.turn = lambda *args: seen.append(args) or "turn-9"
+    path = "/api/chat/history?project=p"
+    assert get(base, path)[0] == 403
+    assert decoded(get(base, path, token=token))["chats"][0]["id"] == hid
+    assert get(base, path + "&id=" + hid, token=token)[0] == 200 and get(base, path + "&id=" + hid + "&image=" + hid + "-1.png", token=token)[0] == 200
+    assert seen == [("p", hid, None), ("p", hid, hid + "-1.png")]
+    for bad in ("?project=nope", "?project=p&id=../../x", "?project=p&image=" + hid + "-1.png", "?project=p&id=" + hid + "&image=..%2Fx.png", "?project=p&extra=1"):
+        assert get(base, "/api/chat/history" + bad, token=token)[0] == 400
+    assert post(base, token, {"op": "start", "project": "p", "provider": "claude", "resume": hid})[0] == 200 and supervisor.settings["resume"] == hid
+    for bad in ({"op": "start", "project": "p", "provider": "claude", "resume": "../x"}, {"op": "start", "project": "p", "resume": hid}):
+        assert post(base, token, bad)[0] == 400
+    turn = {"op": "turn", "project": "p", "session_id": "session-1", "message": "", "images": [png]}
+    assert decoded(post(base, token, turn))["turn_id"] == "turn-9" and seen[-1] == ("p", "session-1", "", [png])
+    assert post(base, token, {**turn, "message": "plain", "images": []})[0] == 200 and seen[-1] == ("p", "session-1", "plain")
+    for bad in ({**turn, "images": []}, {**turn, "images": [{**png, "media_type": "image/svg+xml"}]}, {**turn, "images": [png] * 5}, {**turn, "extra": 1}):
+        assert post(base, token, bad)[0] == 400

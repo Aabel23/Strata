@@ -1,13 +1,18 @@
 /* Chat with Claude in the AI chat panel (the "Chat" tab).
    Strata runs one `claude -p` per chat in a git worktree of the open project (strata/chat_claude.py);
    this file sends messages through POST /api/chat and draws the reply from GET /api/chat/events.
-   Claude asks before it runs a tool: those requests show up as cards with Allow / Deny. */
-const CV={key:"strata-claude-chat-v1",sessions:{},cur:null,auth:null,authChecked:false,banner:null,stick:true};
+   Claude asks before it runs a tool: those requests show up as cards with Allow / Deny.
+   Every chat is saved by the server as a note in the user's vault (strata/chat_history.py); "History" lists
+   them (GET /api/chat/history) and reopening one continues it. Images pasted into the message box go with the turn. */
+const CV={key:"strata-claude-chat-v1",sessions:{},cur:null,auth:null,authChecked:false,banner:null,stick:true,hist:null};
 const cvSleep=ms=>new Promise(r=>setTimeout(r,ms));
 const CV_MAX_MESSAGE=100000, CV_MAX_TURNS=200;
+const CV_IMG_TYPES=["image/png","image/jpeg","image/gif","image/webp"], CV_MAX_IMAGES=4, CV_MAX_IMAGE=3.5*1024*1024;
 
+// hid: id of this chat's note in the history (set by the server on start, or picked from History to continue it).
+// images: pasted images waiting to go with the next message, [{media_type,data(base64),url(data URL)}].
 function cvRecord(project,saved={}){
-  return {project,sid:saved.sid||null,worktree:saved.worktree||"",turns:saved.turns&&typeof saved.turns==="object"?saved.turns:{},
+  return {project,sid:saved.sid||null,hid:saved.hid||null,images:[],worktree:saved.worktree||"",turns:saved.turns&&typeof saved.turns==="object"?saved.turns:{},
     settings:saved.settings&&typeof saved.settings==="object"?saved.settings:null,
     seq:0,log:el("div","cv-thread"),busy:false,sending:false,polling:false,replayed:!saved.sid,
     assistant:null,tools:{},approvals:{},working:null,last:null};
@@ -20,7 +25,7 @@ function cvSave(){
   try{const out={};
     for(const [p,s] of Object.entries(CV.sessions))if(s.sid){
       const ids=Object.keys(s.turns);for(const id of ids.slice(0,Math.max(0,ids.length-CV_MAX_TURNS)))delete s.turns[id];
-      out[p]={sid:s.sid,worktree:s.worktree,turns:s.turns,settings:s.settings};
+      out[p]={sid:s.sid,hid:s.hid,worktree:s.worktree,turns:s.turns,settings:s.settings};
     }
     sessionStorage.setItem(CV.key,JSON.stringify(out));
   }catch{}
@@ -35,7 +40,16 @@ function cvScroll(s){
   if(CV.cur!==s||!CV.stick)return;
   const box=$("cv-log");box.scrollTop=box.scrollHeight;
 }
-function cvUser(s,text){return cvAdd(s,el("div","cv-msg cv-user",text))}
+function cvThumb(box,src){
+  const img=el("img","cv-img");img.alt="Attached image";if(src)img.src=src;
+  img.title="Click to enlarge";img.onclick=()=>img.classList.toggle("big");
+  box.append(img);return img;
+}
+function cvUser(s,text,images){
+  const bubble=el("div","cv-msg cv-user",text);
+  for(const src of images||[])cvThumb(bubble,src);
+  return cvAdd(s,bubble);
+}
 function cvNote(s,text,kind=""){cvScroll(s);return cvAdd(s,el("div","cv-note"+(kind?" "+kind:""),text))}
 function cvWorking(s,on,label="Claude is working…"){
   if(on){
@@ -144,8 +158,15 @@ function cvForget(s,why){
 async function cvStart(s){
   cvWorking(s,true,"Starting Claude…");
   try{const want=cvPrefs();
-    const r=await api("/api/chat",{op:"start",project:s.project,provider:"claude",...(want.model?{model:want.model}:{}),...(want.effort?{effort:want.effort}:{}),permission:want.permission});
-    s.sid=r.session_id;s.worktree=r.worktree||"";s.seq=0;s.replayed=true;s.settings=r.settings||want;cvSave();cvWhere();
+    const start=resume=>api("/api/chat",{op:"start",project:s.project,provider:"claude",...(want.model?{model:want.model}:{}),...(want.effort?{effort:want.effort}:{}),permission:want.permission,...(resume?{resume}:{})});
+    let r;
+    try{r=await start(s.hid)}
+    catch(error){  // the saved chat cannot be continued (its note is gone, or it is open in another tab)
+      if(!s.hid)throw error;
+      s.hid=null;r=await start(null);cvNote(s,"The earlier chat could not be reopened, so this continues as a new one.");
+    }
+    if(r.resumed===false)cvNote(s,"The worktree of the earlier chat is no longer on disk. Claude continues in a new one and does not remember the earlier messages.");
+    s.sid=r.session_id;s.hid=r.history||null;s.worktree=r.worktree||"";s.seq=0;s.replayed=true;s.settings=r.settings||want;cvSave();cvWhere();
   }finally{if(!s.busy)cvWorking(s,false)}
 }
 async function cvPoll(s,replay=false){
@@ -155,7 +176,7 @@ async function cvPoll(s,replay=false){
       let data;
       try{data=await liveGet(cvEventsUrl(s))}
       catch(error){
-        if(error.status===400||error.status===409){cvForget(s,"This chat ended (Strata restarted or the session closed). Your next message starts a new one.");break}
+        if(error.status===400||error.status===409){cvForget(s,"This chat's session ended (Strata restarted or it was closed). Your next message "+(s.hid?"reopens it.":"starts a new one."));break}
         await cvSleep(2000);continue;
       }
       for(const ev of data.events||[]){if(ev.seq>s.seq){s.seq=ev.seq;cvEvent(s,ev,replay)}}
@@ -167,25 +188,30 @@ async function cvPoll(s,replay=false){
   }finally{s.polling=false;cvControls()}
 }
 async function cvSend(){
-  const s=CV.cur,input=$("cv-input"),text=input.value;
-  if(!s||s.busy||s.sending||!text.trim())return;
+  const s=CV.cur,input=$("cv-input"),text=input.value,images=s?s.images:[];
+  if(!s||s.busy||s.sending||(!text.trim()&&!images.length))return;
   if(text.length>CV_MAX_MESSAGE){cvNote(s,"That message is too long (over 100,000 characters).","bad");return}
-  s.sending=true;CV.stick=true;cvControls();
-  const bubble=cvUser(s,text);input.value="";cvGrow();cvScroll(s);
-  const turn=()=>api("/api/chat",{op:"turn",project:s.project,session_id:s.sid,message:text});
+  s.sending=true;CV.stick=true;
+  if(CV.hist){CV.hist=null;cvRender()}
+  const bubble=cvUser(s,text,images.map(i=>i.url));input.value="";s.images=[];cvAttachDraw();cvControls();cvGrow();cvScroll(s);
+  const turn=()=>api("/api/chat",{op:"turn",project:s.project,session_id:s.sid,message:text,...(images.length?{images:images.map(i=>({media_type:i.media_type,data:i.data}))}:{})});
   try{
     if(!s.sid)await cvStart(s);
     let r;
     try{r=await turn()}
     catch(error){
       if(await cvAlive(s))throw error;
-      cvForget(s,"The previous chat had ended, so this message starts a new one.");await cvStart(s);r=await turn();
+      cvForget(s,s.hid?"The chat's session had ended, so it was reopened for this message.":"The previous chat had ended, so this message starts a new one.");await cvStart(s);r=await turn();
     }
-    bubble.dataset.turn=r.turn_id;s.turns[r.turn_id]=text;s.busy=true;cvSave();
+    // kept for redrawing after a page reload; the images themselves stay out of sessionStorage (they are in the history note)
+    const count=images.length?"["+images.length+(images.length>1?" images]":" image]"):"";
+    bubble.dataset.turn=r.turn_id;s.turns[r.turn_id]=text+(text&&count?"\n":"")+count;s.busy=true;cvSave();
     cvWorking(s,true);cvPoll(s);
   }catch(error){
     bubble.classList.add("failed");cvNote(s,"Message not sent: "+error.message,"bad");
-    if(!input.value)input.value=text;cvGrow();
+    if(!input.value)input.value=text;
+    if(!s.images.length){s.images=images;if(CV.cur===s)cvAttachDraw()}
+    cvGrow();
   }finally{s.sending=false;cvControls()}
 }
 async function cvStop(){
@@ -199,7 +225,87 @@ async function cvNew(){
   const p=CUR.p;if(!p)return;
   const old=CV.sessions[p];
   if(old&&old.sid)api("/api/chat",{op:"close",project:p,session_id:old.sid}).catch(()=>{});
-  CV.sessions[p]=cvRecord(p);cvSave();chatViewShow();$("cv-input").focus();
+  CV.sessions[p]=cvRecord(p);CV.hist=null;cvSave();chatViewShow();$("cv-input").focus();
+}
+
+/* ---------- pasted images ---------- */
+const cvDataUrl=blob=>new Promise((ok,bad)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=()=>bad(r.error);r.readAsDataURL(blob)});
+// Re-encode what cannot go as it is (another format, or too large): at most 2000px on the long side, JPEG on white.
+async function cvShrink(blob){
+  const bmp=await createImageBitmap(blob),k=Math.min(1,2000/Math.max(bmp.width,bmp.height));
+  const c=document.createElement("canvas"),g=c.getContext("2d");
+  c.width=Math.max(1,Math.round(bmp.width*k));c.height=Math.max(1,Math.round(bmp.height*k));
+  g.fillStyle="#fff";g.fillRect(0,0,c.width,c.height);g.drawImage(bmp,0,0,c.width,c.height);
+  return new Promise(ok=>c.toBlob(ok,"image/jpeg",.9));
+}
+async function cvAttach(s,file){
+  if(s.images.length>=CV_MAX_IMAGES){cvNote(s,"A message takes at most "+CV_MAX_IMAGES+" images.","bad");return}
+  try{
+    let blob=file;
+    if(!CV_IMG_TYPES.includes(blob.type)||blob.size>CV_MAX_IMAGE)blob=await cvShrink(blob);
+    if(!blob||blob.size>CV_MAX_IMAGE)throw new Error("it is too large");
+    const url=await cvDataUrl(blob);
+    if(s.images.length>=CV_MAX_IMAGES)return;
+    s.images.push({media_type:blob.type,data:url.slice(url.indexOf(",")+1),url});
+  }catch(error){cvNote(s,"Could not attach that image: "+(error&&error.message||"it could not be read"),"bad")}
+  if(CV.cur===s)cvAttachDraw();
+}
+function cvAttachDraw(){
+  const s=CV.cur,box=$("cv-attach"),list=s?s.images:[];
+  box.hidden=!list.length;
+  box.replaceChildren(...list.map((image,i)=>{
+    const chip=el("span","cv-chip"),pic=el("img"),x=el("button","","×");
+    pic.src=image.url;pic.alt="Image "+(i+1)+" to send";
+    x.type="button";x.title="Remove this image";x.setAttribute("aria-label","Remove image "+(i+1));
+    x.onclick=()=>{const at=s.images.indexOf(image);if(at>=0)s.images.splice(at,1);cvAttachDraw();$("cv-input").focus()};
+    chip.append(pic,x);return chip;
+  }));
+}
+
+/* ---------- history: earlier chats, saved as notes in the vault ---------- */
+const cvWhen=t=>new Date(t*1000).toLocaleString([],{dateStyle:"medium",timeStyle:"short"});
+const cvHistUrl=(p,id,image)=>"/api/chat/history?project="+encodeURIComponent(p)+(id?"&id="+encodeURIComponent(id):"")+(image?"&image="+encodeURIComponent(image):"");
+async function cvHistory(){
+  const p=CUR.p;if(!p)return;
+  if(CV.hist){CV.hist=null;cvRender();cvControls();return}
+  const box=CV.hist=el("div","cv-hist");box.append(el("p","cv-note","Loading…"));cvRender();cvControls();
+  try{
+    const r=await liveGet(cvHistUrl(p));
+    if(CV.hist!==box)return;
+    if(!r.enabled){box.replaceChildren(el("p","cv-hist-info","Chat history is off: Strata found no vault folder on the server (~/.secondbrain, or the folder named by STRATA_CHAT_VAULT)."));return}
+    const where=el("p","cv-hist-info","Chats are saved as notes in "+r.folder);
+    if(!r.chats.length){box.replaceChildren(where,el("p","cv-hist-info","No saved chats for this project yet. A chat is saved from its first message."));return}
+    box.replaceChildren(where,...r.chats.map(c=>{
+      const row=el("button","cv-hist-row");row.type="button";
+      row.append(el("span","cv-hist-title",c.title),el("span","cv-hist-when",(c.live?"open now · ":"")+cvWhen(c.updated)));
+      row.onclick=()=>cvOpen(p,c.id,box);return row;
+    }));
+  }catch(error){if(CV.hist===box)box.replaceChildren(el("p","cv-note bad","Could not load the history: "+error.message))}
+}
+function cvPaint(s,chat){
+  let bubble=null;
+  for(const b of chat.blocks||[]){
+    if(b.kind==="user")bubble=cvUser(s,b.text||"");
+    else if(b.kind==="image"){
+      const img=cvThumb(bubble||(bubble=cvUser(s,"")),"");
+      liveGet(cvHistUrl(s.project,chat.id,b.image)).then(r=>{img.src="data:"+r.media_type+";base64,"+r.data}).catch(()=>{img.alt="Image not available"});
+    }
+    else if(b.kind==="claude"){cvAdd(s,el("div","cv-msg cv-claude")).append(md(b.text||""));bubble=null}
+    else if(b.kind==="tool")cvAdd(s,el("div","cv-hist-tool",String(b.text||"").replace(/`/g,"")));
+    else cvNote(s,b.text||"");
+  }
+}
+async function cvOpen(p,hid,box){
+  const old=CV.sessions[p],say=text=>box.prepend(el("p","cv-note bad",text));
+  if(old&&old.hid===hid&&(old.sid||old.log.childElementCount)){CV.hist=null;chatViewShow();return}
+  if(old&&(old.busy||old.sending)){say("Claude is still working in the open chat. Stop it or wait, then pick a chat.");return}
+  let chat;
+  try{chat=await liveGet(cvHistUrl(p,hid))}catch(error){say("Could not open that chat: "+error.message);return}
+  if(CUR.p!==p||CV.hist!==box)return;
+  if(old&&old.sid)api("/api/chat",{op:"close",project:p,session_id:old.sid}).catch(()=>{});
+  const s=CV.sessions[p]=cvRecord(p,{hid});
+  cvPaint(s,chat);cvNote(s,"Saved chat from "+(chat.started||"earlier").replace("T"," ")+". Your next message continues it.");
+  CV.hist=null;cvSave();chatViewShow();$("cv-input").focus();
 }
 
 /* ---------- sign-in ---------- */
@@ -311,7 +417,7 @@ function cvIntro(){
   return box;
 }
 function cvRender(){
-  $("cv-log").replaceChildren(...[CV.banner,CV.cur&&CV.cur.log,cvIntro()].filter(Boolean));
+  $("cv-log").replaceChildren(...(CV.hist?[CV.hist]:[CV.banner,CV.cur&&CV.cur.log,cvIntro()]).filter(Boolean));
   if(CV.cur)cvScroll(CV.cur);
 }
 function cvWhere(){
@@ -325,12 +431,13 @@ function cvControls(){
   if(s&&s.busy){send.textContent="Stop";send.classList.add("stop");send.disabled=false}
   else{send.textContent=s&&s.sending?"Sending…":"Send";send.classList.remove("stop");send.disabled=!ok||!!(s&&s.sending)}
   $("cv-new").disabled=!s||(!s.sid&&!s.log.childElementCount);
+  const hist=$("cv-history");hist.disabled=!s;hist.textContent=CV.hist?"Back to chat":"History";hist.setAttribute("aria-pressed",String(!!CV.hist));
   cvPicks();
 }
 function chatViewShow(){
   const p=CUR.p,s=p?(CV.sessions[p]||(CV.sessions[p]=cvRecord(p))):null;
-  if(CV.cur!==s){CV.cur=s;CV.stick=true}
-  cvRender();cvWhere();cvControls();
+  if(CV.cur!==s){CV.cur=s;CV.stick=true;CV.hist=null}
+  cvRender();cvWhere();cvControls();cvAttachDraw();
   if(s&&s.sid&&!s.replayed){s.replayed=true;cvPoll(s,true)}
   if(!CV.authChecked)cvCheckAuth();
 }
@@ -342,7 +449,14 @@ $("cv-input").addEventListener("keydown",e=>{
   if(e.key==="Tab"&&e.shiftKey&&!e.altKey&&!e.ctrlKey&&!e.metaKey){e.preventDefault();cvCycleMode()}
 });
 $("cv-input").addEventListener("input",cvGrow);
+// An image on the clipboard (a screenshot, "Copy image") is attached; a paste that also carries text stays a text paste.
+$("cv-input").addEventListener("paste",e=>{
+  const s=CV.cur,data=e.clipboardData,files=data?[...data.files].filter(f=>f.type.startsWith("image/")):[];
+  if(!s||!files.length||data.getData("text/plain"))return;
+  e.preventDefault();for(const f of files)cvAttach(s,f);
+});
 $("cv-new").onclick=cvNew;
+$("cv-history").onclick=cvHistory;
 $("cv-model").onchange=$("cv-effort").onchange=$("cv-perm").onchange=cvApplyPicks;
 $("cv-log").addEventListener("scroll",()=>{const b=$("cv-log");CV.stick=b.scrollHeight-b.scrollTop-b.clientHeight<60});
 cvLoad();
