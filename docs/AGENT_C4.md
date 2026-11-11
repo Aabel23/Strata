@@ -8,9 +8,10 @@ docs/c4/
   contracts/<file>.yaml   call detail per link (transport, body, start -> end code symbols)
   behavior/<module>.yaml  states and transitions of one module
   flows/<id>.yaml         one user-visible action as a list of steps
+  layout.yaml       where cards sit per level (`views: {<object id or _root>: {<object id>: [x, y]}}`); drawing data written by the viewer, agents can ignore it
 ```
 
-The folder is the source of truth for the map. The DB is a read model built by `c4 import`; the viewer is read-only.
+The folder is the source of truth for the map. The DB is a read model built by `c4 import`. The viewer's Architecture tab edits the same folder through `POST /api/c4/edit` (validate, write, re-import), so re-read the files after the user has been designing.
 Link a task to an object with `c4 link` (stored in the DB, not in the folder).
 
 ## 1. Reading path (stop as soon as you have enough)

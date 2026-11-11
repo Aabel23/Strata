@@ -11,8 +11,9 @@ acceptance: [<observable conditions and expected evidence>]
 binding_decisions: [<approved requirements>]
 open_to_challenge: [<proposals, if any>]
 base: <for a repo with a GitHub remote, the origin/main SHA the task branch forked from; otherwise a commit/tree or described snapshot; identify existing dirty inputs>
-branch: <task/<N>-<short-slug>, for GitHub repos>
-pr: <PR URL once opened, else n/a>
+branch: <action/scope/work_tN, for GitHub repos>
+pr: <CI-created PR URL when available, else pending or n/a>
+ci_change_approved: false # true only for an explicitly approved CI workflow change
 scope:
   module: <one module>
   read: [<relevant files/interfaces>]
@@ -26,7 +27,7 @@ verify:
   - procedure: <exact command or manual check>
     environment: <authorized sandbox and prerequisites>
     side_effects: <writes/network/services>
-authorization: <already-approved actions; no implicit commit, publish, or delegation. For GitHub repos, GITHUB_FLOW.md's standing authorization already covers pushing this task branch, opening/updating/marking its PR ready, and its eventual squash-merge and branch deletion>
+authorization: <already-approved actions; no implicit publish or delegation. For GitHub repos, GITHUB_FLOW.md covers pushing this task branch and gated merge; CI alone creates PRs, and agents never delete remote branches>
 return: <candidate identity, files/findings, acceptance evidence, checks and limitations>
 ```
 

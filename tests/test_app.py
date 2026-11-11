@@ -121,7 +121,8 @@ def test_shell_routes(env):
     b = env[0]
     st, body = get(b, "/")
     assert st == 200 and b"/app.js" in body and b"/api/c4" not in body
-    assert b"/api/c4" in get(b, "/c4")[1]
+    assert b"/architect.js" in get(b, "/c4")[1] and b"/api/c4" in get(b, "/architect.js")[1] and get(b, "/architect.css")[0] == 200
+    assert b"/api/c4" in get(b, "/c4-classic")[1]  # the old read-mostly page stays reachable
     for ok in ("/app.js", "/app.css", "/pages", "/page/a/s", "/page.js"): assert get(b, ok)[0] == 200, ok
     assert b"/c4?project=" in get(b, "/page.js")[1]
 

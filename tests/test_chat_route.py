@@ -282,3 +282,20 @@ def test_server_starts_with_symlink_project_and_keeps_safe_project_available(tmp
         assert get(base, "/api/version")[0] == 200
     finally:
         httpd.shutdown(); httpd.server_close(); thread.join(2)
+
+
+def test_claude_provider_start_auth_and_sign_in(chat_server):
+    base, token, _, supervisor, *_ = chat_server
+    calls = []
+    supervisor.login_claude = lambda code=None: calls.append(code) or ({"mode": "code", "url": "https://claude.com/x"} if code is None else {"mode": "code", "signed_in": True})
+    status, _, raw = post(base, token, {"op": "start", "project": "p", "provider": "claude", "model": "sonnet"})
+    assert status == 200 and supervisor.calls[-1][3:] == ("claude", "sonnet")
+    assert get(base, "/api/chat/auth?provider=claude", token=token)[0] == 200
+    status, _, raw = post(base, token, {"op": "login", "provider": "claude"})
+    assert status == 200 and decoded((status, None, raw))["url"] == "https://claude.com/x"
+    status, _, raw = post(base, token, {"op": "login", "provider": "claude", "code": "abc#123"})
+    assert status == 200 and decoded((status, None, raw))["signed_in"] is True and calls == [None, "abc#123"]
+    for bad in ({"op": "login", "provider": "claude", "code": "has space"}, {"op": "login", "provider": "claude", "code": 5},
+                {"op": "login", "provider": "claude", "extra": 1}, {"op": "login", "provider": "gemini"}):
+        assert post(base, token, bad)[0] == 400
+    assert calls == [None, "abc#123"]

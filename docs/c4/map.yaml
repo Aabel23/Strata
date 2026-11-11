@@ -112,6 +112,9 @@ objects:
   summary: Map C4 IcePanel-style
   owns:
   - viewer/index.html
+  - viewer/architect.html
+  - viewer/architect.js
+  - viewer/architect.css
 - id: cc_hooks
   parent: strata
   kind: app

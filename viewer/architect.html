@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Architecture · Strata</title>
+<link rel="stylesheet" href="/page.css">
+<link rel="stylesheet" href="/architect.css">
+<script src="/vendor/dagre.min.js"></script>
+</head>
+<body>
+<header id="bar" role="toolbar" aria-label="Design tools">
+  <nav id="crumbs" aria-label="Level"></nav>
+  <span class="grow"></span>
+  <input id="find" list="findlist" placeholder="Find block…" autocomplete="off" aria-label="Find block"><datalist id="findlist"></datalist>
+  <span class="sep"></span>
+  <button id="undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><svg viewBox="0 0 20 20"><path d="M7 5L3 9l4 4M3 9h9a5 5 0 0 1 0 10H9"/></svg></button>
+  <button id="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled><svg viewBox="0 0 20 20"><path d="M13 5l4 4-4 4M17 9H8a5 5 0 0 0 0 10h3"/></svg></button>
+  <span class="sep"></span>
+  <button id="tidy" title="Arrange every block on this level automatically">Auto layout</button>
+  <button id="fit" title="Fit to screen (F)">Fit</button>
+  <button id="zout" title="Zoom out (-)" aria-label="Zoom out">−</button><span id="zoom">100%</span><button id="zin" title="Zoom in (+)" aria-label="Zoom in">+</button>
+  <span class="sep"></span>
+  <div class="menu"><button id="export" aria-haspopup="true">Export</button>
+    <div class="pop" id="exportpop" hidden><button data-x="svg">SVG (vector)</button><button data-x="png">PNG (image)</button><hr><a id="classic" target="_self">Open classic view</a></div></div>
+</header>
+<main>
+  <aside id="palette" aria-label="Blocks"></aside>
+  <section id="stage" tabindex="0" aria-label="Design canvas">
+    <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div id="hint" hidden></div>
+    <div id="start" hidden></div>
+    <div id="toast" role="status" aria-live="polite" hidden></div>
+  </section>
+  <aside id="side">
+    <div id="tabs" role="tablist"><button data-t="props" role="tab">Properties</button><button data-t="flows" role="tab">Flows</button><button data-t="issues" role="tab">Issues <span id="nissues"></span></button>
+      <button id="collapse" title="Hide panel" aria-label="Hide panel">›</button></div>
+    <div id="panel"></div>
+  </aside>
+  <button id="expand" title="Show panel" aria-label="Show panel" hidden>‹</button>
+</main>
+<script src="/architect.js"></script>
+</body>
+</html>

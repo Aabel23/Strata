@@ -44,7 +44,7 @@ def get(base, path):
 def test_api_c4_shape(srv):
     st, body = get(srv, "/api/c4?project=p")
     d = json.loads(body)
-    assert st == 200 and set(d) == {"meta", "objects", "connections", "flows", "links", "open_issues", "layered", "contracts", "behavior"}
+    assert st == 200 and set(d) == {"meta", "positions", "objects", "connections", "flows", "links", "open_issues", "layered", "contracts", "behavior"}
     assert d["meta"] == {"name": "Demo"} and len(d["objects"]) == 5 and "from" in d["connections"][0] and d["flows"][0]["steps"][0] == {"link": "user_app", "text": "tap"}
     assert json.loads(get(srv, "/api/c4")[1]) == d  # default project
 
@@ -55,7 +55,8 @@ def test_unknown_project_404(srv):
 
 def test_index_and_vendor(srv):
     st, body = get(srv, "/c4")
-    assert st == 200 and b"js-yaml" not in body and b"/api/c4" in body
+    assert st == 200 and b"js-yaml" not in body and b"/architect.js" in body and b"/api/c4" in get(srv, "/architect.js")[1]
+    assert b"/api/c4" in get(srv, "/c4-classic")[1]
     assert get(srv, "/vendor/dagre.min.js")[0] == 200
 
 

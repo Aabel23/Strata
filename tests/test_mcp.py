@@ -13,9 +13,9 @@ def run(tmp_path, role, msgs, db_=None):
     return r, [json.loads(l) for l in r.stdout.splitlines()]
 
 
-MAIN_TOOLS = ["list_projects", "list_items", "get_item", "get_doc", "c4_context", "c4_flow", "audit", "search", "task_context", "add_item", "edit_item",
-              "item_claim", "item_submit", "item_approve", "item_reject", "item_release", "dep_add", "dep_rm"]
-READ = MAIN_TOOLS[:9]
+MAIN_TOOLS = ["list_projects", "list_items", "get_item", "list_docs", "get_doc", "c4_context", "c4_flow", "audit", "search", "task_context", "add_item", "edit_item",
+              "item_claim", "item_submit", "item_approve", "item_rework", "item_close", "item_reject", "item_reopen", "item_release", "dep_add", "dep_rm", "c4_link"]
+READ = MAIN_TOOLS[:10]
 
 
 def call(i, name, **a): return {"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": name, "arguments": a}}
@@ -78,7 +78,7 @@ def test_malformed_input_never_crashes(tmp_path):
 def test_missing_project_clean_error(tmp_path):
     r, out = run(tmp_path, "main", [call(1, "add_item", project="zz", kind="task", title="t")])
     res = out[0]["result"]
-    assert res["isError"] and res["content"][0]["text"] == "error: no project zz" and "Traceback" not in r.stderr
+    assert res["isError"] and res["content"][0]["text"] == "error: no project zz; known: p" and "Traceback" not in r.stderr
 
 
 # ---- task #44: role filtering, read tools, cap, protocol, pipe ----
@@ -211,3 +211,62 @@ def test_label_issue_and_filter(tmp_path):
     rows = c.execute("SELECT kind,label,status FROM item WHERE title LIKE 'bug %'").fetchall()
     assert [tuple(x) for x in rows] == [("task", "issue", "proposed")] * 2
     assert sorted(json.loads(l)["title"] for l in out[3]["result"]["content"][0]["text"].splitlines()) == ["bug a", "bug b"]
+
+
+# ---- agent ergonomics: instructions, annotations, argument checks, compact board, next-move hints ----
+def text(o): return o["result"]["content"][0]["text"]
+
+
+def test_instructions_and_annotations(tmp_path):
+    for role, word in (("main", "coordinator"), ("coder", "item_claim"), ("reviewer", "reviewer")):
+        _, out = run(tmp_path, role, [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}])
+        ins = out[0]["result"]["instructions"]
+        assert word in ins and "pass `project`" in ins  # the test cwd is not a registered project
+        for t in out[1]["result"]["tools"]:
+            assert t["annotations"]["readOnlyHint"] == (t["name"] in READ) and len(t["description"]) > 15
+            assert all(p.get("description") or "enum" in p or p["type"] == "boolean" for p in t["inputSchema"]["properties"].values())
+
+
+def test_argument_checks(tmp_path):
+    p = seeded(tmp_path)
+    _, out = run(tmp_path, "main", [call(1, "list_items", projectt="p"), call(2, "list_items", status="todo"), call(3, "get_item"), call(4, "get_item", id="1", role="x"),
+                                    call(5, "list_items", project="zz"), call(6, "get_item", id=1, project=None), call(7, "audit")], p)
+    t = [text(o) for o in out]
+    assert [o["result"]["isError"] for o in out] == [True, True, True, False, True, True, True]
+    assert "unknown argument projectt; list_items takes: project, kind" in t[0] and "must be one of: proposed, approved" in t[1]
+    assert t[2] == "error: missing required argument id" and t[4] == "error: no project zz; known: p"
+    assert "unknown argument project" in t[5] and "pass project" in t[6]
+
+
+def test_project_defaults_to_cwd(tmp_path):
+    p = str(tmp_path / "c.db"); c = db.init(p); db.add_project(c, "here", "Here", root=str(tmp_path)); c.close()
+    msgs = [{"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {}}, call(1, "add_item", kind="task", title="t"), call(2, "audit"), call(3, "list_docs")]
+    r = subprocess.run([sys.executable, str(ROOT / "strata.py"), "mcp", "--role", "main", "--db", p], input="\n".join(map(json.dumps, msgs)) + "\n", capture_output=True, text=True, cwd=tmp_path, timeout=30)
+    out = [json.loads(l) for l in r.stdout.splitlines()]
+    assert "default to `here`" in out[0]["result"]["instructions"]
+    assert json.loads(text(out[1])) == {"ok": True, "id": 1, "project": "here"} and "item.add" in text(out[2]) and text(out[3]) == "(none)"
+
+
+def test_board_is_compact_and_counts_the_rest(tmp_path):
+    p = seeded(tmp_path)
+    c = db.connect(p); c.execute("UPDATE item SET body=?", ("x" * 5000,)); c.commit(); c.close()
+    _, out = run(tmp_path, "coder", [call(1, "list_items", project="p"), call(2, "list_items", limit=1), call(3, "list_docs", project="p")], p)
+    rows = [json.loads(l) for l in text(out[0]).splitlines()]
+    assert [r["id"] for r in rows] == [1, 2] and all("body" not in r and "spec" not in r and "project" not in r for r in rows)
+    assert json.loads(text(out[1]).splitlines()[0])["project"] == "p" and text(out[1]).splitlines()[1] == "… 1 more; raise limit or add filters"
+    assert text(out[2]) == "(none)"  # the doc index is filled by a scan, none ran here
+
+
+def test_status_tools_and_next_move_hints(tmp_path):
+    p = seeded(tmp_path)
+    _, out = run(tmp_path, "coder", [call(1, "item_submit", id=1, note="n"), call(2, "item_claim", id=2), call(3, "item_claim", id=1, actor="bot")], p)
+    assert "coder can next: item_claim -> doing" in text(out[0]) and "blocked by unfinished dependencies" in text(out[1]) and not out[2]["result"]["isError"]
+    _, out = run(tmp_path, "main", [call(1, "item_rework", id=1, note="n"), call(2, "item_submit", id=1, note="did", actor="bot"), call(3, "item_rework", id=1, note="redo"),
+                                    call(4, "item_submit", id=1, note="did", actor="bot"), call(5, "item_approve", id=1, actor="bot"), call(6, "item_approve", id=1),
+                                    call(7, "item_approve", id=1), call(8, "add_item", project="p", kind="task", title="o"), call(9, "item_close", id=3, note="dup"),
+                                    call(10, "item_reject", id=2, note="no"), call(11, "item_reopen", id=2), call(12, "c4_link", project="p", object="zz", item=2)], p)
+    assert [o["result"]["isError"] for o in out] == [True, False, False, False, True, False, True, False, False, False, False, True]
+    assert "only from review (item #1 is doing, owner bot; main can next: item_submit -> review, item_release -> approved, item_reject -> rejected)" in text(out[0])
+    assert "owner may not approve own work" in text(out[4]) and "main can next: nothing" in text(out[6]) and text(out[11]) == "error: no object p/zz"
+    c = db.connect(p)
+    assert [r[0] for r in c.execute("SELECT status FROM item ORDER BY id")] == ["done", "proposed", "done"]

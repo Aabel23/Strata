@@ -3,7 +3,7 @@
 
   strata init [PATH] [--id --name --docs-dir --no-codemap --db-only] [--db]   set up PATH (default cwd): project, docs folders, C4 map, code map
   strata open [PATH] [--port 8740] [--db]   open the browser on the project containing PATH (default cwd)
-  strata serve [--db] [--project P] [--port] [--host A,B] [--allow-host NAME]... [--allow-edit|--no-edit] viewer on http://127.0.0.1:PORT
+  strata serve [--db] [--project P] [--port] [--host A,B] [--allow-host NAME]... [--allow-edit|--no-edit] [--allow-terminal] viewer on http://127.0.0.1:PORT
   strata page put|validate FILE | list [--project]
   strata project add ID --name N [--root --docs-dir --parent --description] | delete ID --yes | list
   strata doc validate FILE                     check a doc YAML (no DB)
@@ -209,7 +209,7 @@ def main(argv=None):
         return p
     add("init", (["path"], {"nargs": "?", "default": "."}), (["--id"], {}), (["--name"], {}), (["--docs-dir"], {}), (["--no-codemap"], {"action": "store_true"}), (["--db-only"], {"action": "store_true"}))
     add("open", (["path"], {"nargs": "?", "default": "."}), (["--port"], {"type": int, "default": 8740}))
-    add("serve", (["--project"], {}), (["--port"], {"type": int, "default": 8740}), (["--host"], {"default": "127.0.0.1"}), (["--allow-host"], {"action": "append", "default": []}), (["--allow-edit"], {"dest": "allow_edit", "action": "store_const", "const": True, "default": None}), (["--no-edit"], {"dest": "allow_edit", "action": "store_const", "const": False, "default": None}))
+    add("serve", (["--project"], {}), (["--port"], {"type": int, "default": 8740}), (["--host"], {"default": "127.0.0.1"}), (["--allow-host"], {"action": "append", "default": []}), (["--allow-edit"], {"dest": "allow_edit", "action": "store_const", "const": True, "default": None}), (["--no-edit"], {"dest": "allow_edit", "action": "store_const", "const": False, "default": None}), (["--allow-terminal"], {"dest": "allow_terminal", "action": "store_const", "const": True, "default": None}))
     pg = sub.add_parser("page"); ps = pg.add_subparsers(dest="action", required=True)
     for n in ("put", "validate"):
         p = ps.add_parser(n); p.add_argument("file"); p.add_argument("--db")
@@ -278,7 +278,7 @@ def main(argv=None):
     if a.cmd == "page": return cmd_page(a)
     from strata import server
     hosts = a.host.split(",")  # vd "127.0.0.1,100.107.55.40": nghe nhiều địa chỉ
-    mk = lambda h: server.make_server(a.db, a.project, a.port, h, a.allow_host, hosts, allow_edit=a.allow_edit)
+    mk = lambda h: server.make_server(a.db, a.project, a.port, h, a.allow_host, hosts, allow_edit=a.allow_edit, allow_terminal=a.allow_terminal)
     try:
         srv = mk(hosts[0])
         others = [mk(h) for h in hosts[1:]]
@@ -287,8 +287,11 @@ def main(argv=None):
     url = f"http://{hosts[0]}:{srv.server_address[1]}/"
     print(f"Strata: {url}  (db: {db.db_path(a.db)})")
     webbrowser.open(url)
+    from strata import agents, term
+    sup = agents.supervisor(a.db)  # loads the auto-run switches now, so approved tasks are picked up without a page open
     try: srv.serve_forever()
     except KeyboardInterrupt: pass
+    finally: sup.close(); term.MANAGER.close_all()
     return 0
 
 

@@ -114,7 +114,17 @@ def load(d):
         if r.get("id", f.stem) != f.stem: errs.append(finding("C4-FLOW-ID", "error", f"flows/{f.name}", f"id '{r.get('id')}' khác tên file", "đổi id cho khớp tên file"))
         for i, s in enumerate(r.get("steps") or [], 1): _keys(errs, f"flow {f.stem} bước {i}", s, "steps")
         m["flows"].append({**r, "id": f.stem})
+    m["layout"] = _layout(_read(d / "layout.yaml", errs) if (d / "layout.yaml").is_file() else None, errs)
     return m, errs
+
+
+def _layout(raw, errs):
+    """{view: {object id: [x, y]}} from layout.yaml; view is the id of the object whose inside is drawn, '_root' for the top level. Drawing data only."""
+    views = raw.get("views") if isinstance(raw, dict) else None
+    if raw is not None and not isinstance(views, dict):
+        errs.append(finding("C4-BAD-SHAPE", "error", "layout.yaml", "layout.yaml phải là mapping có key 'views'", "viết views: {<view>: {<object>: [x, y]}}")); return {}
+    ok = lambda p: isinstance(p, list) and len(p) == 2 and all(type(n) in (int, float) for n in p)
+    return {str(v): {str(k): [round(p[0]), round(p[1])] for k, p in ps.items() if ok(p)} for v, ps in (views or {}).items() if isinstance(ps, dict)}
 
 
 def _dup(errs, kind, ids):
@@ -424,7 +434,7 @@ def import_dir(c, d, project, force=False, dry_run=False, yes=False):
     with c:
         before = _counts(c, project)
         _upsert(c, "meta", "project", {"project": project, "name": pr.get("name") or pr.get("id") or project,
-                                       "root": str((pathlib.Path(d) / pr["root"]).resolve()), "source": str(pathlib.Path(d).resolve())})
+                                       "root": str((pathlib.Path(d) / pr["root"]).resolve()), "source": str(pathlib.Path(d).resolve()), "positions": j(m.get("layout") or {})})
         for t, pk in _PK.items():
             for row in new[t].values(): _upsert(c, t, "project," + pk, row)
             keep = list(new[t])
@@ -457,6 +467,7 @@ def export_dir(c, project, d):
     for stem, rows in files.items(): dump(d / "contracts" / f"{stem}.yaml", rows)
     for r in q("behavior"): dump(d / "behavior" / f"{r['module']}.yaml", jl(r["data"]))
     for r in q("flow"): dump(d / "flows" / f"{r['id']}.yaml", keep(id=r["id"], name=r["name"], steps=jl(r["steps"])))
+    if jl(meta["positions"]): dump(d / "layout.yaml", {"views": jl(meta["positions"])})
 
 
 def write_model(m, d):
@@ -474,6 +485,11 @@ def write_model(m, d):
     files.update({f"contracts/{k}.yaml": v for k, v in by_stem.items()})
     files.update({f"behavior/{k}.yaml": v for k, v in m["behavior"].items()})
     files.update({f"flows/{f['id']}.yaml": keep(f, ("id", "name", "steps")) for f in m["flows"]})
+    ids = {o["id"] for o in m["objects"]} | {"_root"}  # positions of deleted objects go with them
+    views = {v: {k: p for k, p in ps.items() if k in ids} for v, ps in (m.get("layout") or {}).items() if v in ids}
+    views = {v: ps for v, ps in views.items() if ps}
+    if views: files["layout.yaml"] = {"views": views}
+    elif (d / "layout.yaml").is_file(): (d / "layout.yaml").unlink()
     changed = [rel for rel, data in files.items() if dump(d / rel, data)]
     for sub in ("contracts", "behavior", "flows"):
         for f in (d / sub).glob("*.yaml"):
@@ -490,7 +506,7 @@ def read_model(c, project):
     jl = lambda v: json.loads(v) if v is not None else None
     clean = lambda d: {k: v for k, v in d.items() if v is not None}
     q = lambda t: c.execute(f"SELECT * FROM c4_{t} WHERE project=? ORDER BY rowid", (project,)).fetchall()
-    return {"name": meta["name"], "root": meta["root"],
+    return {"name": meta["name"], "root": meta["root"], "positions": jl(meta["positions"]) or {},
             "objects": [clean({"id": o["id"], "type": o["type"], "name": o["name"], "parent": o["parent"], "description": o["description"],
                                "tags": jl(o["tags"]), "status": o["status"], "owns": jl(o["owns"]), "behavior": o["behavior"], "tech": o["technology"]}) for o in q("object")],
             "connections": [clean({"id": x["id"], "from": x["from_id"], "to": x["to_id"], "name": x["name"], "description": x["description"],

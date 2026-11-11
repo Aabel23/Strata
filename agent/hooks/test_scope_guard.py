@@ -71,3 +71,27 @@ def test_marker_can_be_found_from_nested_cwd_and_contract_paths_are_validated():
 def test_non_coder_without_marker_remains_unrestricted():
     with tempfile.TemporaryDirectory() as t:
         assert run("Write", "x.py", t, coder=False) == 0
+
+
+def test_ci_edit_requires_explicit_approved_contract_flag():
+    with tempfile.TemporaryDirectory() as t:
+        os.makedirs(os.path.join(t, ".github", "workflows"))
+        payload = contract([".github/workflows"])
+        marker(t, payload)
+        assert run("Edit", ".github/workflows/ci.yml", t) == 2
+        payload["ci_change_approved"] = True
+        marker(t, payload)
+        assert run("Edit", ".github/workflows/ci.yml", t) == 0
+
+
+def test_coder_subagent_is_recognised_from_the_hook_payload_and_told_what_it_may_edit():
+    env = {k: v for k, v in os.environ.items() if k != "STRATA_AGENT_ROLE"}
+    def go(path, cwd, agent):
+        return subprocess.run([sys.executable, HOOK], text=True, capture_output=True, env=env,
+                              input=json.dumps({"tool_name": "Edit", "tool_input": {"file_path": path}, "cwd": cwd, "agent_type": agent}))
+    with tempfile.TemporaryDirectory() as t:
+        assert go("x.py", t, "coder").returncode == 2 and go("x.py", t, "reviewer").returncode == 0
+        marker(t, contract(["agent/hooks", "tests/test_hook.py"]))
+        p = go("strata/mcp.py", t, "coder")
+        assert p.returncode == 2 and "strata/mcp.py is outside scope.touch of task test. You may edit: agent/hooks, tests/test_hook.py." in p.stderr
+        assert go("tests/test_hook.py", t, "coder").returncode == 0

@@ -1,7 +1,8 @@
 """HTTP server: C4 viewer, pages and their JSON APIs. All data comes from the DB."""
-import hmac, http.server, json, mimetypes, pathlib, re, secrets, socket, threading
+import base64, hmac, http.server, json, mimetypes, pathlib, re, secrets, socket, threading
 from urllib.parse import parse_qs, unquote, urlsplit
 from strata import blocks, c4_edit, c4_layered, codemap, db, service, symbols
+from strata import agents, term
 from strata.chat import ChatError, ChatSupervisor
 
 SERVE_EXT = set(".py .js .mjs .ts .tsx .css .html .htm .md .txt .yaml .yml .json .toml .c .h .cpp .hpp .dart .java .kt .go .rs .svg .png .jpg .jpeg .gif .webp".split())
@@ -16,7 +17,7 @@ def servable(root, segs):
     return f if f.suffix.lower() in SERVE_EXT and f.is_file() else None
 
 VIEWER = pathlib.Path(__file__).resolve().parent.parent / "viewer"
-STATIC = {"/": "app.html", "/app.js": "app.js", "/app.css": "app.css", "/c4": "index.html", "/index.html": "index.html", "/page.js": "page.js", "/swimlane.js": "swimlane.js", "/page.css": "page.css"}
+STATIC = {"/": "app.html", "/app.js": "app.js", "/app.css": "app.css", "/c4": "architect.html", "/architect.js": "architect.js", "/architect.css": "architect.css", "/dock.js": "dock.js", "/dock.css": "dock.css", "/chat.js": "chat.js", "/chat.css": "chat.css", "/c4-classic": "index.html", "/index.html": "index.html", "/page.js": "page.js", "/swimlane.js": "swimlane.js", "/page.css": "page.css"}
 TYPES = {".html": "text/html", ".md": "text/plain", ".yaml": "text/plain", ".js": "application/javascript", ".mjs": "text/javascript", ".css": "text/css", ".json": "application/json"}
 SHOW = {"item": "id,project,kind,label,title,status,priority,owner"}
 ITEM_KINDS = ("rule", "task", "issue", "knowledge", "draft", "note", "step", "gate")
@@ -35,6 +36,13 @@ CHAT_PATH = "/api/chat"
 CHAT_EVENTS_PATH = "/api/chat/events"
 CHAT_AUTH_PATH = "/api/chat/auth"
 CHAT_DIFF_PATH = "/api/chat/diff"
+TERM_PATH = "/api/term"
+TERM_READ_PATH = "/api/term/read"
+AGENT_PATH = "/api/agent"
+AGENTS_PATH = "/api/agents"
+AGENT_LOG_PATH = "/api/agent/log"
+POST_PATHS = (EDIT_PATH, PROJECT_PATH, ITEM_PATH, CHAT_PATH, TERM_PATH, AGENT_PATH)
+TERM_ID = re.compile(r"^[A-Za-z0-9_-]{8,40}$")
 MAX_BODY = 65536
 CHAT_PROJECT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
 CHAT_SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
@@ -44,10 +52,13 @@ _CODEMAP_BUILDS = set()
 _CODEMAP_FAILURES = {}
 
 
-def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_hosts=(), bound_hosts=None, allow_edit=None, build=codemap.run_gitnexus, chat_supervisor_factory=ChatSupervisor):
+def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_hosts=(), bound_hosts=None, allow_edit=None, build=codemap.run_gitnexus, chat_supervisor_factory=ChatSupervisor, allow_terminal=None, agent_supervisor=None, terminals=None):
     """allow_hosts: extra Host names (with or without port). bound_hosts: every address strata binds (default just host).
     allow_edit: enable POST /api/c4/edit; None = only when host is loopback. build: cancellable code-map builder (root, reindex=, cancel=) -> graph bytes."""
     if allow_edit is None: allow_edit = host in LOOPBACK
+    if allow_terminal is None: allow_terminal = allow_edit  # a shell is a stronger right than editing: `serve --allow-terminal` opens it on every bound address
+    terminals = terminals or term.MANAGER
+    agent_sup = lambda: agent_supervisor or agents.supervisor(db_path)  # shared by every bound address of this process
     if host in ("0.0.0.0", "::") and not allow_hosts:
         raise ValueError(f"binding {host} needs at least one --allow-host NAME")
     bound = [h.lower() for h in (bound_hosts or [host])]
@@ -167,14 +178,16 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             ok = {f"[{h}]:{port}" if ":" in h else f"{h}:{port}" for h in bound} | {f"localhost:{port}", f"127.0.0.1:{port}"} | extra | {f"{h}:{port}" for h in extra}
             return (self.headers.get("Host") or "").lower() in ok  # DNS rebinding guard
 
-        def _no(self, *a, **k): self.json({"error": "method not allowed"}, 405, Allow="POST" if urlsplit(self.path).path in (EDIT_PATH, PROJECT_PATH, ITEM_PATH, CHAT_PATH) else "GET")
+        def _no(self, *a, **k): self.json({"error": "method not allowed"}, 405, Allow="POST" if urlsplit(self.path).path in POST_PATHS else "GET")
         do_PUT = do_DELETE = do_PATCH = _no
 
         def do_POST(self):
             if not self.host_ok(): return self.json({"error": "forbidden host"}, 403)
-            if not allow_edit: return self.json({"error": "editing disabled"}, 403)
             u = urlsplit(self.path)
-            if u.path not in (EDIT_PATH, PROJECT_PATH, ITEM_PATH, CHAT_PATH): return self._no()
+            if u.path == TERM_PATH:
+                if not allow_terminal: return self.json({"error": "the terminal is not enabled on this address"}, 403)
+            elif not allow_edit: return self.json({"error": "editing disabled"}, 403)
+            if u.path not in POST_PATHS: return self._no()
             h = self.headers
             if not hmac.compare_digest((h.get("X-Strata-Token") or "").encode(), token.encode()): return self.json({"error": "bad or missing X-Strata-Token"}, 403)
             if h.get("X-Strata-Edit") != "1": return self.json({"error": "X-Strata-Edit header required"}, 403)
@@ -190,6 +203,8 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             if u.path == CHAT_PATH:
                 if u.query: return self.json({"error": "query parameters are not allowed"}, 400)
                 return self.chat_post(op)
+            if u.path == TERM_PATH: return self.term_post(op)
+            if u.path == AGENT_PATH: return self.agent_post(op)
             if u.path == PROJECT_PATH: return self.project_op(op)
             if u.path == ITEM_PATH: return self.item_op(op, parse_qs(u.query).get("project", [""])[-1])
             if not isinstance(op.get("yes", False), bool): return self.json({"error": "yes must be boolean"}, 400)
@@ -256,6 +271,11 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 operation = op.get("op")
                 if operation == "login" and set(op) == {"op"}:
                     return self.json({"ok": True, **chat_supervisor.login_global()})
+                if operation == "login" and op.get("provider") == "claude" and set(op) <= {"op", "provider", "code"}:
+                    code = op.get("code")  # absent: start sign-in, get the link; present: the code the sign-in page showed
+                    if code is not None and (not isinstance(code, str) or not re.fullmatch(r"[\x21-\x7e]{4,1024}", code)):
+                        raise ValueError("invalid sign-in code")
+                    return self.json({"ok": True, **chat_supervisor.login_claude(code)})
                 project_id = op.get("project")
                 if not isinstance(project_id, str) or not CHAT_PROJECT_ID.fullmatch(project_id):
                     raise ValueError("invalid project")
@@ -264,7 +284,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                         raise ValueError("unexpected start field")
                     provider = op.get("provider", "codex")
                     model = op.get("model")
-                    if provider not in ("codex", "openrouter", "omniroute"):
+                    if provider not in ("claude", "codex", "openrouter", "omniroute"):
                         raise ValueError("invalid provider")
                     if model is not None and (not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}", model)):
                         raise ValueError("invalid model")
@@ -311,6 +331,79 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             except Exception:
                 return self.json({"error": "chat service unavailable"}, 503)
 
+        def term_post(self, op):
+            """open / input / resize / close / list on the server's terminals (real shells: see strata/term.py)."""
+            try:
+                kind, tid = op.get("op"), op.get("id")
+                size = lambda k, d: max(2, min(int(op.get(k, d)), 1000))
+                if kind == "list" and set(op) == {"op"}:
+                    return self.json({"ok": True, "terminals": terminals.list()})
+                if kind == "open" and set(op) <= {"op", "project", "cols", "rows"}:
+                    cwd, proj = str(pathlib.Path.home()), op.get("project")
+                    if proj is not None:
+                        if not isinstance(proj, str) or not CHAT_PROJECT_ID.fullmatch(proj): raise ValueError
+                        cwd = chat_projects().get(proj) or cwd
+                    t = terminals.open(str(cwd), size("cols", 100), size("rows", 28), title=proj or "")
+                    return self.json({"ok": True, "id": t.id, "cwd": t.cwd})
+                if not isinstance(tid, str) or not TERM_ID.fullmatch(tid): raise ValueError
+                if kind == "input" and set(op) == {"op", "id", "data"} and isinstance(op["data"], str) and len(op["data"]) <= term.MAX_INPUT:
+                    terminals.get(tid).write(op["data"].encode("utf-8", "surrogatepass"))
+                    return self.json({"ok": True})
+                if kind == "resize" and set(op) == {"op", "id", "cols", "rows"}:
+                    terminals.get(tid).resize(size("cols", 100), size("rows", 28))
+                    return self.json({"ok": True})
+                if kind == "close" and set(op) == {"op", "id"}:
+                    return self.json({"ok": True, "closed": terminals.close(tid)})
+                raise ValueError
+            except (ValueError, TypeError):
+                return self.json({"error": "invalid terminal request"}, 400)
+            except term.TermError as e:
+                return self.json({"error": str(e)}, 409)
+
+        def agent_post(self, op):
+            """auto (per-project auto-run switch) / settings (model, effort) / run (give a task to an agent, also retry) / stop."""
+            try:
+                kind = op.get("op")
+                if kind == "auto" and set(op) == {"op", "project", "on"} and isinstance(op["on"], bool) and isinstance(op["project"], str) and CHAT_PROJECT_ID.fullmatch(op["project"]):
+                    agent_sup().set_auto(op["project"], op["on"])
+                elif kind == "settings" and set(op) == {"op", "model", "effort"} and isinstance(op["model"], str) and isinstance(op["effort"], str):
+                    agent_sup().configure(op["model"], op["effort"])
+                elif kind == "run" and set(op) == {"op", "item"} and isinstance(op["item"], int) and not isinstance(op["item"], bool):
+                    return self.json({"ok": True, "run": agent_sup().start(op["item"])})
+                elif kind == "stop" and set(op) == {"op", "run"} and isinstance(op["run"], str) and TERM_ID.fullmatch(op["run"]):
+                    return self.json({"ok": True, "stopped": agent_sup().stop(op["run"])})
+                else:
+                    return self.json({"error": "invalid agent request"}, 400)
+                return self.json({"ok": True})
+            except KeyError as e:
+                return self.json({"error": str(e.args[0]) if e.args else "not found"}, 404)
+            except (agents.AgentError, PermissionError) as e:
+                return self.json({"error": str(e)}, 409)
+
+        def live_get(self, path, q):
+            """Token-guarded reads behind the dock: terminal output, the agent list, one agent's log."""
+            if not hmac.compare_digest((self.headers.get("X-Strata-Token") or "").encode(), token.encode()):
+                return self.json({"error": "bad or missing X-Strata-Token"}, 403)
+            try:
+                after = int(q.get("after", "0"))
+                if after < 0: raise ValueError
+                if path == AGENTS_PATH:
+                    from strata import agent_sessions
+                    data = agent_sup().snapshot()
+                    data["sessions"] = agent_sessions.discover(terminals, data["runs"])
+                    return self.json(data)
+                if path == AGENT_LOG_PATH:
+                    if not TERM_ID.fullmatch(q.get("run", "")): raise ValueError
+                    return self.json(agent_sup().events(q["run"], after, wait=20 if q.get("wait") == "1" else 0))
+                if not allow_terminal: return self.json({"error": "the terminal is not enabled on this address"}, 403)
+                if not TERM_ID.fullmatch(q.get("id", "")): raise ValueError
+                data, nxt, closed = terminals.get(q["id"]).read(after)
+                return self.json({"data": base64.b64encode(data).decode(), "next": nxt, "closed": closed})
+            except ValueError:
+                return self.json({"error": "invalid request"}, 400)
+            except (term.TermError, agents.AgentError) as e:
+                return self.json({"error": str(e)}, 404)
+
         def chat_get(self, path, raw_query):
             if not hmac.compare_digest((self.headers.get("X-Strata-Token") or "").encode(), token.encode()):
                 return self.json({"error": "bad or missing X-Strata-Token"}, 403)
@@ -324,7 +417,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 refresh_chat_projects()
                 if path == CHAT_AUTH_PATH:
                     provider = q.get("provider", "codex")
-                    if provider not in ("codex", "openrouter", "omniroute"):
+                    if provider not in ("claude", "codex", "openrouter", "omniroute"):
                         raise ValueError
                     return self.json(chat_supervisor.auth_status(provider))
                 project_id, session_id = q.get("project"), q.get("session_id")
@@ -389,9 +482,10 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             p = u.path
             if p in (CHAT_EVENTS_PATH, CHAT_AUTH_PATH, CHAT_DIFF_PATH):
                 return self.chat_get(p, u.query)
+            if p in (TERM_READ_PATH, AGENTS_PATH, AGENT_LOG_PATH): return self.live_get(p, q)
             if p in STATIC: return self.file(VIEWER / STATIC[p])
             if p in ("/api/projects", "/api/docs", "/api/doc", "/api/search"): autoscan()
-            if p == "/api/session": return self.json({"token": token}, **{"Cache-Control": "no-store"})
+            if p == "/api/session": return self.json({"token": token, "edit": bool(allow_edit), "terminal": bool(allow_terminal)}, **{"Cache-Control": "no-store"})
             if p == "/api/version":  # viewer polls this; any CLI/MCP commit or docs edit changes it
                 autoscan()
                 with lock: dv = db.get_data_version(conn); ds = hash(repr(sorted(stamps.items(), key=str)))
@@ -416,6 +510,12 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             if parts[1:2] == ["page"] and len(parts) == 4:
                 with lock: ok = db.get_page(conn, parts[2], parts[3])
                 return self.file(VIEWER / "page.html") if ok else self.send_error(404)
+            if p == "/api/c4/check":  # findings of the map folder as it is on disk, for the designer's Issues list
+                with lock: row = conn.execute("SELECT source FROM c4_meta WHERE project=?", (q.get("project") or default_project(),)).fetchone()
+                if not row or not row["source"]: return self.send_error(404)
+                m, errs = c4_layered.load(row["source"])
+                e, w, _ = c4_layered.check(m, row["source"]) if m else ([], [], None)
+                return self.json({"errors": errs + e, "warnings": w})
             if p == "/api/c4":
                 proj = q.get("project") or default_project()
                 with lock:

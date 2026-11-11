@@ -27,10 +27,11 @@ Principles:
 | `strata/db/` | Package: connection, init + migrate, repository CRUD for project/doc/item/page/link/search, audit |
 | `strata/c4_layered.py` | The only C4 format (folder `map.yaml` + `contracts/` + `behavior/` + `flows/`): load, validate, import/export, `read_model`, `context`, flow trace, contract text, `write_model` (atomic write of a loaded model back to the folder) |
 | `strata/blocks.py` | Validates the 8 block types of a page |
-| `strata/c4_edit.py` | Architect editor back end: `apply(c, project, op, yes)` runs one of six ops (`add_object`, `update_object`, `delete_object`, `add_link`, `update_link`, `delete_link`) on the C4 folder |
+| `strata/c4_edit.py` | Architect editor back end: `apply(c, project, op, yes)` runs one op (`add_object`, `update_object`, `delete_object`, `add_link`, `update_link`, `delete_link`, `add_flow`, `update_flow`, `delete_flow`, `set_positions`, or a `batch` of them applied all-or-nothing) on the C4 folder; `create_map` starts an empty map for a project that has none |
 | `strata/server.py` | HTTP server: static files, GET `/api/*`, `/docs/*`, `/code/*`; the write routes are `POST /api/c4/edit`, `POST /api/item`, `POST /api/project` |
 | `viewer/app.html`, `app.js`, `app.css` | Multi-project app shell (sidebar, tabs, Ctrl+K, theme) |
-| `viewer/index.html` | C4 viewer (zoom by level, flows, tags, object search) |
+| `viewer/architect.html`, `architect.js`, `architect.css` | Architecture designer served at `/c4`: drag blocks, drag-to-connect, inline editing, saved positions (`layout.yaml`), flow editing, undo/redo, Issues list (`GET /api/c4/check`), SVG/PNG export |
+| `viewer/index.html` | Previous C4 viewer, kept at `/c4-classic` (semantic zoom, code panel, contract and behavior views) |
 | `viewer/page.html`, `page.js`, `page.css` | Renders block-based pages |
 | `viewer/app.js` | App shell, overview, task board |
 | `viewer/vendor/` | `dagre` (layout), `mermaid` |

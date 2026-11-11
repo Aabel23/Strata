@@ -77,10 +77,25 @@ Kiểm lỗi: mở viewer (trang hiện khung lỗi) hoặc `curl -s 'localhost:
 
 ## MCP
 Ba server cùng `strata.py mcp --role ...`, khác nhau ở tập tool theo vai:
-- `strata` (`--role main`): chat chính.
-- `strata-coder` (`--role coder`): coder claim/submit.
-- `strata-reviewer` (`--role reviewer`): reviewer đọc, thêm issue (`proposed`).
-Cài đặt MCP: `claude mcp add --scope user strata -- python3 /home/abel/project/tools/strata/strata.py mcp --role main` (Codex: thay `claude` bằng `codex`, bỏ `--scope user`). Quyền từng role do server thực thi; quy trình agent thuộc `agent/` của Strata, không thuộc công cụ Strata.
+- `strata` (`--role main`): chat chính, đủ tool ghi.
+- `strata-coder` (`--role coder`): đọc, `item_claim`/`item_submit`, thêm issue (`proposed`).
+- `strata-reviewer` (`--role reviewer`): đọc, thêm issue (`proposed`).
+
+Có MCP thì dùng MCP, không cần đọc bảng lệnh ở trên: server tự gửi hướng dẫn theo vai lúc kết nối, mỗi tool và tham số có mô tả.
+
+| Muốn | Tool |
+|---|---|
+| Xem bảng việc | `list_items` (dòng gọn, không body; `ready=true` = nhận được ngay) → `get_item` |
+| Bắt đầu một task | `task_context` → `item_claim` → làm → `item_submit` (cùng `actor`) |
+| Duyệt / trả lại / đóng (main) | `item_approve`, `item_rework`, `item_close`, `item_reject`, `item_reopen`, `item_release` |
+| Thêm / sửa | `add_item`, `edit_item`, `dep_add`, `dep_rm`, `c4_link` |
+| Tài liệu, kiến trúc | `list_docs` → `get_doc`; `c4_context`, `c4_flow`; `search`; `audit` |
+
+- `project` bỏ trống thì lấy project chứa thư mục làm việc của server (riêng `list_items`, `search`: bỏ trống = mọi project).
+- Gọi sai thì lỗi nói rõ cách sửa: tên tham số lạ, thiếu tham số, giá trị ngoài enum, project không tồn tại (kèm danh sách), và với chuyển trạng thái: item đang ở đâu, vai này làm tiếp được gì.
+- Kết quả bị cắt ở 8000 ký tự; thu hẹp bằng bộ lọc.
+
+Cài đặt MCP: `claude mcp add --scope user strata -- python3 /home/abel/project/tools/strata/strata.py mcp --role main` (Codex: thay `claude` bằng `codex`, bỏ `--scope user`). Quyền từng role do server thực thi; quy trình agent thuộc `agent/` của Strata, không thuộc công cụ Strata. Sửa `strata/mcp.py` xong phải kết nối lại MCP (`/mcp`) hoặc mở phiên mới.
 
 ## Lỗi hay gặp (thư mục C4)
 - Chuỗi có `:` `?` `{` `}` `,` `#` phải bọc `"..."`; dấu phẩy không bọc cắt chuỗi, `c4 validate` báo `key lạ`.

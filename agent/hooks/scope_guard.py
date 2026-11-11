@@ -3,8 +3,10 @@
 
 The marker is JSON: {"task_id": ..., "mode": "implement", "scope":
 {"module": ..., "touch": [repo-relative paths]}}. Its touch list is copied
-from the assigned contract's scope.touch. STRATA_AGENT_ROLE=coder makes a
-missing marker fail closed. This is an accident-prevention hook, not a sandbox.
+from the assigned contract's scope.touch. A coder (STRATA_AGENT_ROLE=coder in
+the environment, or a subagent whose hook payload has agent_type "coder") fails
+closed on a missing marker. Every block message says what the agent may do
+instead. This is an accident-prevention hook, not a sandbox.
 """
 import json
 import os
@@ -65,7 +67,7 @@ def load_scope(marker):
         if os.path.isabs(item) or any(part == ".." for part in item.replace("\\", "/").split("/")):
             block("scope.touch entries must be safe repo-relative paths")
         allowed.append(os.path.realpath(os.path.join(root, item)))
-    return root, allowed
+    return root, allowed, data["task_id"], [p.strip() for p in paths], data.get("ci_change_approved") is True
 
 
 try:
@@ -86,16 +88,19 @@ if not isinstance(raw_target, str) or not raw_target:
 lexical = os.path.abspath(os.path.join(cwd, raw_target))
 target = os.path.realpath(lexical)
 marker = find_marker((cwd, lexical, target))
-is_coder = os.environ.get("STRATA_AGENT_ROLE", "").lower() == "coder"
+is_coder = "coder" in (os.environ.get("STRATA_AGENT_ROLE", "").lower(), str(request.get("agent_type") or "").lower())
+STOP = "Do not work around this with Bash; stop and report the needed path to the coordinator."
 if marker is None:
     if is_coder:
-        block(f"coder edit has no coordinator-provisioned {MARKER}")
+        block(f"coder edit has no coordinator-provisioned {MARKER} in {cwd} or above. Only the coordinator creates it. {STOP}")
     sys.exit(0)
 if target == marker:
     block(f"{MARKER} is read-only for agents")
-root, allowed = load_scope(marker)
+root, allowed, task, touch, ci_change_approved = load_scope(marker)
 if target == root or not (target == root or target.startswith(root + os.sep)):
-    block("target escapes task repository")
+    block(f"{target} is outside the task repository {root}. {STOP}")
 if not any(target == p or target.startswith(p.rstrip(os.sep) + os.sep) for p in allowed):
-    block(f"{target} is outside contract scope.touch")
+    block(f"{os.path.relpath(target, root)} is outside scope.touch of task {task}. You may edit: {', '.join(touch)}. {STOP}")
+if os.path.relpath(target, root).replace(os.sep, "/").startswith(".github/workflows/") and not ci_change_approved:
+    block(f"CI workflow edits require ci_change_approved in task {task}. {STOP}")
 sys.exit(0)

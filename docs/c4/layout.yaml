@@ -1,0 +1,81 @@
+views:
+  _root:
+    user:
+    - 100
+    - 580
+    agent_cli:
+    - 1240
+    - 150
+    chat_worktree:
+    - 1570
+    - 300
+    codex_app_server:
+    - 750
+    - 540
+    openrouter:
+    - 1570
+    - 450
+    omniroute:
+    - 1570
+    - 600
+    repo:
+    - 860
+    - 60
+    agent:
+    - -40
+    - 200
+    strata:
+    - 440
+    - 240
+  strata:
+    cli:
+    - 1080
+    - 680
+    server:
+    - 2370
+    - 1010
+    viewer:
+    - 2050
+    - 430
+    sqlite:
+    - 1570
+    - 760
+    mcp:
+    - 600
+    - 630
+    item_report:
+    - 1570
+    - 430
+    cc_hooks:
+    - 600
+    - 330
+    gitnexus:
+    - 1570
+    - 230
+    gitnexus_index:
+    - 2050
+    - 280
+    codemap_store:
+    - 3020
+    - 880
+    agent_gov:
+    - 600
+    - 480
+    user:
+    - 2540
+    - 110
+    agent:
+    - 120
+    - 410
+    repo:
+    - 3020
+    - 330
+    agent_cli:
+    - 1570
+    - 610
+    codex_app_server:
+    - 3020
+    - 630
+    chat_worktree:
+    - 2400
+    - 1230

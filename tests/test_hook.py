@@ -40,3 +40,22 @@ def test_bare_word_in_hook_filename_allowed():
 
 def test_dotted_vault_path_denied():
     assert run({"agent_type": "coder", "tool_name": "Bash", "tool_input": {"command": "cat ~/.secondbrain/RAM.md"}})
+
+
+def test_install_hooks_dry_run_apply_idempotent(tmp_path):
+    script = HOOK.parent.parent / "scripts/install_hooks.py"
+    f = tmp_path / "settings.json"
+    codex = tmp_path / "codex-hooks.json"
+    old = {"permissions": {"allow": ["x"]}, "hooks": {"PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "python3 /elsewhere/block_secondbrain_creative_agents.py"}]}]}}
+    f.write_text(json.dumps(old))
+    go = lambda *a: subprocess.run([sys.executable, str(script), "--settings", str(f), "--codex-settings", str(codex), *a], capture_output=True, text=True, check=True).stdout
+    assert "would add: scope_guard.py" in go() and json.loads(f.read_text()) == old  # dry run writes nothing
+    assert "added: scope_guard.py" in go("--apply") and "already registered: block_secondbrain" in go("--apply")
+    new = json.loads(f.read_text())
+    assert new["permissions"] == old["permissions"] and new["hooks"]["PreToolUse"][0] == old["hooks"]["PreToolUse"][0] and len(new["hooks"]["PreToolUse"]) == 4
+    assert new["hooks"]["PreToolUse"][1]["hooks"][0]["command"].endswith("agent/hooks/scope_guard.py") and json.loads((tmp_path / "settings.json.bak").read_text()) == old
+    assert len(json.loads(codex.read_text())["hooks"]["PreToolUse"]) == 2
+    assert json.loads(codex.read_text())["hooks"]["PreToolUse"][0]["hooks"][0]["command"].endswith("agent/hooks/github_guard.py")
+    assert len(json.loads(codex.read_text())["hooks"]["SubagentStart"]) == 1
+    assert len(json.loads(codex.read_text())["hooks"]["SubagentStop"]) == 1
+    assert "already registered: github_guard.py for Codex" in go("--apply")

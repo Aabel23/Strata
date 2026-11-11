@@ -9,3 +9,5 @@ backups/
 agent/skills/schematic/
 .gitnexus/
 /*.codemap/
+*.db.agents/
+.strata-worktrees/

@@ -18,6 +18,7 @@ from typing import Any, Mapping
 from urllib.parse import urlsplit
 
 from strata.chat_codex import CodexDeviceUnsupported, CodexSession
+from strata.chat_claude import ClaudeError, ClaudeLogin, ClaudeSession, safe_login_url
 
 
 MAX_SESSIONS = 4
@@ -563,6 +564,7 @@ class ChatSupervisor:
         # the provider so its localhost callback can complete.
         self._global_auth_session = None
         self._global_auth_result: dict[str, str] | None = None
+        self._claude_login = None  # the one `claude auth login` child waiting for its code, if any
 
     @classmethod
     def _validated_projects(cls, projects: Mapping[str, str | os.PathLike[str]]) -> dict[str, str]:
@@ -701,7 +703,9 @@ class ChatSupervisor:
                 resolved = record["worktree"]
                 if not resolved.is_relative_to(worktree.parent.resolve()):
                     raise ChatError("created worktree escaped its allowed parent")
-                session = self._session_factory(resolved, provider=provider, model=model)
+                # Claude Code is its own client; an injected factory (tests) still stands in for every provider.
+                factory = ClaudeSession if provider == "claude" and self._session_factory is CodexSession else self._session_factory
+                session = factory(resolved, provider=provider, model=model)
                 record["session"] = session
                 auth = (CodexSession.auth_status(provider)
                         if provider == "codex" and self._session_factory is CodexSession else None)
@@ -805,6 +809,28 @@ class ChatSupervisor:
             response["login_id"] = login_id
         return response
 
+    def login_claude(self, code: str | None = None, *, login_factory=ClaudeLogin) -> dict[str, Any]:
+        """Machine-wide Claude sign-in. Without `code`: start it and return the link to open. With `code`: finish it."""
+        with self._lock:
+            if self._shutting_down:
+                raise ChatError("chat supervisor is shutting down")
+            previous = self._claude_login
+            try:
+                if code is None:
+                    self._claude_login = None
+                    if previous is not None:
+                        previous.close()
+                    login = login_factory()
+                    url = login.url()
+                    self._claude_login = login
+                    return {"mode": "code", "url": url}
+                if previous is None:
+                    raise ChatError("no Claude sign-in is waiting for a code")
+                self._claude_login = None
+                return {"mode": "code", "signed_in": bool(previous.submit(code))}
+            except ClaudeError as exc:
+                raise ChatError(str(exc)) from exc
+
     def login_global(self) -> dict[str, str]:
         """Start a fresh project-independent Codex device login when supported."""
         with self._lock:
@@ -879,7 +905,7 @@ class ChatSupervisor:
 
     @staticmethod
     def auth_status(provider: str = "codex") -> dict[str, Any]:
-        return CodexSession.auth_status(provider)
+        return ClaudeSession.auth_status() if provider == "claude" else CodexSession.auth_status(provider)
 
     def diff_status(self, project: str, session_id: str) -> dict[str, Any]:
         with self._lock:
@@ -919,6 +945,9 @@ class ChatSupervisor:
             global_auth_session = self._global_auth_session
             self._global_auth_session = None
             self._global_auth_result = None
+            claude_login, self._claude_login = self._claude_login, None
+            if claude_login is not None:
+                claude_login.close()
             for record in records:
                 record["closed"] = True
         for record in records:

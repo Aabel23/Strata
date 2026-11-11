@@ -6,6 +6,9 @@
 <title>Strata</title>
 <link rel="stylesheet" href="/page.css">
 <link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/vendor/xterm.css">
+<link rel="stylesheet" href="/dock.css">
+<link rel="stylesheet" href="/chat.css">
 </head>
 <body>
 <div id="shell">
@@ -24,70 +27,57 @@
       <button id="menu" class="ib" aria-label="Menu">☰</button>
       <nav id="crumbs" aria-label="Breadcrumb"></nav>
       <button id="searchbtn" aria-label="Search"><span>Search…</span><kbd>Ctrl K</kbd></button>
-      <button id="chat-toggle" class="ib" type="button" aria-label="Toggle AI chat" aria-controls="chat-panel" aria-expanded="false" title="Toggle AI chat">AI</button>
+      <button id="chat-toggle" type="button" aria-controls="chat-panel" aria-expanded="false">AI chat</button>
     </header>
     <div id="content"></div>
+    <section id="dock" aria-label="Agents">
+      <div id="dock-resize" role="separator" aria-label="Resize panel" aria-orientation="horizontal" tabindex="0"></div>
+      <header id="dock-bar">
+        <strong>Agents <span id="dock-agent-count" aria-label="Running agents">0</span></strong>
+        <span id="dock-status" role="status" aria-live="polite"></span>
+        <details id="agent-settings"><summary>Task agent settings</summary>
+          <label id="agent-auto-label"><input id="agent-auto" type="checkbox" disabled> <span id="agent-auto-text">Auto-run approved tasks</span></label>
+          <label for="agent-model">Model</label><select id="agent-model"></select>
+          <label for="agent-effort">Effort</label><select id="agent-effort"></select>
+        </details>
+        <button id="dock-toggle" class="ib" type="button" aria-expanded="false" aria-controls="dock-body" aria-label="Show or hide Agents" title="Show or hide Agents"></button>
+      </header>
+      <div id="dock-body" hidden>
+        <div id="agent-cards" aria-label="Live agent sessions"></div>
+      </div>
+    </section>
   </div>
-  <aside id="chat-panel" aria-label="AI coding agent" aria-hidden="true" hidden>
-    <header class="chat-header">
-      <h2>AI chat</h2>
-      <button id="chat-new-session" type="button">New session</button>
-      <button id="chat-close" class="ib" type="button" aria-label="Close AI chat" title="Close AI chat">×</button>
-    </header>
-    <section class="chat-session-setup" aria-label="Agent setup">
-      <label for="chat-provider">Provider</label>
-      <select id="chat-provider" name="provider">
-        <option value="codex">Codex</option>
-        <option value="openrouter">OpenRouter</option>
-        <option value="omniroute">OmniRoute</option>
-      </select>
-      <label for="chat-model">Model</label>
-      <input id="chat-model" name="model" type="text" maxlength="128" autocomplete="off" placeholder="Default model">
-      <div id="chat-auth-state" role="status" aria-live="polite">Checking authentication…</div>
-      <div id="chat-login-area" aria-label="Provider login" hidden>
-        <a id="chat-login-link" target="_blank" rel="noopener noreferrer" hidden>Sign in to Codex</a>
-        <p id="chat-login-help" class="chat-help"></p>
+  <aside id="chat-panel" aria-label="AI chat terminal" hidden>
+    <div id="chat-resize" role="separator" aria-label="Resize AI chat" aria-orientation="vertical" tabindex="0"></div>
+    <header id="chat-head"><h2>AI chat</h2><button id="chat-close" class="ib" type="button" aria-label="Close AI chat">×</button></header>
+    <div id="term-tabs" aria-label="Terminals"></div>
+    <section id="chat-view" aria-label="Chat with Claude" hidden>
+      <div id="cv-bar">
+        <span id="cv-where" title=""></span>
+        <select id="cv-model" aria-label="Model for new chats" title="Model for new chats">
+          <option value="">Default model</option><option value="opus">Opus</option><option value="sonnet">Sonnet</option><option value="haiku">Haiku</option>
+        </select>
+        <button id="cv-new" type="button" title="Start a new chat">New chat</button>
       </div>
+      <div id="cv-log" role="log" aria-live="polite" tabindex="0"></div>
+      <form id="cv-form" autocomplete="off">
+        <textarea id="cv-input" rows="1" placeholder="Message Claude…" aria-label="Message Claude"></textarea>
+        <div id="cv-actions">
+          <span id="cv-hint">Enter to send · Shift+Enter for a new line</span>
+          <button id="cv-send" type="submit">Send</button>
+        </div>
+      </form>
     </section>
-    <section id="chat-conversation" aria-label="Conversation">
-      <div id="chat-events" role="log" aria-live="polite" aria-relevant="additions text" aria-label="Chat messages and agent activity" tabindex="0">
-        <p id="chat-empty-state">Start a session to work with an AI coding agent.</p>
-      </div>
-      <section id="chat-approval" aria-labelledby="chat-approval-title" hidden>
-        <h3 id="chat-approval-title">Approval required</h3>
-        <div id="chat-approval-details"></div>
-        <button id="chat-approval-allow" type="button">Allow</button>
-        <button id="chat-approval-deny" type="button">Deny</button>
-      </section>
-    </section>
-    <section id="chat-review" aria-label="Worktree review">
-      <details id="chat-review-details">
-        <summary>Review changes</summary>
-        <div id="chat-diff-status" aria-label="Worktree status"></div>
-        <pre id="chat-diff" aria-label="Worktree diff"></pre>
-      </details>
-    </section>
-    <form id="chat-composer">
-      <label for="chat-message">Message</label>
-      <textarea id="chat-message" name="message" rows="3" maxlength="60000" placeholder="Describe a coding task…" disabled></textarea>
-      <div class="chat-composer-actions">
-        <button id="chat-send" type="submit" disabled>Send</button>
-        <button id="chat-cancel" type="button" disabled>Cancel turn</button>
-        <button id="chat-close-session" type="button" disabled>Close session</button>
-      </div>
-    </form>
+    <div id="term-host"></div>
+    <p id="term-note" hidden></p>
   </aside>
 </div>
-<section id="agent-bar" aria-label="Agent sessions">
-  <header class="agent-bar-header">
-    <button id="agent-bar-toggle" type="button" aria-expanded="false" aria-controls="agent-session-cards">
-      <span id="agent-bar-title">Agent sessions</span>
-      <span id="agent-session-count" aria-label="Active session count">0</span>
-    </button>
-    <span id="agent-bar-empty">No active agent sessions</span>
-  </header>
-  <div id="agent-session-cards" aria-label="Active agent session cards" hidden></div>
-</section>
+<dialog id="agent-popup" aria-label="Agent terminal">
+  <header><h2 id="agent-popup-title"></h2><button id="agent-popup-close" type="button">Close</button></header>
+  <p id="agent-popup-meta"></p>
+  <div id="agent-popup-terminal"></div>
+  <div id="agent-popup-log" role="log" tabindex="0" hidden></div>
+</dialog>
 <div id="pal" hidden>
   <div id="palbox" class="edge" role="dialog" aria-label="Search">
     <input id="q" type="search" placeholder="Type a command or search tasks, docs…" autocomplete="off" role="combobox" aria-controls="hits" aria-expanded="true">
@@ -116,5 +106,9 @@
 <script src="/swimlane.js"></script>
 <script src="/page.js"></script>
 <script src="/app.js"></script>
+<script src="/vendor/xterm.js"></script>
+<script src="/vendor/xterm-addon-fit.js"></script>
+<script src="/dock.js"></script>
+<script src="/chat.js"></script>
 </body>
 </html>

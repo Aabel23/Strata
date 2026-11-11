@@ -42,43 +42,44 @@ The installer checks only `~/.local/bin/strata`. If a file or symlink is already
 
 GitNexus is licensed under PolyForm Noncommercial 1.0.0 (noncommercial use only). Review the [license](tools/gitnexus/LICENSE) before using GitNexus.
 
-## AI chat
+## Agents and terminal
 
-The viewer includes an AI coding agent panel (the **Chat** button in the top bar; the panel is titled **AI chat**). It runs the local [Codex CLI](https://github.com/openai/codex) as `codex app-server` on the machine that runs `strata serve`; your browser only talks to Strata. Claude is not supported. A Claude SDK or API-key route was researched but not shipped.
+The bottom panel shows live agent cards. The **AI chat** button (or `Ctrl+`\``) opens the terminal in the right panel. Drag the top edge of Agents to resize it. A Claude/Codex CLI launched in that terminal gets a card automatically; the card shows its task when associated with a Strata worktree and its branch. Child processes and hook-reported native subagents connect to the parent card. Click the card to open its live terminal in a popup; native subagents share the parent's terminal. Headless task runs show a log. External terminal sessions get a card, but their terminal cannot be attached without a shared PTY or tmux.
 
-**Setup**
+**Agents**
 
-1. Install the Codex CLI so `codex` is on the `PATH` of the `strata serve` process. Without it, starting a session fails. The viewer only shows a generic "chat request could not be completed" error (the detail stays server-side), and because the worktree is created before Codex starts, a retained worktree is left behind (see cleanup below).
-2. The project must be registered in Strata and its folder must be the top-level directory of a Git repository with at least one commit. Nested repositories and symlinked roots are rejected.
-3. Chat needs editing enabled: use the default loopback bind, or pass `--allow-edit` to `strata serve` on a non-loopback bind (`--no-edit` disables it). Otherwise every chat request, including start, returns 403 "editing disabled".
-4. Open the project in the viewer, open **AI chat**, choose a provider, optionally enter a model (blank uses the default), and select **New session**.
+An agent takes a task, works on its own branch and pushes that branch to `origin`. CI will create a PR after its checks when the owner adds that workflow; agents do not create PRs or delete remote branches.
 
-**Providers and sign-in**
+1. The project folder must be a Git repository with an `origin` remote you can push to from this machine.
+2. Install the Claude Code CLI (`claude`) and sign in once. Agents use that sign-in; no API key is passed to them.
+3. Open **Task agent settings** in the Agents header and tick **Auto-run approved tasks** for the project. It is off by default, per project. From then on every task that is `approved` with its dependencies done is taken automatically, up to 2 at a time (`STRATA_AGENT_MAX`). Tasks in one project run together only when their `scope.touch` paths are disjoint; overlapping or unspecified scopes wait. To hand over one task without auto-run, open it on the board and choose **Give to agent**.
+4. Pick the **Model** and **Effort** the next runs use, or leave both on default.
 
-- **Codex** (default): uses your local Codex account. If the panel shows "Codex sign-in required", start a session, select **Get sign-in link**, then open the OpenAI link it shows. Login happens on the server: Codex redirects to a localhost callback on the machine running Strata, so for a remote viewer you may need a tunnel for that callback port.
-- **OpenRouter** and **OmniRoute**: set these in the environment of `strata serve`, then restart it. The key is never taken from the browser.
+Each run goes through the same steps, shown live in the log:
 
-| Provider | API key | Base URL (optional) | Default base URL |
-| --- | --- | --- | --- |
-| OpenRouter | `STRATA_OPENROUTER_API_KEY` | `STRATA_OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` |
-| OmniRoute | `STRATA_OMNIROUTE_API_KEY` | `STRATA_OMNIROUTE_BASE_URL` | `http://127.0.0.1:20128/v1` |
+| Step | What happens |
+| --- | --- |
+| claim | The task moves to `doing`, owner `agent:claude`. |
+| fetch | `git fetch origin`. |
+| branch | A worktree at `<project parent>/.strata-worktrees/<project>/<action>/<scope>/<work>_t<id>` on a matching branch `<action>/<scope>/<work>_t<id>`, cut from the remote default branch. A clean, idle default-branch checkout is fast-forwarded; a dirty or busy checkout is left intact. |
+| work | Claude Code runs there without asking for permissions and commits its work. |
+| verify | Strata checks the result (see below). |
+| push | Strata pushes that one branch. Never the default branch, never forced. |
+| report | The task moves to `review` with the agent's report and a link to the branch. |
 
-A base URL must be HTTPS, or HTTP on `localhost`, `127.0.0.1`, or `::1`, with no credentials, query, or fragment. Otherwise the panel shows "Provider configuration required".
+What keeps an agent inside its task:
 
-The status line shows "Codex account connected" or a provider as configured ("inference not yet verified"). Neither is proof that the model works: model access is confirmed only after a turn completes successfully.
+- A guard (`agent/hooks/agent_guard.py`) checks every tool call. It refuses pushing, switching branches, changing Git configuration, the GitHub CLI, web and MCP tools, `sudo`, `ssh`, `curl`, the Strata CLI, credential files, and writes outside the worktree. When the task has `scope.touch`, edits outside those paths are refused too.
+- When `bwrap` (bubblewrap) is installed, the agent runs in a sandbox: the file system is read-only except the worktree and the repository's Git store, and the GitHub sign-in is not visible. The status line shows `sandbox on` or `sandbox off`.
+- Only Strata pushes, and only after `verify`: the worktree is still on its branch, the changed files are inside `scope.touch`, CI workflows are untouched unless the scope names them **and** `ci_change_approved: true` is set on the task, and no unrelated branch, tag or Git setting changed. Branches of concurrent, disjoint Strata tasks are allowed to advance. Otherwise the run ends as **Not pushed** and says why.
 
-**Worktree and review**
+A run that fails, is stopped or is not pushed leaves the task in `doing` with the agent, so it is not picked up again by itself. **Retry** continues on the same branch. A run is stopped after 60 minutes (`STRATA_AGENT_TIMEOUT`, in seconds).
 
-Each session works in its own detached Git worktree of `HEAD`, at `<project parent>/.strata-worktrees/<project-id>/chat-<session-id>`, so your checkout is not touched. Uncommitted changes in your checkout are not visible to the agent. Open **Review changes** in the panel to see the worktree's status and diff, which refresh while you chat. Apply changes yourself, for example by committing in the worktree and merging its commit, or by copying files. The diff is capped at 256 KiB, any file over 64 KiB is omitted from it with a marker, and the status list is capped at 64 KiB. Also, a project over 2 GiB (or with a file over 128 MiB) cannot be given a chat worktree.
+**Terminal**
 
-**Approvals and cancel**
+A real shell on the machine that runs `strata serve`, opened in the project folder. Shells keep running when you reload the page; up to 6 at once. Run `claude` here when you want to work with a model yourself.
 
-The agent runs with Codex `approvalPolicy: on-request` and a read-only sandbox, so commands and file changes appear as an **Approval required** card with **Allow** and **Deny**. Review each command before you select Allow: the worktree is the agent's working directory, not an enforced boundary for commands you approve. An approval that is not answered within 300 seconds is denied. **Cancel turn** interrupts the running turn and denies pending approvals. **Close session** stops the agent and denies pending approvals; its worktree remains for review. Stopping `strata serve` also closes all sessions.
-
-**Limits and cleanup**
-
-- At most 4 live sessions at once; close one to start another. The viewer remembers up to 4 session references per browser tab.
-- Strata never deletes chat worktrees, including after a failed startup. Remove one when you are done with `git worktree remove --force <worktree path>` from the project, or delete `.strata-worktrees/<project-id>/chat-*` and run `git worktree prune`.
+The terminal follows the editing switch: it works on the default loopback bind. On another address it is off unless you start the server with `--allow-terminal`. Anyone who can open the viewer on such an address gets a shell as your user, so add that flag only on a network you trust.
 
 ## Common commands
 
