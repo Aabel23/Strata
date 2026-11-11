@@ -309,43 +309,6 @@ async function cvOpen(p,hid,box){
 }
 
 /* ---------- pasted / dropped images ---------- */
-// Big images are scaled to CV_IMAGE_EDGE on the long side (what Claude sees anyway) and sent as JPEG.
-function cvImageLoad(file){
-  return new Promise((ok,fail)=>{const url=URL.createObjectURL(file),img=new Image();
-    img.onload=()=>ok({img,url});img.onerror=()=>{URL.revokeObjectURL(url);fail(new Error("not an image"))};img.src=url});
-}
-const cvB64=blob=>new Promise((ok,fail)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(",")[1]||"");r.onerror=()=>fail(r.error);r.readAsDataURL(blob)});
-async function cvImagePrepare(file){
-  const {img,url}=await cvImageLoad(file),w=img.naturalWidth,h=img.naturalHeight;
-  if(CV_IMAGE_TYPES.includes(file.type)&&file.size<=CV_IMAGE_BYTES&&Math.max(w,h)<=CV_IMAGE_EDGE)
-    return {type:file.type,data:await cvB64(file),url};
-  const k=Math.min(1,CV_IMAGE_EDGE/Math.max(w,h)),c=document.createElement("canvas");
-  c.width=Math.max(1,Math.round(w*k));c.height=Math.max(1,Math.round(h*k));
-  const g=c.getContext("2d");g.fillStyle="#fff";g.fillRect(0,0,c.width,c.height);g.drawImage(img,0,0,c.width,c.height);
-  URL.revokeObjectURL(url);
-  const blob=await new Promise(r=>c.toBlob(r,"image/jpeg",.88));if(!blob)throw new Error("could not convert the image");
-  return {type:"image/jpeg",data:await cvB64(blob),url:URL.createObjectURL(blob)};
-}
-async function cvAttach(files){
-  const s=CV.cur;if(!s)return;
-  for(const f of files){
-    if(CV.images.length>=CV_MAX_IMAGES){cvNote(s,"Up to "+CV_MAX_IMAGES+" images per message.","bad");break}
-    try{CV.images.push(await cvImagePrepare(f))}catch(error){cvNote(s,"Could not attach that image: "+error.message,"bad")}
-    cvAttachDraw();
-  }
-  $("cv-input").focus();
-}
-function cvAttachDraw(){
-  const box=$("cv-attach");box.hidden=!CV.images.length;
-  box.replaceChildren(...CV.images.map((i,n)=>{
-    const t=el("div","cv-thumb"),img=document.createElement("img"),x=el("button","","×");
-    img.src=i.url;img.alt="Image "+(n+1);x.type="button";x.title="Remove image";x.setAttribute("aria-label","Remove image "+(n+1));
-    x.onclick=()=>{CV.images.splice(n,1);cvAttachDraw();$("cv-input").focus()};
-    t.append(img,x);return t;
-  }));
-  cvControls();
-}
-const cvImageFiles=list=>[...(list||[])].filter(f=>f&&f.type&&f.type.startsWith("image/"));
 
 /* ---------- sign-in ---------- */
 async function cvCheckAuth(){
