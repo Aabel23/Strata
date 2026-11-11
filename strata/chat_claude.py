@@ -205,9 +205,12 @@ class ClaudeSession:
             raise ClaudeError("could not start Claude Code") from exc
         threading.Thread(target=self._read_loop, args=(self._proc,), daemon=True).start()
 
-    def turn(self, message: str, images: list[dict[str, str]] | None = None) -> str:
-        """`images`: [{media_type, data(base64)}], already validated by the caller; they go to Claude before the text."""
-        if not isinstance(message, str) or len(message) > MAX_MESSAGE or not (message.strip() or images):
+    def turn(self, message: str, images: list | None = None) -> str:
+        try:
+            pictures = check_images(images)
+        except ValueError as exc:
+            raise ClaudeError(str(exc)) from None
+        if not isinstance(message, str) or (not message.strip() and not pictures) or len(message) > MAX_MESSAGE:
             raise ClaudeError("invalid message")
         content: Any = message
         if images:
@@ -224,6 +227,7 @@ class ClaudeSession:
             turn_id = secrets.token_urlsafe(12)
             self._active_turn = turn_id
             try:
+                content = [*pictures, *([{"type": "text", "text": message}] if message.strip() else [])] if pictures else message
                 self._send({"type": "user", "message": {"role": "user", "content": content}})
             except ClaudeError:
                 self._active_turn = None

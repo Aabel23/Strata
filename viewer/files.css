@@ -1,0 +1,82 @@
+/* Files tab: file tree | divider | tabs + editor + status bar. Colours come from the theme variables in page.css. */
+.reader.fx{--fx-side:260px;grid-template-rows:minmax(0,1fr);grid-template-columns:var(--fx-side) 5px minmax(0,1fr);height:100%;min-height:0}
+.reader.fx.fx-noside{grid-template-columns:minmax(0,1fr)}
+.fx-noside .fx-side,.fx-noside .fx-split{display:none}
+.fx-side{display:grid;grid-template-rows:34px minmax(0,1fr);min-width:0;min-height:0;background:var(--side)}
+.fx-side-head{display:flex;align-items:center;gap:2px;padding:0 6px 0 12px;border-bottom:1px solid var(--line-soft);min-width:0}
+.fx-proj{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.fx-side-head .ib{width:24px;height:24px;border-radius:var(--r-sm)}
+.fx-side-head .ib:hover,.fx-status .ib:hover{background:var(--hover)}
+.fx .ib svg{width:16px;height:16px}
+.fx-tree{overflow:auto;padding:4px 0 24px;min-height:0;overscroll-behavior:contain}
+.fx-row{display:flex;align-items:center;gap:5px;width:100%;height:24px;padding:0 8px 0 calc(8px + var(--d,0) * 14px);border:0;border-radius:0;background:transparent;color:var(--fg);font-size:13px;text-align:left;white-space:nowrap;cursor:pointer}
+.fx-row:hover{background:var(--hover)}
+.fx-row.on{background:var(--sel)}
+.fx-row:focus-visible{outline:1px solid var(--accent);outline-offset:-1px}
+.fx-row svg{width:15px;height:15px;flex:none;color:var(--faint)}
+.fx-row.fx-dir>svg{color:var(--accent)}
+.fx-tw{display:inline-grid;place-items:center;width:14px;height:14px;flex:none}
+.fx-tw svg{width:12px;height:12px;color:var(--faint);transition:transform 80ms}
+.fx-row.open .fx-tw svg{transform:rotate(90deg)}
+.fx-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.fx-nm.dot{color:var(--muted)}
+.fx-mod{flex:none;color:var(--st-doing);font-size:10px}
+.fx-edit{cursor:default}
+.fx-edit input{flex:1;min-width:0;height:20px;padding:0 5px;border:1px solid var(--accent);border-radius:var(--r-sm);background:var(--card);color:var(--fg);font:inherit;font-size:13px;outline:0}
+.fx-treeerr{margin:12px;color:var(--faint);font-size:13px;overflow-wrap:anywhere}
+.fx-split{cursor:col-resize;touch-action:none;border-left:1px solid var(--line-soft)}
+.fx-split:hover,.fx-split:focus-visible,body.resizing .fx-split{background:var(--accent);opacity:.6;outline:0}
+.fx-main{display:grid;grid-template-rows:auto auto minmax(0,1fr) 24px;min-width:0;min-height:0;background:var(--bg)}
+.fx-tabs{display:flex;min-height:35px;overflow-x:auto;overflow-y:hidden;background:var(--side);border-bottom:1px solid var(--line-soft);scrollbar-width:thin}
+.fx-tab{display:flex;align-items:center;gap:6px;flex:none;height:35px;max-width:240px;padding:0 6px 0 12px;border-right:1px solid var(--line-soft);border-top:1px solid transparent;color:var(--muted);font-size:13px;cursor:pointer;user-select:none}
+.fx-tab:hover{color:var(--fg)}
+.fx-tab.on{background:var(--bg);color:var(--fg);border-top-color:var(--accent)}
+.fx-tab:focus-visible{outline:1px solid var(--accent);outline-offset:-1px}
+.fx-tab svg{width:14px;height:14px;flex:none;color:var(--faint)}
+.fx-tn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fx-x{display:inline-grid;place-items:center;width:20px;height:20px;padding:0;border:0;border-radius:var(--r-sm);color:var(--muted);font-size:15px;line-height:1;visibility:hidden}
+.fx-x::before{content:"×"}
+.fx-tab:hover .fx-x,.fx-tab.on .fx-x,.fx-tab.dirty .fx-x{visibility:visible}
+.fx-tab.dirty .fx-x:not(:hover)::before{content:"●";font-size:10px;color:var(--st-doing)}
+.fx-path{display:flex;align-items:center;gap:5px;min-height:24px;padding:0 14px;overflow:hidden;white-space:nowrap;color:var(--faint);font-size:12px}
+.fx-path:empty{display:none}
+.fx-path b{font-weight:500;color:var(--muted)}
+.fx-body{position:relative;min-height:0;min-width:0}
+.fx-editor{position:absolute;inset:0}
+.fx-editor[hidden],.fx-note[hidden]{display:none}
+.fx-note{display:grid;place-content:center;gap:6px;height:100%;padding:24px;text-align:center;color:var(--muted)}
+.fx-note b{font-family:var(--display);font-size:1.5rem;font-weight:500;color:var(--fg)}
+.fx-note p{margin:0;max-width:44ch}
+.fx-status{display:flex;align-items:center;gap:14px;padding:0 12px 0 4px;border-top:1px solid var(--line-soft);background:var(--side);color:var(--muted);font-size:12px;white-space:nowrap;min-width:0}
+.fx-status .ib{width:22px;height:22px;border-radius:var(--r-sm)}
+.fx-st-msg{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.fx-st-msg.bad{color:var(--st-block)}
+.fx-menu{position:fixed;z-index:60;min-width:180px;padding:4px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--raised);box-shadow:var(--shadow-pop)}
+.fx-menu button{display:block;width:100%;padding:4px 10px;border:0;border-radius:var(--r-sm);text-align:left;font-size:13px}
+.fx-menu hr{margin:4px 0;border:0;border-top:1px solid var(--line-soft)}
+
+/* editor: CodeMirror on the theme variables, so it follows light and dark */
+.fx .CodeMirror{height:100%;background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px;line-height:1.5}
+.fx .CodeMirror-gutters{background:var(--bg);border-right:0}
+.fx .CodeMirror-linenumber{padding:0 12px 0 8px;color:var(--faint)}
+.fx .CodeMirror-cursor{border-left:2px solid var(--accent)}
+.fx .CodeMirror-activeline-background{background:var(--hover)}
+.fx .CodeMirror-activeline .CodeMirror-linenumber{color:var(--fg)}
+.fx .CodeMirror-selected,.fx .CodeMirror-focused .CodeMirror-selected{background:var(--accent-soft)}
+.fx .CodeMirror-line::selection,.fx .CodeMirror-line>span::selection,.fx .CodeMirror-line>span>span::selection{background:var(--accent-soft)}
+.fx div.CodeMirror span.CodeMirror-matchingbracket{color:inherit;outline:1px solid var(--accent)}
+.fx div.CodeMirror span.CodeMirror-nonmatchingbracket{color:var(--st-block)}
+.fx .cm-searching{background:color-mix(in srgb,var(--st-doing) 35%,transparent)}
+.fx .CodeMirror-dialog{padding:6px 12px;border-bottom:1px solid var(--line);background:var(--raised);color:var(--fg);font-size:13px}
+.fx .CodeMirror-dialog input{border:1px solid var(--line);border-radius:var(--r-sm);background:var(--card);color:var(--fg);font-family:var(--mono);padding:2px 6px}
+.fx .cm-s-default .cm-keyword,.fx .cm-s-default .cm-tag,.fx .cm-s-default .cm-meta{color:var(--accent)}
+.fx .cm-s-default .cm-string,.fx .cm-s-default .cm-string-2{color:var(--st-done)}
+.fx .cm-s-default .cm-number,.fx .cm-s-default .cm-atom,.fx .cm-s-default .cm-builtin{color:var(--st-doing)}
+.fx .cm-s-default .cm-comment,.fx .cm-s-default .cm-quote{color:var(--faint);font-style:italic}
+.fx .cm-s-default .cm-def,.fx .cm-s-default .cm-variable-2,.fx .cm-s-default .cm-variable-3,.fx .cm-s-default .cm-type,.fx .cm-s-default .cm-attribute,.fx .cm-s-default .cm-qualifier{color:var(--st-info)}
+.fx .cm-s-default .cm-variable,.fx .cm-s-default .cm-property,.fx .cm-s-default .cm-punctuation{color:var(--fg)}
+.fx .cm-s-default .cm-operator,.fx .cm-s-default .cm-bracket{color:var(--muted)}
+.fx .cm-s-default .cm-header{color:var(--accent);font-weight:600}
+.fx .cm-s-default .cm-link,.fx .cm-s-default .cm-url{color:var(--st-info)}
+.fx .cm-s-default .cm-error{color:var(--st-block)}
+@media (max-width:767px){.reader.fx{--fx-side:180px}}

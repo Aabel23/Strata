@@ -25,7 +25,7 @@ views:
     - -40
     - 200
     strata:
-    - 440
+    - 430
     - 240
   strata:
     cli:
