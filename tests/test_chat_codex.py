@@ -6,7 +6,7 @@ import time
 import pytest
 
 from strata.chat_codex import (MAX_EVENT_BYTES, MAX_PENDING_APPROVALS, MAX_REPLAY_BYTES,
-                               CodexDeviceUnsupported, CodexError, CodexSession, _child_env, _safe_url,
+                               CodexDeviceUnsupported, CodexError, CodexSession, _child_env, _codex_executable, _safe_url,
                                _terminate_and_reap)
 
 
@@ -389,6 +389,17 @@ def test_server_selected_codex_binary_is_used_for_auth_and_sessions(tmp_path):
     assert children[0][0][0] == str(binary)
     assert "STRATA_CODEX_BIN" not in children[0][1]["env"]
     session.close()
+
+
+def test_desktop_codex_preferred_over_older_path_binary(tmp_path, monkeypatch):
+    bundled = tmp_path / "desktop-codex"
+    bundled.write_text("#!/bin/sh\nexit 0\n")
+    bundled.chmod(0o755)
+    monkeypatch.setattr("strata.chat_codex.DESKTOP_CODEX", str(bundled))
+    monkeypatch.setattr("strata.chat_codex.shutil.which", lambda *args, **kwargs: "/snap/bin/codex")
+    assert _codex_executable({"PATH": "/snap/bin"}) == str(bundled)
+    bundled.unlink()
+    assert _codex_executable({"PATH": "/snap/bin"}) == "/snap/bin/codex"
 
 
 def test_invalid_server_selected_codex_binary_does_not_fall_back(tmp_path):

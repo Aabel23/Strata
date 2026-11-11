@@ -26,6 +26,7 @@ MAX_PENDING_APPROVALS = 64
 MAX_PENDING_RPCS = 32
 MAX_PENDING_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_APPROVAL_BYTES = 48 * 1024
+DESKTOP_CODEX = "/usr/lib/chatgpt/resources/codex"
 RPC_TIMEOUT = 20
 APPROVAL_TIMEOUT = 300
 _APPROVAL_METHODS = {
@@ -117,6 +118,11 @@ def _codex_executable(environ: dict[str, str]) -> str:
                 or not os.path.isfile(configured) or not os.access(configured, os.X_OK)):
             raise CodexError("STRATA_CODEX_BIN must name an absolute executable")
         return configured
+    # On a Codex desktop host, the app's bundled runtime can be newer than a
+    # separately installed CLI earlier on PATH (for example, an old Snap).
+    desktop = DESKTOP_CODEX
+    if os.path.isfile(desktop) and os.access(desktop, os.X_OK):
+        return desktop
     executable = shutil.which("codex")
     if not executable:
         raise CodexError("Codex CLI is not installed or not on the server PATH")
