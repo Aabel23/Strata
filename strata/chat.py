@@ -552,8 +552,10 @@ class ChatSupervisor:
     """
 
     def __init__(self, projects: Mapping[str, str | os.PathLike[str]], *,
-                 session_factory=CodexSession, max_sessions: int = MAX_SESSIONS):
+                 session_factory=CodexSession, max_sessions: int = MAX_SESSIONS, history=None):
+        """history: a ChatHistory (strata/chat_history.py) that saves every Claude chat; None keeps nothing."""
         self._projects = self._validated_projects(projects)
+        self.history = history
         self._session_factory = session_factory
         self._max_sessions = max(1, min(int(max_sessions), MAX_SESSIONS))
         self._sessions: dict[str, dict[str, Any]] = {}
@@ -676,10 +678,60 @@ class ChatSupervisor:
             raise ChatError("worktree directory escaped its allowed parent")
         return project_dir
 
+    def _listener(self, record: dict[str, Any]):
+        """Save a Claude chat's events into its history entry (record["chat"])."""
+        history, project, chat = self.history, record["project"], record["chat"]
+        def listen(event: dict[str, Any]) -> None:
+            history.record(project, chat, event)
+            if event.get("type") in ("turn_completed", "settings_changed"):
+                session = record.get("session")
+                history.update(project, chat, thread_id=getattr(session, "thread_id", None),
+                               settings=getattr(session, "settings", None))
+        return listen
+
+    def _resume(self, project: str, root: str | os.PathLike[str], chat: str, claude_settings: dict[str, Any]) -> dict[str, Any]:
+        """Carry on a saved Claude chat in the worktree it ran in. A chat still live is handed back as is."""
+        if self.history is None:
+            raise ChatError("chat history is not kept on this server")
+        meta = self.history.meta(project, chat)
+        if not meta or not isinstance(meta.get("thread_id"), str):
+            raise ChatError("this chat cannot be continued")
+        for session_id, record in self._sessions.items():
+            if record.get("chat") == chat and record["project"] == project and not record["closed"] and not record.get("invalidated"):
+                events = record["session"].events(0)
+                return {"project": project, "session_id": session_id, "thread_id": meta["thread_id"], "chat_id": chat,
+                        "worktree": str(record["worktree"]), "seq": events[-1]["seq"] if events else 0,
+                        "settings": getattr(record["session"], "settings", None)}
+        if sum(not record["closed"] for record in self._sessions.values()) >= self._max_sessions:
+            raise ChatError("maximum live chat sessions reached")
+        git_root = self._registered_root(project, root)
+        base = self._worktree_base(project, git_root)
+        worktree = base / f"chat-{chat}"
+        if worktree.is_symlink() or not (worktree / ".git").is_file() or not worktree.resolve().is_relative_to(base.resolve()):
+            raise ChatError("the worktree of this chat is gone; it can only be read")
+        settings = {**{k: v for k, v in (meta.get("settings") or {}).items() if k in ("model", "effort", "permission") and v},
+                    **{k: v for k, v in claude_settings.items() if v is not None}}
+        session_id = secrets.token_urlsafe(24)
+        record = {"project": project, "root": git_root, "worktree": worktree.resolve(), "chat": chat,
+                  "session": None, "closed": True, "startup_error": None}
+        factory = ClaudeSession if self._session_factory is CodexSession else self._session_factory
+        session = factory(record["worktree"], provider="claude", resume=meta["thread_id"], listener=self._listener(record), **settings)
+        record["session"], record["closed"] = session, False
+        self._sessions[session_id] = record
+        return {"project": project, "session_id": session_id, "thread_id": meta["thread_id"], "chat_id": chat,
+                "worktree": str(record["worktree"]), "seq": 0, "settings": getattr(session, "settings", None)}
+
     def start(self, project: str, root: str | os.PathLike[str], provider: str = "codex",
-              model: str | None = None, **claude_settings: Any) -> dict[str, Any]:
-        """claude_settings: effort / permission, passed only to a Claude session."""
+              model: str | None = None, resume: str | None = None, **claude_settings: Any) -> dict[str, Any]:
+        """claude_settings: effort / permission, passed only to a Claude session.
+        resume: a saved chat id (see history) to continue instead of starting a new chat; Claude only."""
         with self._lock:
+            if resume is not None:
+                if self._shutting_down:
+                    raise ChatError("chat supervisor is shutting down")
+                if provider != "claude":
+                    raise ChatError("only Claude chats can be continued")
+                return self._resume(self._project_id(project), root, resume, {"model": model, **claude_settings})
             if self._shutting_down:
                 raise ChatError("chat supervisor is shutting down")
             if sum(not record["closed"] for record in self._sessions.values()) >= self._max_sessions:
@@ -707,7 +759,16 @@ class ChatSupervisor:
                 # Claude Code is its own client; an injected factory (tests) still stands in for every provider.
                 factory = ClaudeSession if provider == "claude" and self._session_factory is CodexSession else self._session_factory
                 extra = {k: v for k, v in claude_settings.items() if v is not None} if provider == "claude" else {}
+                if provider == "claude" and self.history is not None:
+                    record["chat"] = session_id
+                    extra["listener"] = self._listener(record)
                 session = factory(resolved, provider=provider, model=model, **extra)
+                if record.get("chat"):
+                    try:
+                        self.history.begin(project, session_id, provider=provider, worktree=str(resolved),
+                                           settings=getattr(session, "settings", None))
+                    except (OSError, ValueError):
+                        record.pop("chat", None)
                 record["session"] = session
                 auth = (CodexSession.auth_status(provider)
                         if provider == "codex" and self._session_factory is CodexSession else None)
@@ -736,7 +797,7 @@ class ChatSupervisor:
                 if isinstance(exc, ChatError):
                     raise
                 raise ChatError("could not create Codex review worktree") from exc
-            result = {"project": project, "session_id": session_id,
+            result = {"project": project, "session_id": session_id, "chat_id": record.get("chat"),
                       "thread_id": thread_id, "worktree": str(record["worktree"])}
             settings = getattr(session, "settings", None)
             return {**result, "settings": settings} if isinstance(settings, dict) else result
@@ -804,7 +865,36 @@ class ChatSupervisor:
                 return False
             record["closed"] = True
             record["session"].close()
+            if record.get("chat") and self.history is not None:
+                self.history.flush(record["project"], record["chat"])
             return True
+
+    def history_list(self, project: str) -> list[dict[str, Any]]:
+        if self.history is None:
+            return []
+        project = self._project_id(project)
+        with self._lock:
+            live = {r["chat"] for r in self._sessions.values() if r.get("chat") and r["project"] == project and not r["closed"]}
+        return [{**chat, "live": chat["id"] in live} for chat in self.history.list(project)]
+
+    def history_events(self, project: str, chat: str) -> dict[str, Any]:
+        if self.history is None:
+            raise ChatError("chat history is not kept on this server")
+        project = self._project_id(project)
+        meta = self.history.meta(project, chat)
+        if meta is None:
+            raise ChatError("chat not found")
+        keep = ("id", "title", "created", "updated", "turns", "settings")
+        return {"chat": {k: meta.get(k) for k in keep}, "events": self.history.events(project, chat)}
+
+    def history_forget(self, project: str, chat: str) -> bool:
+        if self.history is None:
+            return False
+        project = self._project_id(project)
+        with self._lock:
+            if any(r.get("chat") == chat and r["project"] == project and not r["closed"] for r in self._sessions.values()):
+                raise ChatError("close this chat before deleting it")
+            return self.history.delete(project, chat)
 
     def login(self, project: str, session_id: str) -> dict[str, str]:
         """Return an official login URL for the UI to display; never open it.
@@ -969,6 +1059,8 @@ class ChatSupervisor:
                 record["session"].close()
             except Exception:
                 pass
+            if record.get("chat") and self.history is not None:
+                self.history.flush(record["project"], record["chat"])
         if global_auth_session is not None:
             try:
                 global_auth_session.close()

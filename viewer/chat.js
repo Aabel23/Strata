@@ -2,12 +2,14 @@
    Strata runs one `claude -p` per chat in a git worktree of the open project (strata/chat_claude.py);
    this file sends messages through POST /api/chat and draws the reply from GET /api/chat/events.
    Claude asks before it runs a tool: those requests show up as cards with Allow / Deny. */
-const CV={key:"strata-claude-chat-v1",sessions:{},cur:null,auth:null,authChecked:false,banner:null,stick:true};
+const CV={key:"strata-claude-chat-v1",sessions:{},cur:null,auth:null,authChecked:false,banner:null,stick:true,view:"chat",history:null};
 const cvSleep=ms=>new Promise(r=>setTimeout(r,ms));
 const CV_MAX_MESSAGE=100000, CV_MAX_TURNS=200;
 
 function cvRecord(project,saved={}){
+  // chat: this chat's id in the saved history (strata/chat_history.py). resume: a saved chat opened from History, continued on the next message.
   return {project,sid:saved.sid||null,worktree:saved.worktree||"",turns:saved.turns&&typeof saved.turns==="object"?saved.turns:{},
+    chat:typeof saved.chat==="string"?saved.chat:null,resume:null,
     settings:saved.settings&&typeof saved.settings==="object"?saved.settings:null,
     seq:0,log:el("div","cv-thread"),busy:false,sending:false,polling:false,replayed:!saved.sid,
     assistant:null,tools:{},approvals:{},working:null,last:null};
@@ -20,7 +22,7 @@ function cvSave(){
   try{const out={};
     for(const [p,s] of Object.entries(CV.sessions))if(s.sid){
       const ids=Object.keys(s.turns);for(const id of ids.slice(0,Math.max(0,ids.length-CV_MAX_TURNS)))delete s.turns[id];
-      out[p]={sid:s.sid,worktree:s.worktree,turns:s.turns,settings:s.settings};
+      out[p]={sid:s.sid,worktree:s.worktree,turns:s.turns,settings:s.settings,chat:s.chat};
     }
     sessionStorage.setItem(CV.key,JSON.stringify(out));
   }catch{}
@@ -137,15 +139,23 @@ async function cvAlive(s){
 const cvEventsUrl=s=>"/api/chat/events?project="+encodeURIComponent(s.project)+"&session_id="+encodeURIComponent(s.sid)+"&after="+s.seq;
 function cvForget(s,why){
   if(why)cvNote(s,why);
+  if(s.chat&&!s.resume)s.resume=s.chat;  // the next message carries on the same saved chat when it can
   s.sid=null;s.worktree="";s.seq=0;s.busy=false;s.assistant=null;cvWorking(s,false);
   for(const id of Object.keys(s.approvals))cvApprovalEnd(s,id,"Session ended");
   s.tools={};cvSave();cvWhere();
 }
 async function cvStart(s){
-  cvWorking(s,true,"Starting Claude…");
-  try{const want=cvPrefs();
-    const r=await api("/api/chat",{op:"start",project:s.project,provider:"claude",...(want.model?{model:want.model}:{}),...(want.effort?{effort:want.effort}:{}),permission:want.permission});
-    s.sid=r.session_id;s.worktree=r.worktree||"";s.seq=0;s.replayed=true;s.settings=r.settings||want;cvSave();cvWhere();
+  cvWorking(s,true,s.resume?"Reopening this chat…":"Starting Claude…");
+  try{const want=s.resume&&s.settings?{...cvPrefs(),...s.settings}:cvPrefs();
+    const body={op:"start",project:s.project,provider:"claude",...(want.model?{model:want.model}:{}),...(want.effort?{effort:want.effort}:{}),permission:want.permission};
+    let r;
+    if(s.resume){
+      try{r=await api("/api/chat",{...body,resume:s.resume})}
+      catch(error){cvNote(s,"This chat cannot be continued (its worktree may be gone), so your message starts a new chat.","bad");s.chat=null}
+      s.resume=null;
+    }
+    if(!r)r=await api("/api/chat",body);
+    s.sid=r.session_id;s.chat=r.chat_id||null;s.worktree=r.worktree||"";s.seq=r.seq||0;s.replayed=true;s.settings=r.settings||want;cvSave();cvWhere();
   }finally{if(!s.busy)cvWorking(s,false)}
 }
 async function cvPoll(s,replay=false){
@@ -155,7 +165,11 @@ async function cvPoll(s,replay=false){
       let data;
       try{data=await liveGet(cvEventsUrl(s))}
       catch(error){
-        if(error.status===400||error.status===409){cvForget(s,"This chat ended (Strata restarted or the session closed). Your next message starts a new one.");break}
+        if(error.status===400||error.status===409){
+          const empty=!s.log.childElementCount;
+          cvForget(s,s.chat?"Strata restarted or this chat was closed. Your next message continues it from the saved history.":"This chat ended (Strata restarted or the session closed). Your next message starts a new one.");
+          if(empty&&s.resume&&CUR.p===s.project)cvOpenChat({id:s.resume},true);  // page reloaded after a restart: show the saved transcript
+          break}
         await cvSleep(2000);continue;
       }
       for(const ev of data.events||[]){if(ev.seq>s.seq){s.seq=ev.seq;cvEvent(s,ev,replay)}}
@@ -170,6 +184,7 @@ async function cvSend(){
   const s=CV.cur,input=$("cv-input"),text=input.value;
   if(!s||s.busy||s.sending||!text.trim())return;
   if(text.length>CV_MAX_MESSAGE){cvNote(s,"That message is too long (over 100,000 characters).","bad");return}
+  if(CV.view!=="chat"){CV.view="chat";cvRender()}
   s.sending=true;CV.stick=true;cvControls();
   const bubble=cvUser(s,text);input.value="";cvGrow();cvScroll(s);
   const turn=()=>api("/api/chat",{op:"turn",project:s.project,session_id:s.sid,message:text});
@@ -199,7 +214,77 @@ async function cvNew(){
   const p=CUR.p;if(!p)return;
   const old=CV.sessions[p];
   if(old&&old.sid)api("/api/chat",{op:"close",project:p,session_id:old.sid}).catch(()=>{});
-  CV.sessions[p]=cvRecord(p);cvSave();chatViewShow();$("cv-input").focus();
+  CV.sessions[p]=cvRecord(p);CV.view="chat";cvSave();chatViewShow();$("cv-input").focus();
+}
+
+/* ---------- saved chats (History) ---------- */
+// Every Claude chat is saved on the server (strata/chat_history.py). History lists them;
+// opening one shows its transcript, and the next message continues it with `claude --resume`.
+function cvAgo(t){
+  const d=(Date.now()/1000-t);
+  if(d<60)return "just now";if(d<3600)return Math.floor(d/60)+" min ago";if(d<86400)return Math.floor(d/3600)+" h ago";
+  return new Date(t*1000).toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"});
+}
+async function cvHistory(){
+  if(CV.view==="history"){CV.view="chat";cvRender();cvControls();return}
+  CV.view="history";cvLoadHistory();
+}
+async function cvLoadHistory(){
+  const p=CUR.p;if(!p)return;
+  CV.history=null;cvRender();cvControls();
+  let list;
+  try{list=(await liveGet("/api/chat/history?project="+encodeURIComponent(p))).chats||[]}
+  catch(error){list={error:error.message}}
+  if(CV.view==="history"&&CUR.p===p){CV.history=list;cvRender()}
+}
+function cvHistoryBox(){
+  const box=el("div","cv-history"),list=CV.history;
+  box.append(el("div","cv-history-head","Previous chats in "+CUR.p));
+  if(!list){box.append(el("p","cv-empty","Loading…"));return box}
+  if(list.error){box.append(el("p","cv-empty","Could not load saved chats: "+list.error));return box}
+  if(!list.length){box.append(el("p","cv-empty","No saved chats yet. Chats are saved as you talk to Claude."));return box}
+  const cur=CV.cur&&CV.cur.chat;
+  for(const c of list){
+    const row=el("div","cv-hrow"+(c.id===cur?" cur":"")),open=el("button","cv-hopen"),del=el("button","ib cv-hdel","×");
+    open.type=del.type="button";
+    open.append(el("span","cv-htitle",c.title||"(untitled chat)"),
+      el("span","cv-hmeta",cvAgo(c.updated||c.created||0)+" · "+(c.turns||0)+(c.turns===1?" message":" messages")+(c.id===cur?" · open":c.live?" · live":"")));
+    open.onclick=()=>cvOpenChat(c);
+    del.title="Delete this saved chat";del.setAttribute("aria-label","Delete saved chat");
+    del.onclick=()=>cvForgetChat(c,row);
+    row.append(open,del);box.append(row);
+  }
+  return box;
+}
+async function cvOpenChat(c,force=false){
+  const p=CUR.p;if(!p)return;
+  const old=CV.sessions[p];
+  if(old&&old.chat===c.id&&!force){CV.view="chat";cvRender();cvControls();return}
+  if(old&&old.busy){cvNote(old,"Stop Claude before opening another chat.","bad");CV.view="chat";cvRender();cvControls();return}
+  let data;
+  try{data=await liveGet("/api/chat/history?project="+encodeURIComponent(p)+"&chat_id="+encodeURIComponent(c.id))}
+  catch(error){if(!force)alert("Could not open that chat: "+error.message);return}
+  if(old&&old.sid)api("/api/chat",{op:"close",project:p,session_id:old.sid}).catch(()=>{});
+  const s=cvRecord(p);s.resume=c.id;s.chat=c.id;s.settings=data.chat&&data.chat.settings||null;
+  CV.sessions[p]=s;CV.view="chat";CV.cur=null;
+  for(const ev of data.events||[]){
+    const d=ev.data||{};
+    if(ev.type==="user_message")cvUser(s,String(d.text||""));
+    else if(ev.type==="text"){s.assistant=null;cvText(s,String(d.text||""),d.item_id);s.assistant=null}
+    else cvEvent(s,ev,true);
+  }
+  s.busy=false;cvWorking(s,false);
+  for(const id of Object.keys(s.approvals))cvApprovalEnd(s,id,"Closed");
+  const when=data.chat&&(data.chat.updated||data.chat.created);
+  cvNote(s,"Saved chat"+(when?" from "+cvAgo(when):"")+". Your next message continues it.");
+  cvSave();chatViewShow();$("cv-input").focus();
+}
+async function cvForgetChat(c,row){
+  if(!confirm("Delete the saved chat \""+(c.title||"untitled")+"\"? Its worktree stays on disk."))return;
+  try{await api("/api/chat",{op:"forget",project:CUR.p,chat_id:c.id});row.remove();
+    CV.history=(CV.history||[]).filter(x=>x.id!==c.id);
+    const s=CV.sessions[CUR.p];if(s&&s.chat===c.id){s.chat=null;s.resume=null;cvSave()}
+  }catch(error){alert("Could not delete it: "+error.message+" (close the chat first if it is open)")}
 }
 
 /* ---------- sign-in ---------- */
@@ -311,12 +396,14 @@ function cvIntro(){
   return box;
 }
 function cvRender(){
+  if(CV.view==="history"&&CUR.p){$("cv-log").replaceChildren(cvHistoryBox());$("cv-history").classList.add("on");return}
+  $("cv-history").classList.remove("on");
   $("cv-log").replaceChildren(...[CV.banner,CV.cur&&CV.cur.log,cvIntro()].filter(Boolean));
   if(CV.cur)cvScroll(CV.cur);
 }
 function cvWhere(){
   const s=CV.cur,n=$("cv-where");
-  n.textContent=s?s.project+(s.sid?" · live":""):"No project";
+  n.textContent=s?s.project+(s.sid?" · live":s.resume?" · saved chat":""):"No project";
   n.title=s&&s.worktree?"Worktree: "+s.worktree:"";
 }
 function cvControls(){
@@ -325,11 +412,12 @@ function cvControls(){
   if(s&&s.busy){send.textContent="Stop";send.classList.add("stop");send.disabled=false}
   else{send.textContent=s&&s.sending?"Sending…":"Send";send.classList.remove("stop");send.disabled=!ok||!!(s&&s.sending)}
   $("cv-new").disabled=!s||(!s.sid&&!s.log.childElementCount);
+  $("cv-history").disabled=!s;
   cvPicks();
 }
 function chatViewShow(){
   const p=CUR.p,s=p?(CV.sessions[p]||(CV.sessions[p]=cvRecord(p))):null;
-  if(CV.cur!==s){CV.cur=s;CV.stick=true}
+  if(CV.cur!==s){CV.cur=s;CV.stick=true;if(CV.view==="history")cvLoadHistory()}
   cvRender();cvWhere();cvControls();
   if(s&&s.sid&&!s.replayed){s.replayed=true;cvPoll(s,true)}
   if(!CV.authChecked)cvCheckAuth();
@@ -343,6 +431,7 @@ $("cv-input").addEventListener("keydown",e=>{
 });
 $("cv-input").addEventListener("input",cvGrow);
 $("cv-new").onclick=cvNew;
+$("cv-history").onclick=cvHistory;
 $("cv-model").onchange=$("cv-effort").onchange=$("cv-perm").onchange=cvApplyPicks;
 $("cv-log").addEventListener("scroll",()=>{const b=$("cv-log");CV.stick=b.scrollHeight-b.scrollTop-b.clientHeight<60});
 cvLoad();

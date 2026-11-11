@@ -10,4 +10,5 @@ agent/skills/schematic/
 .gitnexus/
 /*.codemap/
 *.db.agents/
+*.db.chats/
 .strata-worktrees/

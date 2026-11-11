@@ -102,7 +102,10 @@ class ClaudeSession:
 
     def __init__(self, cwd, provider: str = "claude", model: str | None = None, *, effort: str | None = None,
                  permission: str = DEFAULT_PERMISSION, popen=subprocess.Popen,
-                 environ: dict[str, str] | None = None, approval_timeout: int = APPROVAL_TIMEOUT, replay_limit: int = MAX_REPLAY):
+                 environ: dict[str, str] | None = None, approval_timeout: int = APPROVAL_TIMEOUT, replay_limit: int = MAX_REPLAY,
+                 resume: str | None = None, listener=None):
+        """resume: a Claude Code session id to carry on (from saved chat history). listener: called with every
+        event, plus a `user_message` event per turn, so the chat can be saved (strata/chat_history.py)."""
         if provider != "claude":
             raise ValueError("provider must be claude")
         _check_settings(model, effort, permission)
@@ -120,7 +123,10 @@ class ClaudeSession:
         self._active_turn: str | None = None
         self._closed = self._verified = False
         self._skip_results = 0  # an interrupted turn still ends with one result message; it was already reported as cancelled
-        self._thread_id: str | None = None
+        if resume is not None and not (isinstance(resume, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", resume)):
+            raise ValueError("invalid resume id")
+        self._thread_id: str | None = resume
+        self._listener = listener
 
     # ---- status and sign-in (no session needed) ----
     @classmethod
@@ -185,6 +191,7 @@ class ClaudeSession:
             except ClaudeError:
                 self._active_turn = None
                 raise
+            self._tell({"type": "user_message", "data": {"text": message, "turn_id": turn_id}, "time": time.time()})
             self._emit("turn_started", {"turn_id": turn_id})
             return turn_id
 
@@ -386,6 +393,14 @@ class ClaudeSession:
             while len(self._events) > self._replay_limit or self._event_bytes > MAX_REPLAY_BYTES:
                 self._event_bytes -= self._events.popleft()[1]
             self._changed.notify_all()
+            self._tell(event)
+
+    def _tell(self, event: dict[str, Any]) -> None:
+        if self._listener is not None:
+            try:
+                self._listener(event)
+            except Exception:
+                pass
 
     @property
     def inference_status(self) -> dict[str, Any]:

@@ -4,6 +4,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from strata import blocks, c4_edit, c4_layered, codemap, db, service, symbols
 from strata import agents, claude_models, term
 from strata.chat import ChatError, ChatSupervisor
+from strata.chat_history import ChatHistory
 
 SERVE_EXT = set(".py .js .mjs .ts .tsx .css .html .htm .md .txt .yaml .yml .json .toml .c .h .cpp .hpp .dart .java .kt .go .rs .svg .png .jpg .jpeg .gif .webp".split())
 
@@ -36,6 +37,7 @@ CHAT_PATH = "/api/chat"
 CHAT_EVENTS_PATH = "/api/chat/events"
 CHAT_AUTH_PATH = "/api/chat/auth"
 CHAT_DIFF_PATH = "/api/chat/diff"
+CHAT_HISTORY_PATH = "/api/chat/history"
 TERM_PATH = "/api/term"
 TERM_READ_PATH = "/api/term/read"
 AGENT_PATH = "/api/agent"
@@ -100,7 +102,11 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                     continue
             return registered
 
-    chat_supervisor = chat_supervisor_factory(chat_projects())
+    # Saved chats live as files beside the DB (strata/chat_history.py); an in-memory DB keeps none.
+    store = db.db_path(db_path)
+    history = ChatHistory(pathlib.Path(store).resolve().with_name(pathlib.Path(store).name + ".chats")) if store != ":memory:" else None
+    chat_supervisor = (chat_supervisor_factory(chat_projects(), history=history) if chat_supervisor_factory is ChatSupervisor
+                       else chat_supervisor_factory(chat_projects()))
     chat_stop_lock = threading.Lock()
     chat_stopped = False
 
@@ -280,8 +286,11 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 if not isinstance(project_id, str) or not CHAT_PROJECT_ID.fullmatch(project_id):
                     raise ValueError("invalid project")
                 if operation == "start":
-                    if set(op) - {"op", "project", "provider", "model", "effort", "permission"}:
+                    if set(op) - {"op", "project", "provider", "model", "effort", "permission", "resume"}:
                         raise ValueError("unexpected start field")
+                    resume = op.get("resume")
+                    if resume is not None and (not isinstance(resume, str) or not CHAT_SESSION_ID.fullmatch(resume)):
+                        raise ValueError("invalid chat to resume")
                     provider = op.get("provider", "codex")
                     model = op.get("model")
                     if provider not in ("claude", "codex", "openrouter", "omniroute"):
@@ -298,9 +307,15 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                     root = roots.get(project_id)
                     if not root:
                         return self.json({"error": "project is not registered for chat"}, 404)
+                    if resume is not None:
+                        settings["resume"] = resume
                     result = chat_supervisor.start(project_id, root, provider=provider, model=model, **settings)
                     return self.json({"ok": True, **result})
 
+                if operation == "forget":  # delete a saved chat's transcript; its worktree stays
+                    if set(op) != {"op", "project", "chat_id"} or not isinstance(op["chat_id"], str) or not CHAT_SESSION_ID.fullmatch(op["chat_id"]):
+                        raise ValueError("invalid chat to forget")
+                    return self.json({"ok": True, "deleted": chat_supervisor.history_forget(project_id, op["chat_id"])})
                 required = {"op", "project", "session_id"}
                 if operation in ("turn", "decide", "cancel", "close", "login", "cancel_login"):
                     if not required.issubset(op):
@@ -430,7 +445,8 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             try:
                 parsed = parse_qs(raw_query, keep_blank_values=True, strict_parsing=True)
                 allowed = {CHAT_EVENTS_PATH: {"project", "session_id", "after"},
-                           CHAT_AUTH_PATH: {"provider"}, CHAT_DIFF_PATH: {"project", "session_id"}}[path]
+                           CHAT_AUTH_PATH: {"provider"}, CHAT_DIFF_PATH: {"project", "session_id"},
+                           CHAT_HISTORY_PATH: {"project", "chat_id"}}[path]
                 if any(k not in allowed or len(v) != 1 for k, v in parsed.items()):
                     raise ValueError
                 q = {k: values[0] for k, values in parsed.items()}
@@ -442,6 +458,15 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                     status = chat_supervisor.auth_status(provider)
                     return self.json({**status, **claude_models.chat_catalog()} if provider == "claude" else status)
                 project_id, session_id = q.get("project"), q.get("session_id")
+                if path == CHAT_HISTORY_PATH:  # no chat_id: the project's saved chats; with one: that chat's transcript
+                    if not project_id or not CHAT_PROJECT_ID.fullmatch(project_id):
+                        raise ValueError
+                    chat = q.get("chat_id")
+                    if chat is None:
+                        return self.json({"chats": chat_supervisor.history_list(project_id)})
+                    if not CHAT_SESSION_ID.fullmatch(chat):
+                        raise ValueError
+                    return self.json(chat_supervisor.history_events(project_id, chat))
                 if not project_id or not CHAT_PROJECT_ID.fullmatch(project_id) or not session_id or not CHAT_SESSION_ID.fullmatch(session_id):
                     raise ValueError
                 if path == CHAT_EVENTS_PATH:
@@ -501,7 +526,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             q = {k: v[-1] for k, v in parse_qs(u.query, keep_blank_values=True).items()}
             parts = [unquote(x) for x in u.path.split("/")]  # ['', 'api', ...]
             p = u.path
-            if p in (CHAT_EVENTS_PATH, CHAT_AUTH_PATH, CHAT_DIFF_PATH):
+            if p in (CHAT_EVENTS_PATH, CHAT_AUTH_PATH, CHAT_DIFF_PATH, CHAT_HISTORY_PATH):
                 return self.chat_get(p, u.query)
             if p in (TERM_READ_PATH, AGENTS_PATH, AGENT_LOG_PATH): return self.live_get(p, q)
             if p in STATIC: return self.file(VIEWER / STATIC[p])
