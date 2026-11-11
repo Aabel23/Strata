@@ -707,9 +707,10 @@ class ChatSupervisor:
             except ChatError:
                 raise ChatError(NO_COMMITS, public=True) from None
             try:
-                _run_git(git_root, ["-c", "core.hooksPath=" + os.devnull,
-                                    "worktree", "add", "--detach", "--no-checkout",
-                                    str(worktree), "HEAD"])
+                if reuse is None:
+                    _run_git(git_root, ["-c", "core.hooksPath=" + os.devnull,
+                                        "worktree", "add", "--detach", "--no-checkout",
+                                        str(worktree), "HEAD"])
                 registered_worktree = True
                 record["worktree"] = worktree.resolve(strict=True)
                 self._sessions[session_id] = record
@@ -826,14 +827,21 @@ class ChatSupervisor:
                 raise ChatError("chat session is closed")
             return record
 
-    def turn(self, project: str, session_id: str, message: str, images: list | None = None) -> str:
+    def turn(self, project: str, session_id: str, message: str, images: list[dict[str, str]] | None = None) -> str:
+        """images: [{media_type, data(base64)}] already checked by `chat_history.check_images`; Claude sessions only."""
         with self._lock:
-            session = self._get(project, session_id)["session"]
-            if not images:
-                return session.turn(message)
-            if getattr(session, "provider", "") != "claude":
+            record = self._get(project, session_id)
+            session, recorder = record["session"], record.get("history")
+            if images and getattr(session, "provider", "") != "claude" and not isinstance(session, ClaudeSession):
                 raise ChatError("only Claude chats take images")
-            return session.turn(message, images)
+            if recorder is not None:
+                recorder.expect(message, images)
+            try:
+                return session.turn(message, images) if images else session.turn(message)
+            except BaseException:
+                if recorder is not None:
+                    recorder.forget()
+                raise
 
     def events(self, project: str, session_id: str, after: int = 0) -> list[dict[str, Any]]:
         with self._lock:
