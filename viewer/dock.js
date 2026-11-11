@@ -58,7 +58,7 @@ document.addEventListener("keydown",e=>{if(e.ctrlKey&&!e.altKey&&!e.metaKey&&e.k
 
 /* ---------- cards ---------- */
 function agentOptions(select,values,current){
-  if(select.options.length!==values.length)select.replaceChildren(...values.map(v=>new Option(v||"default",v)));
+  if(select.options.length!==values.length)select.replaceChildren(...values.map(v=>new Option(v||"Default",v)));
   if(document.activeElement!==select)select.value=current||"";
 }
 function agentRender(){
@@ -137,6 +137,8 @@ async function agentOp(body,button){
 }
 async function agentRun(item,button){const result=await agentOp({op:"run",item},button);dockSet(true);if(result)await agentPoll()}
 $("agent-auto").onchange=()=>{if(CUR.p)agentOp({op:"auto",project:CUR.p,on:$("agent-auto").checked})};
+document.addEventListener("pointerdown",e=>{const d=$("agent-settings");if(d.open&&!d.contains(e.target))d.open=false});
+$("agent-settings").addEventListener("keydown",e=>{if(e.key==="Escape"){const d=$("agent-settings");d.open=false;d.querySelector("summary").focus()}});
 $("agent-model").onchange=$("agent-effort").onchange=()=>agentOp({op:"settings",model:$("agent-model").value,effort:$("agent-effort").value});
 function dockProjectChanged(){agentRender();if(CHAT.open&&PANEL.mode==="chat"&&typeof chatViewShow==="function")chatViewShow()}
 

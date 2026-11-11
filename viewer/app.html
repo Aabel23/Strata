@@ -36,9 +36,11 @@
         <strong>Agents <span id="dock-agent-count" aria-label="Running agents">0</span></strong>
         <span id="dock-status" role="status" aria-live="polite"></span>
         <details id="agent-settings"><summary>Task agent settings</summary>
-          <label id="agent-auto-label"><input id="agent-auto" type="checkbox" disabled> <span id="agent-auto-text">Auto-run approved tasks</span></label>
-          <label for="agent-model">Model</label><select id="agent-model"></select>
-          <label for="agent-effort">Effort</label><select id="agent-effort"></select>
+          <div id="agent-settings-pop">
+            <label id="agent-auto-label"><input id="agent-auto" type="checkbox" disabled> <span id="agent-auto-text">Auto-run approved tasks</span></label>
+            <label for="agent-model">Model</label><select id="agent-model"></select>
+            <label for="agent-effort">Effort</label><select id="agent-effort"></select>
+          </div>
         </details>
         <button id="dock-toggle" class="ib" type="button" aria-expanded="false" aria-controls="dock-body" aria-label="Show or hide Agents" title="Show or hide Agents"></button>
       </header>
@@ -58,7 +60,8 @@
       </div>
       <div id="cv-log" role="log" aria-live="polite" tabindex="0"></div>
       <form id="cv-form" autocomplete="off">
-        <textarea id="cv-input" rows="1" placeholder="Message Claude…" aria-label="Message Claude" title="Enter to send · Shift+Enter for a new line · Shift+Tab to change mode"></textarea>
+        <div id="cv-attach" aria-label="Images to send" hidden></div>
+        <textarea id="cv-input" rows="1" placeholder="Message Claude…" aria-label="Message Claude" title="Enter to send · Shift+Enter for a new line · Shift+Tab to change mode · paste or drop images to attach"></textarea>
         <div id="cv-actions">
           <select id="cv-perm" class="cv-pick" aria-label="Permission mode"><option value="auto">Auto</option></select>
           <select id="cv-model" class="cv-pick" aria-label="Model"><option value="">Default model</option></select>

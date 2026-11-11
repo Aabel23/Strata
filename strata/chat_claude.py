@@ -17,6 +17,8 @@ import re
 import secrets
 import shutil
 import subprocess
+import base64
+import binascii
 import threading
 import time
 from typing import Any
@@ -31,6 +33,11 @@ MAX_REPLAY_BYTES = 4 * 1024 * 1024
 MAX_EVENT_BYTES = 64 * 1024
 MAX_PENDING_APPROVALS = 64
 MAX_FIELD = 6000
+MAX_IMAGES = 4
+MAX_IMAGE_B64 = 5 * 1024 * 1024  # the Messages API limit for one base64 image
+# media type -> the bytes a real file of that type starts with (WebP: RIFF....WEBP)
+IMAGE_MAGIC = {"image/png": (b"\x89PNG\r\n\x1a\n",), "image/jpeg": (b"\xff\xd8\xff",),
+               "image/gif": (b"GIF87a", b"GIF89a"), "image/webp": (b"RIFF",)}
 APPROVAL_TIMEOUT = 300
 STATUS_TIMEOUT = 15
 LOGIN_URL_TIMEOUT = 20
@@ -44,6 +51,31 @@ _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/\[\]-]{0,127}")
 
 class ClaudeError(RuntimeError):
     pass
+
+
+def check_images(images: Any) -> list[dict[str, str]]:
+    """Pasted images for one turn: at most MAX_IMAGES of {media_type, data (base64)}, each a real PNG/JPEG/GIF/WebP.
+    Returns them as Claude image content blocks; raises ValueError otherwise."""
+    if images is None:
+        return []
+    if not isinstance(images, list) or len(images) > MAX_IMAGES:
+        raise ValueError(f"images must be a list of at most {MAX_IMAGES}")
+    blocks = []
+    for image in images:
+        if not isinstance(image, dict) or set(image) != {"media_type", "data"}:
+            raise ValueError("each image needs media_type and data only")
+        kind, data = image["media_type"], image["data"]
+        if kind not in IMAGE_MAGIC or not isinstance(data, str) or not data or len(data) > MAX_IMAGE_B64:
+            raise ValueError("images must be PNG, JPEG, GIF or WebP, up to 5 MB each")
+        try:
+            head = base64.b64decode(data[:64], validate=True)
+            base64.b64decode(data, validate=True)
+        except (binascii.Error, ValueError):
+            raise ValueError("image data is not base64") from None
+        if not head.startswith(IMAGE_MAGIC[kind]) or (kind == "image/webp" and head[8:12] != b"WEBP"):
+            raise ValueError("image data does not match its media type")
+        blocks.append({"type": "image", "source": {"type": "base64", "media_type": kind, "data": data}})
+    return blocks
 
 
 def _child_env(environ: dict[str, str] | None = None) -> dict[str, str]:
@@ -168,8 +200,12 @@ class ClaudeSession:
             raise ClaudeError("could not start Claude Code") from exc
         threading.Thread(target=self._read_loop, args=(self._proc,), daemon=True).start()
 
-    def turn(self, message: str) -> str:
-        if not isinstance(message, str) or not message.strip() or len(message) > MAX_MESSAGE:
+    def turn(self, message: str, images: list | None = None) -> str:
+        try:
+            pictures = check_images(images)
+        except ValueError as exc:
+            raise ClaudeError(str(exc)) from None
+        if not isinstance(message, str) or (not message.strip() and not pictures) or len(message) > MAX_MESSAGE:
             raise ClaudeError("invalid message")
         with self._lock:
             if self._closed:
@@ -181,7 +217,8 @@ class ClaudeSession:
             turn_id = secrets.token_urlsafe(12)
             self._active_turn = turn_id
             try:
-                self._send({"type": "user", "message": {"role": "user", "content": message}})
+                content = [*pictures, *([{"type": "text", "text": message}] if message.strip() else [])] if pictures else message
+                self._send({"type": "user", "message": {"role": "user", "content": content}})
             except ClaudeError:
                 self._active_turn = None
                 raise

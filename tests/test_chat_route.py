@@ -32,9 +32,9 @@ class FakeChatSupervisor:
         self.sessions.add((project, "session-1"))
         return {"project": project, "session_id": "session-1", "thread_id": "thread-1", "worktree": "/tmp/worktree"}
 
-    def turn(self, project, session_id, message):
+    def turn(self, project, session_id, message, images=None):
         self._bound(project, session_id)
-        self.calls.append(("turn", project, session_id, message))
+        self.calls.append(("turn", project, session_id, message) + ((len(images),) if images else ()))
         return "turn-1"
 
     def decide(self, project, session_id, approval_id, allow):
@@ -319,3 +319,21 @@ def test_claude_provider_start_auth_and_sign_in(chat_server):
                 {"op": "login", "provider": "claude", "extra": 1}, {"op": "login", "provider": "gemini"}):
         assert post(base, token, bad)[0] == 400
     assert calls == [None, "abc#123"]
+
+
+PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+
+
+def test_turn_takes_pasted_images_and_checks_them(chat_server):
+    base, token, _, supervisor, *_ = chat_server
+    assert post(base, token, {"op": "start", "project": "p"})[0] == 200
+    image = {"media_type": "image/png", "data": PNG}
+    turn = {"op": "turn", "project": "p", "session_id": "session-1"}
+    assert post(base, token, {**turn, "message": "look", "images": [image]})[0] == 200
+    assert post(base, token, {**turn, "message": "", "images": [image, image]})[0] == 200
+    assert supervisor.calls[-2:] == [("turn", "p", "session-1", "look", 1), ("turn", "p", "session-1", "", 2)]
+    for bad in ({**turn, "message": ""}, {**turn, "message": "x", "images": [{"media_type": "image/gif", "data": PNG}]},
+                {**turn, "message": "x", "images": [image] * 5}):
+        assert post(base, token, bad)[0] == 400
+    big = {**turn, "message": "x", "images": [{"media_type": "image/png", "data": PNG + "A" * 200_000}]}
+    assert post(base, token, big)[0] == 400  # past the 64 KB edit cap, still read and checked (bad padding), not 413
