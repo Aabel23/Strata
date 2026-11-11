@@ -38,10 +38,14 @@ class ChatError(RuntimeError):
     """Safe supervisor failure suitable for conversion to a client error."""
 
     def __init__(self, message: str, *, session_id: str | None = None,
-                 worktree: str | None = None):
+                 worktree: str | None = None, public: bool = False):
         super().__init__(message)
         self.session_id = session_id
         self.worktree = worktree
+        self.public = public  # the message is fixed text the user can act on, so the server may show it
+
+
+NO_COMMITS = "this project has no commits yet; make a first commit, then start the chat"
 
 
 def _safe_auth_url(value: Any) -> bool:
@@ -693,6 +697,10 @@ class ChatSupervisor:
             registered_worktree = False
             session = None
             try:
+                _run_git(git_root, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"])
+            except ChatError:
+                raise ChatError(NO_COMMITS, public=True) from None
+            try:
                 _run_git(git_root, ["-c", "core.hooksPath=" + os.devnull,
                                     "worktree", "add", "--detach", "--no-checkout",
                                     str(worktree), "HEAD"])
@@ -758,9 +766,14 @@ class ChatSupervisor:
                 raise ChatError("chat session is closed")
             return record
 
-    def turn(self, project: str, session_id: str, message: str) -> str:
+    def turn(self, project: str, session_id: str, message: str, images: list | None = None) -> str:
         with self._lock:
-            return self._get(project, session_id)["session"].turn(message)
+            session = self._get(project, session_id)["session"]
+            if not images:
+                return session.turn(message)
+            if getattr(session, "provider", "") != "claude":
+                raise ChatError("only Claude chats take images")
+            return session.turn(message, images)
 
     def events(self, project: str, session_id: str, after: int = 0) -> list[dict[str, Any]]:
         with self._lock:

@@ -9,6 +9,8 @@
 <link rel="stylesheet" href="/vendor/xterm.css">
 <link rel="stylesheet" href="/dock.css">
 <link rel="stylesheet" href="/chat.css">
+<link rel="stylesheet" href="/vendor/codemirror.css">
+<link rel="stylesheet" href="/files.css">
 </head>
 <body>
 <div id="shell">
@@ -58,7 +60,8 @@
       </div>
       <div id="cv-log" role="log" aria-live="polite" tabindex="0"></div>
       <form id="cv-form" autocomplete="off">
-        <textarea id="cv-input" rows="1" placeholder="Message Claude…" aria-label="Message Claude" title="Enter to send · Shift+Enter for a new line · Shift+Tab to change mode"></textarea>
+        <div id="cv-attach" aria-label="Images to send" hidden></div>
+        <textarea id="cv-input" rows="1" placeholder="Message Claude…" aria-label="Message Claude" title="Enter to send · Shift+Enter for a new line · Shift+Tab to change mode · paste or drop images to attach"></textarea>
         <div id="cv-actions">
           <select id="cv-perm" class="cv-pick" aria-label="Permission mode"><option value="auto">Auto</option></select>
           <select id="cv-model" class="cv-pick" aria-label="Model"><option value="">Default model</option></select>
@@ -90,7 +93,7 @@
     <h2>Keyboard shortcuts</h2>
     <dl>
       <dt><kbd>Ctrl K</kbd> <kbd>/</kbd></dt><dd>Search, commands</dd>
-      <dt><kbd>G</kbd> then <kbd>T R A L</kbd></dt><dd>Task, Docs, Architecture, Log</dd>
+      <dt><kbd>G</kbd> then <kbd>T E R A L</kbd></dt><dd>Task, Files, Docs, Architecture, Log</dd>
       <dt><kbd>J</kbd> <kbd>K</kbd></dt><dd>Next / previous row</dd>
       <dt><kbd>Enter</kbd></dt><dd>Open selected row</dd>
       <dt><kbd>F</kbd></dt><dd>Go to filter</dd>
@@ -110,5 +113,7 @@
 <script src="/vendor/xterm-addon-fit.js"></script>
 <script src="/dock.js"></script>
 <script src="/chat.js"></script>
+<script src="/vendor/codemirror.js"></script>
+<script src="/files.js"></script>
 </body>
 </html>

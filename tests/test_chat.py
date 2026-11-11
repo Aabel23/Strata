@@ -485,3 +485,11 @@ def test_registry_refresh_rejects_symlink_alias_to_same_root(tmp_path):
     assert supervisor.turn("project", started["session_id"], "still registered") == "turn-fake"
     with pytest.raises(ChatError, match="symlink"):
         supervisor.start("project", alias)
+
+
+def test_start_in_repo_without_commits_says_so(tmp_path):
+    root = tmp_path / "empty"; root.mkdir(); git(root, "init", "-q")
+    supervisor = ChatSupervisor({"project": root}, session_factory=FakeSession)
+    with pytest.raises(ChatError, match="no commits yet") as caught:
+        supervisor.start("project", root)
+    assert caught.value.public

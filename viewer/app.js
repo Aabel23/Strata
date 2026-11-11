@@ -2,7 +2,7 @@
 // App shell. Read-only except writes through POST /api/project and POST /api/item (token-guarded). All text goes through textContent (el() from page.js); never assigns markup.
 // el, get, enc and renderPage come from page.js (STRATA_SHELL makes it skip its own routing).
 const $=id=>document.getElementById(id);
-const TABS=[["task","Task","t"],["docs","Docs","r"],["c4","Architecture","a"],["audit","Log","l"],["codemap","Code map","m"]];
+const TABS=[["task","Task","t"],["files","Files","e"],["docs","Docs","r"],["c4","Architecture","a"],["audit","Log","l"],["codemap","Code map","m"]];
 const TAB_LABEL=Object.fromEntries(TABS.map(t=>[t[0],t[1]]));
 const ST_ITEM=["proposed","approved","open","doing","review","done","rejected"];
 const ST_DOC=["current","draft","outdated","missing"], KIND_DOC=["research","architect","review","plan","other"];
@@ -220,10 +220,10 @@ async function render(keep){
   }catch(e){box.append(el("p","err",e.message))}
   if(my!==token)return;
   document.title=(r.p?byId[r.p].name+" · "+TAB_LABEL[r.tab]+" · ":"")+"Strata";
-  const rd=box.querySelector(":scope>.reader");
+  const rd=box.keep||box.querySelector(":scope>.reader");
   if(!rd&&!box.className)box.className="page"+(r.tab==="task"?" wide":"");
   const sc=$("content").scrollTop;
-  $("content").replaceChildren(rd||box);
+  if($("content").firstChild!==(rd||box))$("content").replaceChildren(rd||box);
   $("content").scrollTop=keep===true?sc:0;
 }
 /* gold sheen: one global scheduler, strictly sequential. Wait 6-12s, sweep ONE random visible title once, repeat. */
@@ -268,6 +268,7 @@ function card(title,tab,p,rows,emptyText,n){
 
 const VIEW={
   task:(box,p,id)=>boardView(box,p,id),
+  files:(box,p,id)=>filesView(box,p,id),  // viewer/files.js
   async docs(box,p,id){
     const docs=await get("/api/docs?project="+enc(p));
     docs.forEach(x=>{try{x.code=JSON.parse(x.code||"[]")||[]}catch{x.code=[]}});
@@ -672,6 +673,7 @@ document.addEventListener("keydown",e=>{
   if(e.target.closest&&e.target.closest("#term-host,#agent-popup-terminal"))return;  // terminal keys belong to the shell
   const pal=!$("pal").hidden, typing=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)||e.target.isContentEditable;
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();return pal?closePal():openPal()}
+  if(e.target.closest&&e.target.closest(".CodeMirror,.fx-tree"))return;  // editor and file tree keys (Esc, arrows, letters) stay there
   if(e.key==="Escape"){
     if(pal)return closePal();if(!$("keys").hidden)return closeKeys();
     if(document.body.classList.contains("menu"))return document.body.classList.remove("menu");
@@ -744,6 +746,6 @@ render();
   if(document.hidden)return;
   try{const v=(await get("/api/version")).version;if(ver!==null&&v!==ver){
     const a=document.activeElement,busy=a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)||document.querySelector("dialog[open]");
-    if(busy||CUR.tab==="c4"||(CUR.tab==="docs"&&CUR.id))return;  // retry next tick, ver stays old
+    if(busy||CUR.tab==="c4"||CUR.tab==="files"||(CUR.tab==="docs"&&CUR.id))return;  // retry next tick, ver stays old
     await render(true)}ver=v}catch{}};
  setInterval(live,2000);document.addEventListener("visibilitychange",live)}

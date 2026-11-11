@@ -2,8 +2,9 @@
 import base64, hmac, http.server, json, mimetypes, pathlib, re, secrets, socket, threading
 from urllib.parse import parse_qs, unquote, urlsplit
 from strata import blocks, c4_edit, c4_layered, codemap, db, service, symbols
-from strata import agents, claude_models, term
+from strata import agents, claude_models, files, term
 from strata.chat import ChatError, ChatSupervisor
+from strata.chat_claude import check_images
 
 SERVE_EXT = set(".py .js .mjs .ts .tsx .css .html .htm .md .txt .yaml .yml .json .toml .c .h .cpp .hpp .dart .java .kt .go .rs .svg .png .jpg .jpeg .gif .webp".split())
 
@@ -17,7 +18,7 @@ def servable(root, segs):
     return f if f.suffix.lower() in SERVE_EXT and f.is_file() else None
 
 VIEWER = pathlib.Path(__file__).resolve().parent.parent / "viewer"
-STATIC = {"/": "app.html", "/app.js": "app.js", "/app.css": "app.css", "/c4": "architect.html", "/architect.js": "architect.js", "/architect.css": "architect.css", "/dock.js": "dock.js", "/dock.css": "dock.css", "/chat.js": "chat.js", "/chat.css": "chat.css", "/c4-classic": "index.html", "/index.html": "index.html", "/page.js": "page.js", "/swimlane.js": "swimlane.js", "/page.css": "page.css"}
+STATIC = {"/": "app.html", "/app.js": "app.js", "/app.css": "app.css", "/c4": "architect.html", "/architect.js": "architect.js", "/architect.css": "architect.css", "/dock.js": "dock.js", "/dock.css": "dock.css", "/chat.js": "chat.js", "/chat.css": "chat.css", "/files.js": "files.js", "/files.css": "files.css", "/c4-classic": "index.html", "/index.html": "index.html", "/page.js": "page.js", "/swimlane.js": "swimlane.js", "/page.css": "page.css"}
 TYPES = {".html": "text/html", ".md": "text/plain", ".yaml": "text/plain", ".js": "application/javascript", ".mjs": "text/javascript", ".css": "text/css", ".json": "application/json"}
 SHOW = {"item": "id,project,kind,label,title,status,priority,owner"}
 ITEM_KINDS = ("rule", "task", "issue", "knowledge", "draft", "note", "step", "gate")
@@ -41,9 +42,13 @@ TERM_READ_PATH = "/api/term/read"
 AGENT_PATH = "/api/agent"
 AGENTS_PATH = "/api/agents"
 AGENT_LOG_PATH = "/api/agent/log"
-POST_PATHS = (EDIT_PATH, PROJECT_PATH, ITEM_PATH, CHAT_PATH, TERM_PATH, AGENT_PATH)
+FILE_PATH = "/api/file"
+FILES_PATH = "/api/files"
+POST_PATHS = (EDIT_PATH, PROJECT_PATH, ITEM_PATH, CHAT_PATH, TERM_PATH, AGENT_PATH, FILE_PATH)
 TERM_ID = re.compile(r"^[A-Za-z0-9_-]{8,40}$")
 MAX_BODY = 65536
+MAX_CHAT_BODY = 24 * 1024 * 1024  # a chat turn may carry up to four pasted images
+FILE_MAX_BODY = files.MAX_FILE * 6 + 65536  # a saved file as JSON: worst case six bytes per byte (\uXXXX)
 CHAT_PROJECT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
 CHAT_SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _CODEMAP_BUILD_SLOT = threading.Semaphore(1)
@@ -196,7 +201,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             if not (h.get("Content-Type") or "").lower().startswith("application/json"): return self.json({"error": "Content-Type must be application/json"}, 415)
             n = h.get("Content-Length")
             if n is None or not n.isdigit(): return self.json({"error": "Content-Length required"}, 413)
-            if int(n) > MAX_BODY: return self.json({"error": "body too large"}, 413)
+            if int(n) > (FILE_MAX_BODY if u.path == FILE_PATH else MAX_CHAT_BODY if u.path == CHAT_PATH else MAX_BODY): return self.json({"error": "body too large"}, 413)
             try: op = json.loads(self.rfile.read(int(n)))
             except ValueError: op = None
             if not isinstance(op, dict): return self.json({"error": "JSON object body required"}, 400)
@@ -205,6 +210,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 return self.chat_post(op)
             if u.path == TERM_PATH: return self.term_post(op)
             if u.path == AGENT_PATH: return self.agent_post(op)
+            if u.path == FILE_PATH: return self.file_op(op)
             if u.path == PROJECT_PATH: return self.project_op(op)
             if u.path == ITEM_PATH: return self.item_op(op, parse_qs(u.query).get("project", [""])[-1])
             if not isinstance(op.get("yes", False), bool): return self.json({"error": "yes must be boolean"}, 400)
@@ -309,9 +315,12 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 if not isinstance(session_id, str) or not CHAT_SESSION_ID.fullmatch(session_id):
                     raise ValueError("invalid session ID")
                 if operation == "turn":
-                    if set(op) != required | {"message"} or not isinstance(op.get("message"), str) or not op["message"].strip() or len(op["message"]) > 100_000:
+                    images = check_images(op.get("images"))  # ValueError for anything but real PNG/JPEG/GIF/WebP
+                    if not set(op) - {"images"} == required | {"message"} or not isinstance(op.get("message"), str) or len(op["message"]) > 100_000 or not (op["message"].strip() or images):
                         raise ValueError("invalid turn message")
-                    return self.json({"ok": True, "turn_id": chat_supervisor.turn(project_id, session_id, op["message"])})
+                    if not images:
+                        return self.json({"ok": True, "turn_id": chat_supervisor.turn(project_id, session_id, op["message"])})
+                    return self.json({"ok": True, "turn_id": chat_supervisor.turn(project_id, session_id, op["message"], op["images"])})
                 if operation == "decide":
                     if set(op) != required | {"approval_id", "allow"} or not isinstance(op.get("approval_id"), str) or not op["approval_id"] or len(op["approval_id"]) > 128 or not isinstance(op.get("allow"), bool):
                         raise ValueError("invalid approval decision")
@@ -336,8 +345,8 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 raise ValueError("invalid chat operation")
             except ValueError:
                 return self.json({"error": "invalid chat request"}, 400)
-            except ChatError:
-                return self.json({"error": "chat request could not be completed"}, 409)
+            except ChatError as e:
+                return self.json({"error": str(e) if e.public else "chat request could not be completed"}, 409)
             except Exception:
                 return self.json({"error": "chat service unavailable"}, 503)
 
@@ -400,6 +409,48 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             except (agents.AgentError, PermissionError) as e:
                 return self.json({"error": str(e)}, 409)
 
+        def file_root(self, proj):
+            if not isinstance(proj, str) or not CHAT_PROJECT_ID.fullmatch(proj): raise ValueError("invalid project")
+            root = chat_projects().get(proj)
+            if not root: raise KeyError("project has no code folder")
+            return root
+
+        def file_fail(self, e):
+            if isinstance(e, files.Conflict): return self.json({"error": str(e)}, 409)
+            if isinstance(e, ValueError): return self.json({"error": str(e) or "invalid request"}, 400)
+            if isinstance(e, KeyError): return self.json({"error": str(e.args[0]) if e.args else "not found"}, 404)
+            if isinstance(e, FileNotFoundError): return self.json({"error": "not found"}, 404)
+            return self.json({"error": e.strerror or "file error"}, 400)
+
+        def file_get(self, path, q):
+            """Files tab reads: GET /api/files (one folder) and GET /api/file (one file's text). Same switch and token as the
+            writes: they show any file under the project root, dotfiles included."""
+            if not allow_edit: return self.json({"error": "editing disabled"}, 403)
+            if not hmac.compare_digest((self.headers.get("X-Strata-Token") or "").encode(), token.encode()):
+                return self.json({"error": "bad or missing X-Strata-Token"}, 403)
+            try:
+                root = self.file_root(q.get("project"))
+                return self.json(files.listing(root, q.get("path", "")) if path == FILES_PATH else files.read(root, q.get("path", "")))
+            except (ValueError, KeyError, OSError) as e: return self.file_fail(e)
+
+        def file_op(self, op):
+            """POST /api/file {op: write|create|mkdir|rename|delete, project, path, ...}: file changes under the project root (strata/files.py)."""
+            try:
+                kind, path = op.get("op"), op.get("path")
+                if not isinstance(path, str): raise ValueError("invalid file request")
+                root = self.file_root(op.get("project"))
+                if kind == "write" and set(op) <= {"op", "project", "path", "text", "mtime"} and isinstance(op.get("text"), str) and isinstance(op.get("mtime"), (str, type(None))):
+                    r = files.write(root, path, op["text"], op.get("mtime"))
+                elif kind in ("create", "mkdir") and set(op) == {"op", "project", "path"}:
+                    r = files.create(root, path, folder=kind == "mkdir")
+                elif kind == "rename" and set(op) == {"op", "project", "path", "to"} and isinstance(op["to"], str):
+                    r = files.rename(root, path, op["to"])
+                elif kind == "delete" and set(op) <= {"op", "project", "path", "recursive"} and isinstance(op.get("recursive", False), bool):
+                    r = files.delete(root, path, op.get("recursive", False))
+                else: raise ValueError("invalid file request")
+                return self.json({"ok": True, **r})
+            except (ValueError, KeyError, OSError) as e: return self.file_fail(e)
+
         def live_get(self, path, q):
             """Token-guarded reads behind the dock: terminal output, the agent list, one agent's log."""
             if not hmac.compare_digest((self.headers.get("X-Strata-Token") or "").encode(), token.encode()):
@@ -452,8 +503,8 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 return self.json(chat_supervisor.diff_status(project_id, session_id))
             except ValueError:
                 return self.json({"error": "invalid chat query"}, 400)
-            except ChatError:
-                return self.json({"error": "chat request could not be completed"}, 409)
+            except ChatError as e:
+                return self.json({"error": str(e) if e.public else "chat request could not be completed"}, 409)
             except Exception:
                 return self.json({"error": "chat service unavailable"}, 503)
 
@@ -504,6 +555,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             if p in (CHAT_EVENTS_PATH, CHAT_AUTH_PATH, CHAT_DIFF_PATH):
                 return self.chat_get(p, u.query)
             if p in (TERM_READ_PATH, AGENTS_PATH, AGENT_LOG_PATH): return self.live_get(p, q)
+            if p in (FILE_PATH, FILES_PATH): return self.file_get(p, q)
             if p in STATIC: return self.file(VIEWER / STATIC[p])
             if p in ("/api/projects", "/api/docs", "/api/doc", "/api/search"): autoscan()
             if p == "/api/session": return self.json({"token": token, "edit": bool(allow_edit), "terminal": bool(allow_terminal)}, **{"Cache-Control": "no-store"})

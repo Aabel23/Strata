@@ -2,7 +2,9 @@
 import json, os, stat, sys, time
 import pytest
 from strata.chat import ChatSupervisor, ChatError
-from strata.chat_claude import ClaudeError, ClaudeLogin, ClaudeSession, _child_env, safe_login_url
+from strata.chat_claude import ClaudeError, ClaudeLogin, ClaudeSession, _child_env, check_images, safe_login_url
+
+PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 
 FAKE = r'''#!%s
 import json, os, sys
@@ -22,6 +24,7 @@ for line in sys.stdin:
         out({"type": "result", "subtype": "error_during_execution", "is_error": True}); continue
     if m["type"] != "user": continue
     text = m["message"]["content"]
+    if isinstance(text, list): open(os.environ["FAKE_LOG"] + ".content", "a").write(json.dumps(text) + "\n")
     out({"type": "system", "subtype": "init", "session_id": "sess-1"})
     if text == "die": sys.exit(3)
     if text == "wait": continue
@@ -181,3 +184,25 @@ def test_supervisor_claude_sign_in(tmp_path):
     assert sup.login_claude("good", login_factory=Login) == {"mode": "code", "signed_in": True}
     with pytest.raises(ChatError): sup.login_claude("good", login_factory=Login)
     sup.login_claude(login_factory=Login); sup.shutdown(); assert Login.made[-1].closed
+
+
+def test_turn_with_pasted_images_sends_image_blocks_then_text(tmp_path, env):
+    with session(tmp_path, env) as s:
+        s.turn("what is this?", [{"media_type": "image/png", "data": PNG}])
+        ev = collect(s, "turn_completed")
+        s.turn("", [{"media_type": "image/png", "data": PNG}]); collect(s, "turn_completed", after=ev[-1]["seq"])  # an image alone is a message
+        with pytest.raises(ClaudeError): s.turn("", [])
+    sent = [json.loads(l) for l in (tmp_path / "log.content").read_text().splitlines()]
+    assert sent[0] == [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": PNG}}, {"type": "text", "text": "what is this?"}]
+    assert [b["type"] for b in sent[1]] == ["image"]
+
+
+@pytest.mark.parametrize("images", [
+    "x", [PNG], [{"media_type": "image/svg+xml", "data": PNG}], [{"media_type": "image/jpeg", "data": PNG}],
+    [{"media_type": "image/png", "data": "not base64!"}], [{"media_type": "image/png", "data": PNG, "extra": 1}],
+    [{"media_type": "image/png", "data": PNG}] * 5, [{"media_type": "image/png", "data": "A" * (5 * 1024 * 1024 + 4)}],
+])
+def test_check_images_rejects_anything_but_a_few_real_images(images):
+    with pytest.raises(ValueError):
+        check_images(images)
+    assert check_images(None) == [] and len(check_images([{"media_type": "image/png", "data": PNG}] * 4)) == 4
