@@ -180,7 +180,7 @@ def test_agent_routes(srv):
     hp = srv()
     assert call(hp, "/api/agents", **{"X-Strata-Token": None})[0] == 403
     st, d = call(hp, "/api/agents")
-    assert st == 200 and d["runs"] == [] and d["auto"] == {} and "opus" in [m["id"] for m in d["models"]] and "xhigh" in [e["id"] for e in d["efforts"]]
+    assert st == 200 and d["runs"] == [] and d["auto"] == {} and "opus" in d["models"] and "xhigh" in d["efforts"]
     assert call(hp, "/api/agent", {"op": "settings", "model": "opus", "effort": "max"})[0] == 200
     assert call(hp, "/api/agent", {"op": "settings", "model": "gpt", "effort": ""})[0] == 409
     assert call(hp, "/api/agent", {"op": "auto", "project": "missing", "on": True})[0] == 409

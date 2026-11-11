@@ -1,6 +1,6 @@
 """The Claude models, effort levels and permission modes Strata offers for Claude Code (`claude --model ... --effort ...`).
 
-One list for every picker (AI chat and task agents). An alias ("opus") follows the newest
+One list for the AI chat pickers. An alias ("opus") follows the newest
 version of its family; a full id ("claude-opus-5-5") pins one version. "" means Claude Code's
 own default. Each model lists the effort levels it accepts; "" (default) is always allowed.
 """
@@ -21,7 +21,7 @@ EFFORTS = (
 
 # (id, label, family, efforts)
 MODELS = (
-    ("", "Default model", "Latest", ALL_EFFORTS),
+    ("", "Default model", "", ALL_EFFORTS),
     ("fable", "Fable latest", "Latest", ALL_EFFORTS),
     ("opus", "Opus latest", "Latest", ALL_EFFORTS),
     ("sonnet", "Sonnet latest", "Latest", ALL_EFFORTS),
@@ -70,8 +70,9 @@ def catalog() -> dict:
         if i in _LATEST:
             return f"Follows the newest version, now {_LATEST[i]}"
         return "Claude Code's default model" if not i else f"Pinned: {i}"
+    # Pickers show real versions only; the family aliases stay accepted for older saved choices.
     return {"models": [{"id": i, "label": label, "group": group, "efforts": list(efforts), "hint": hint(i)}
-                       for i, label, group, efforts in MODELS],
+                       for i, label, group, efforts in MODELS if group != "Latest"],
             "efforts": [{"id": i, "label": label, "hint": h} for i, label, h in EFFORTS]}
 
 

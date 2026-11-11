@@ -236,10 +236,33 @@ async function cvLogin(box){
 function cvRetry(box){const b=el("button","","Try again");b.type="button";b.onclick=()=>cvLogin(box);return b}
 
 /* ---------- model, effort, permission mode ---------- */
+// Fill a <select> from [{id,label,group?,hint?}], grouping by `group` (model families).
+function pickOptions(select,items,current){
+  const key=JSON.stringify(items.map(i=>[i.id,i.label,i.group||"",i.hint||""]));
+  if(select.dataset.key!==key){
+    select.dataset.key=key;const groups=new Map(),out=[];
+    for(const i of items){
+      const o=new Option(i.label||i.id||"Default",i.id);if(i.hint)o.title=i.hint;
+      if(!i.group){out.push(o);continue}
+      if(!groups.has(i.group)){const g=document.createElement("optgroup");g.label=i.group;groups.set(i.group,g);out.push(g)}
+      groups.get(i.group).append(o);
+    }
+    select.replaceChildren(...out);
+  }
+  if(document.activeElement!==select){select.value=current||"";if(select.selectedIndex<0)select.value=""}
+}
+// Only the effort levels the chosen model takes stay enabled; "" (default) always does. Returns a valid effort.
+function effortFit(select,models,model,effort){
+  const m=models.find(x=>x.id===(model||""))||{efforts:["low","medium","high","xhigh","max"]};
+  for(const o of select.options)o.disabled=!!o.value&&!m.efforts.includes(o.value);
+  const ok=!effort||m.efforts.includes(effort)?effort||"":"";
+  select.value=ok;return ok;
+}
 // For a new chat: the last choice (localStorage). For a live chat: what that session runs with.
 function cvPrefs(){
   let p={};try{p=JSON.parse(store.get("strata-chat-settings")||"{}")||{}}catch{}
   if(p.model===undefined)p.model=store.get("strata-chat-model")||"";  // the older model-only preference
+  p.model={fable:"claude-fable-5-2",opus:"claude-opus-5-5",sonnet:"claude-sonnet-5-5",haiku:"claude-haiku-5-5"}[p.model]||p.model;  // old alias choices show as their version
   return {model:typeof p.model==="string"?p.model:"",effort:typeof p.effort==="string"?p.effort:"",permission:typeof p.permission==="string"&&p.permission?p.permission:"auto"};
 }
 const cvLabel=(list,id)=>((list||[]).find(x=>x.id===id)||{}).label||id;
