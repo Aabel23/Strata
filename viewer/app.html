@@ -54,16 +54,16 @@
     <section id="chat-view" aria-label="Chat with Claude" hidden>
       <div id="cv-bar">
         <span id="cv-where" title=""></span>
-        <select id="cv-model" aria-label="Model for new chats" title="Model for new chats">
-          <option value="">Default model</option><option value="opus">Opus</option><option value="sonnet">Sonnet</option><option value="haiku">Haiku</option>
-        </select>
         <button id="cv-new" type="button" title="Start a new chat">New chat</button>
       </div>
       <div id="cv-log" role="log" aria-live="polite" tabindex="0"></div>
       <form id="cv-form" autocomplete="off">
-        <textarea id="cv-input" rows="1" placeholder="Message Claude…" aria-label="Message Claude"></textarea>
+        <textarea id="cv-input" rows="1" placeholder="Message Claude…" aria-label="Message Claude" title="Enter to send · Shift+Enter for a new line · Shift+Tab to change mode"></textarea>
         <div id="cv-actions">
-          <span id="cv-hint">Enter to send · Shift+Enter for a new line</span>
+          <select id="cv-perm" class="cv-pick" aria-label="Permission mode"><option value="auto">Auto</option></select>
+          <select id="cv-model" class="cv-pick" aria-label="Model"><option value="">Default model</option></select>
+          <select id="cv-effort" class="cv-pick" aria-label="Effort"><option value="">Default effort</option></select>
+          <span id="cv-hint"></span>
           <button id="cv-send" type="submit">Send</button>
         </div>
       </form>

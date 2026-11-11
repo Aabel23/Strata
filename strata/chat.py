@@ -677,7 +677,8 @@ class ChatSupervisor:
         return project_dir
 
     def start(self, project: str, root: str | os.PathLike[str], provider: str = "codex",
-              model: str | None = None) -> dict[str, Any]:
+              model: str | None = None, **claude_settings: Any) -> dict[str, Any]:
+        """claude_settings: effort / permission, passed only to a Claude session."""
         with self._lock:
             if self._shutting_down:
                 raise ChatError("chat supervisor is shutting down")
@@ -705,7 +706,8 @@ class ChatSupervisor:
                     raise ChatError("created worktree escaped its allowed parent")
                 # Claude Code is its own client; an injected factory (tests) still stands in for every provider.
                 factory = ClaudeSession if provider == "claude" and self._session_factory is CodexSession else self._session_factory
-                session = factory(resolved, provider=provider, model=model)
+                extra = {k: v for k, v in claude_settings.items() if v is not None} if provider == "claude" else {}
+                session = factory(resolved, provider=provider, model=model, **extra)
                 record["session"] = session
                 auth = (CodexSession.auth_status(provider)
                         if provider == "codex" and self._session_factory is CodexSession else None)
@@ -734,8 +736,10 @@ class ChatSupervisor:
                 if isinstance(exc, ChatError):
                     raise
                 raise ChatError("could not create Codex review worktree") from exc
-            return {"project": project, "session_id": session_id,
-                    "thread_id": thread_id, "worktree": str(record["worktree"])}
+            result = {"project": project, "session_id": session_id,
+                      "thread_id": thread_id, "worktree": str(record["worktree"])}
+            settings = getattr(session, "settings", None)
+            return {**result, "settings": settings} if isinstance(settings, dict) else result
 
     def _get(self, project: str, session_id: str, *, allow_closed: bool = False) -> dict[str, Any]:
         if not isinstance(project, str) or not isinstance(session_id, str):
@@ -778,6 +782,16 @@ class ChatSupervisor:
     def decide(self, project: str, session_id: str, approval_id: str, allow: bool) -> bool:
         with self._lock:
             return self._get(project, session_id)["session"].decide(approval_id, allow)
+
+    def configure(self, project: str, session_id: str, model: str | None, effort: str | None, permission: str) -> dict[str, Any]:
+        with self._lock:
+            session = self._get(project, session_id)["session"]
+        if not hasattr(session, "configure"):
+            raise ChatError("this chat provider cannot change settings mid-chat")
+        try:
+            return session.configure(model, effort, permission)
+        except ClaudeError as exc:
+            raise ChatError(str(exc)) from exc
 
     def cancel(self, project: str, session_id: str) -> bool:
         with self._lock:

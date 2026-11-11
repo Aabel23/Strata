@@ -2,7 +2,7 @@
 import base64, hmac, http.server, json, mimetypes, pathlib, re, secrets, socket, threading
 from urllib.parse import parse_qs, unquote, urlsplit
 from strata import blocks, c4_edit, c4_layered, codemap, db, service, symbols
-from strata import agents, term
+from strata import agents, claude_models, term
 from strata.chat import ChatError, ChatSupervisor
 
 SERVE_EXT = set(".py .js .mjs .ts .tsx .css .html .htm .md .txt .yaml .yml .json .toml .c .h .cpp .hpp .dart .java .kt .go .rs .svg .png .jpg .jpeg .gif .webp".split())
@@ -280,7 +280,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 if not isinstance(project_id, str) or not CHAT_PROJECT_ID.fullmatch(project_id):
                     raise ValueError("invalid project")
                 if operation == "start":
-                    if set(op) - {"op", "project", "provider", "model"}:
+                    if set(op) - {"op", "project", "provider", "model", "effort", "permission"}:
                         raise ValueError("unexpected start field")
                     provider = op.get("provider", "codex")
                     model = op.get("model")
@@ -288,11 +288,17 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                         raise ValueError("invalid provider")
                     if model is not None and (not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}", model)):
                         raise ValueError("invalid model")
+                    settings = {}
+                    if provider == "claude":
+                        settings = self.claude_settings(op, model)
+                        model = settings.pop("model")
+                    elif {"effort", "permission"} & set(op):
+                        raise ValueError("effort and permission are Claude settings")
                     roots = chat_projects()
                     root = roots.get(project_id)
                     if not root:
                         return self.json({"error": "project is not registered for chat"}, 404)
-                    result = chat_supervisor.start(project_id, root, provider=provider, model=model)
+                    result = chat_supervisor.start(project_id, root, provider=provider, model=model, **settings)
                     return self.json({"ok": True, **result})
 
                 required = {"op", "project", "session_id"}
@@ -310,6 +316,10 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                     if set(op) != required | {"approval_id", "allow"} or not isinstance(op.get("approval_id"), str) or not op["approval_id"] or len(op["approval_id"]) > 128 or not isinstance(op.get("allow"), bool):
                         raise ValueError("invalid approval decision")
                     return self.json({"ok": True, "accepted": chat_supervisor.decide(project_id, session_id, op["approval_id"], op["allow"])})
+                if operation == "settings":
+                    if set(op) != required | {"model", "effort", "permission"}: raise ValueError("invalid chat settings")
+                    s = self.claude_settings(op, op["model"])
+                    return self.json({"ok": True, "settings": chat_supervisor.configure(project_id, session_id, s["model"], s["effort"], s["permission"])})
                 if operation == "cancel":
                     if set(op) != required: raise ValueError("unexpected cancel field")
                     return self.json({"ok": True, "cancelled": chat_supervisor.cancel(project_id, session_id)})
@@ -330,6 +340,16 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 return self.json({"error": "chat request could not be completed"}, 409)
             except Exception:
                 return self.json({"error": "chat service unavailable"}, 503)
+
+        @staticmethod
+        def claude_settings(op, model):
+            """Model, effort and permission mode for a Claude chat, checked against the offered lists."""
+            effort, permission = op.get("effort", ""), op.get("permission", claude_models.DEFAULT_PERMISSION)
+            model = model or ""
+            if not all(isinstance(v, str) for v in (model, effort, permission)) or not claude_models.effort_ok(model, effort) \
+                    or permission not in claude_models.PERMISSION_IDS:
+                raise ValueError("invalid Claude settings")
+            return {"model": model or None, "effort": effort or None, "permission": permission}
 
         def term_post(self, op):
             """open / input / resize / close / list on the server's terminals (real shells: see strata/term.py)."""
@@ -419,7 +439,8 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                     provider = q.get("provider", "codex")
                     if provider not in ("claude", "codex", "openrouter", "omniroute"):
                         raise ValueError
-                    return self.json(chat_supervisor.auth_status(provider))
+                    status = chat_supervisor.auth_status(provider)
+                    return self.json({**status, **claude_models.chat_catalog()} if provider == "claude" else status)
                 project_id, session_id = q.get("project"), q.get("session_id")
                 if not project_id or not CHAT_PROJECT_ID.fullmatch(project_id) or not session_id or not CHAT_SESSION_ID.fullmatch(session_id):
                     raise ValueError

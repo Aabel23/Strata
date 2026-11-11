@@ -26,8 +26,9 @@ class FakeChatSupervisor:
         self.projects = dict(projects)
         self.refreshes.append(dict(projects))
 
-    def start(self, project, root, provider="codex", model=None):
+    def start(self, project, root, provider="codex", model=None, **settings):
         self.calls.append(("start", project, root, provider, model))
+        self.settings = settings
         self.sessions.add((project, "session-1"))
         return {"project": project, "session_id": "session-1", "thread_id": "thread-1", "worktree": "/tmp/worktree"}
 
@@ -40,6 +41,11 @@ class FakeChatSupervisor:
         self._bound(project, session_id)
         self.calls.append(("decide", project, session_id, approval_id, allow))
         return True
+
+    def configure(self, project, session_id, model, effort, permission):
+        self._bound(project, session_id)
+        self.calls.append(("settings", project, session_id, model, effort, permission))
+        return {"model": model or "", "effort": effort or "", "permission": permission}
 
     def cancel(self, project, session_id):
         self._bound(project, session_id)
@@ -290,7 +296,21 @@ def test_claude_provider_start_auth_and_sign_in(chat_server):
     supervisor.login_claude = lambda code=None: calls.append(code) or ({"mode": "code", "url": "https://claude.com/x"} if code is None else {"mode": "code", "signed_in": True})
     status, _, raw = post(base, token, {"op": "start", "project": "p", "provider": "claude", "model": "sonnet"})
     assert status == 200 and supervisor.calls[-1][3:] == ("claude", "sonnet")
-    assert get(base, "/api/chat/auth?provider=claude", token=token)[0] == 200
+    assert supervisor.settings == {"effort": None, "permission": "auto"}  # auto is the default mode
+    status, _, raw = post(base, token, {"op": "start", "project": "p", "provider": "claude", "model": "claude-opus-4-6", "effort": "max", "permission": "plan"})
+    assert status == 200 and supervisor.calls[-1][4] == "claude-opus-4-6" and supervisor.settings == {"effort": "max", "permission": "plan"}
+    for bad in ({"model": "claude-opus-4-6", "effort": "xhigh"}, {"model": "claude-haiku-4-5", "effort": "low"}, {"model": "made-up"},
+                {"permission": "bypassPermissions"}, {"effort": 3}):
+        assert post(base, token, {"op": "start", "project": "p", "provider": "claude", **bad})[0] == 400
+    assert post(base, token, {"op": "start", "project": "p", "provider": "codex", "effort": "low"})[0] == 400
+    auth = decoded(get(base, "/api/chat/auth?provider=claude", token=token))
+    assert auth["permission"] == "auto" and "claude-opus-5-5" in [m["id"] for m in auth["models"]] and "acceptEdits" in [p["id"] for p in auth["permissions"]]
+    assert "models" not in decoded(get(base, "/api/chat/auth?provider=codex", token=token))
+    body = {"op": "settings", "project": "p", "session_id": "session-1", "model": "opus", "effort": "low", "permission": "acceptEdits"}
+    status, _, raw = post(base, token, body)
+    assert status == 200 and decoded((status, None, raw))["settings"]["permission"] == "acceptEdits" and supervisor.calls[-1] == ("settings", "p", "session-1", "opus", "low", "acceptEdits")
+    for bad in ({**body, "permission": "dontAsk"}, {k: v for k, v in body.items() if k != "effort"}, {**body, "extra": 1}):
+        assert post(base, token, bad)[0] == 400
     status, _, raw = post(base, token, {"op": "login", "provider": "claude"})
     assert status == 200 and decoded((status, None, raw))["url"] == "https://claude.com/x"
     status, _, raw = post(base, token, {"op": "login", "provider": "claude", "code": "abc#123"})

@@ -34,13 +34,13 @@ import threading
 import time
 from typing import Any
 
-from strata import db, service
+from strata import claude_models, db, service
 from strata.chat_claude import _child_env, _claude_executable
 
 ACTOR = "agent:claude"
 GUARD = pathlib.Path(__file__).resolve().parent.parent / "agent" / "hooks" / "agent_guard.py"
-MODELS = ("", "fable", "opus", "sonnet", "haiku")
-EFFORTS = ("", "low", "medium", "high", "xhigh", "max")
+MODELS = claude_models.MODEL_IDS
+EFFORTS = claude_models.EFFORT_IDS
 LIVE = ("running",)
 MAX_EVENTS = 3000
 MAX_TEXT = 4000
@@ -220,7 +220,7 @@ class AgentSupervisor:
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             runs = [{k: v for k, v in r.items() if k not in ("events", "proc")} for r in sorted(self._runs.values(), key=lambda r: -r["started"])]
-            return {"auto": dict(self._auto), "model": self._model, "effort": self._effort, "models": list(MODELS), "efforts": list(EFFORTS),
+            return {"auto": dict(self._auto), "model": self._model, "effort": self._effort, **claude_models.catalog(),
                     "max_parallel": self._max, "sandbox": self._sandbox_on(), "runs": runs, "now": time.time()}
 
     def set_auto(self, project: str, on: bool) -> None:
@@ -232,8 +232,8 @@ class AgentSupervisor:
             self._ensure_watcher()
 
     def configure(self, model: str, effort: str) -> None:
-        if model not in MODELS or effort not in EFFORTS:
-            raise AgentError("unknown model or effort")
+        if not claude_models.effort_ok(model, effort):
+            raise AgentError("unknown model, or an effort this model does not take")
         with self._lock:
             self._model, self._effort = model, effort
             self._save()

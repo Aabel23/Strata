@@ -23,6 +23,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from strata.chat_codex import _terminate_and_reap
+from strata.claude_models import DEFAULT_PERMISSION, EFFORT_IDS, PERMISSION_IDS
 
 MAX_MESSAGE = 1_000_000
 MAX_REPLAY = 2000
@@ -87,16 +88,26 @@ def _clip(value: Any, limit: int = MAX_FIELD) -> Any:
     return value
 
 
+def _check_settings(model, effort, permission) -> None:
+    if model is not None and not (isinstance(model, str) and (model == "" or _MODEL.fullmatch(model))):
+        raise ValueError("invalid model")
+    if effort is not None and effort not in EFFORT_IDS:
+        raise ValueError("invalid effort")
+    if permission not in PERMISSION_IDS:
+        raise ValueError("invalid permission mode")
+
+
 class ClaudeSession:
     """One Claude Code conversation in `cwd`. The child starts on the first turn and stays for the following ones."""
 
-    def __init__(self, cwd, provider: str = "claude", model: str | None = None, *, popen=subprocess.Popen,
+    def __init__(self, cwd, provider: str = "claude", model: str | None = None, *, effort: str | None = None,
+                 permission: str = DEFAULT_PERMISSION, popen=subprocess.Popen,
                  environ: dict[str, str] | None = None, approval_timeout: int = APPROVAL_TIMEOUT, replay_limit: int = MAX_REPLAY):
         if provider != "claude":
             raise ValueError("provider must be claude")
-        if model is not None and not _MODEL.fullmatch(model):
-            raise ValueError("invalid model")
-        self.cwd, self.provider, self.model = os.fspath(cwd), provider, model
+        _check_settings(model, effort, permission)
+        self.cwd, self.provider = os.fspath(cwd), provider
+        self.model, self.effort, self.permission = model or None, effort or None, permission
         self._popen, self._source_env = popen, dict(os.environ if environ is None else environ)
         self._env = _child_env(self._source_env)
         self._approval_timeout, self._replay_limit = approval_timeout, max(1, min(int(replay_limit), MAX_REPLAY))
@@ -143,9 +154,13 @@ class ClaudeSession:
         if self._closed:
             raise ClaudeError("session is closed")
         args = [_claude_executable(self._source_env), "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-                "--include-partial-messages", "--permission-prompt-tool", "stdio", "--permission-mode", "manual"]
+                "--include-partial-messages", "--permission-prompt-tool", "stdio", "--permission-mode", self.permission]
         if self.model:
             args += ["--model", self.model]
+        if self.effort:
+            args += ["--effort", self.effort]
+        if self._thread_id:  # relaunched after a settings change: carry on the same conversation
+            args += ["--resume", self._thread_id]
         try:
             self._proc = self._popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                      text=True, bufsize=1, cwd=self.cwd, env=self._env)
@@ -172,6 +187,26 @@ class ClaudeSession:
                 raise
             self._emit("turn_started", {"turn_id": turn_id})
             return turn_id
+
+    def configure(self, model: str | None, effort: str | None, permission: str) -> dict[str, Any]:
+        """Change model, effort and permission mode between turns. The idle child stops; the next turn
+        starts a new one with the new settings that resumes this conversation."""
+        _check_settings(model, effort, permission)
+        with self._lock:
+            if self._closed:
+                raise ClaudeError("session is closed")
+            if self._active_turn:
+                raise ClaudeError("wait for the current turn to finish")
+            self.model, self.effort, self.permission = model or None, effort or None, permission
+            proc, self._proc = self._proc, None
+            settings = self.settings
+            self._emit("settings_changed", settings)
+        _terminate_and_reap(proc)
+        return settings
+
+    @property
+    def settings(self) -> dict[str, Any]:
+        return {"model": self.model or "", "effort": self.effort or "", "permission": self.permission}
 
     def events(self, after: int = 0) -> list[dict[str, Any]]:
         with self._lock:

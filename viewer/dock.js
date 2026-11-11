@@ -57,9 +57,28 @@ $("agent-popup").addEventListener("close",()=>{
 document.addEventListener("keydown",e=>{if(e.ctrlKey&&!e.altKey&&!e.metaKey&&e.key==="`"){e.preventDefault();e.stopPropagation();chatSet(!CHAT.open)}},true);
 
 /* ---------- cards ---------- */
-function agentOptions(select,values,current){
-  if(select.options.length!==values.length)select.replaceChildren(...values.map(v=>new Option(v||"default",v)));
+/* Fill a <select> from [{id,label,group?}], grouping by `group` (model families). Shared with chat.js. */
+function pickOptions(select,items,current){
+  const key=JSON.stringify(items.map(i=>[i.id,i.label,i.group||"",i.hint||""]));
+  if(select.dataset.key!==key){
+    select.dataset.key=key;const groups=new Map(),out=[];
+    for(const i of items){
+      const o=new Option(i.label||i.id||"Default",i.id);if(i.hint)o.title=i.hint;
+      if(!i.group){out.push(o);continue}
+      if(!groups.has(i.group)){const g=document.createElement("optgroup");g.label=i.group;groups.set(i.group,g);out.push(g)}
+      groups.get(i.group).append(o);
+    }
+    select.replaceChildren(...out);
+  }
   if(document.activeElement!==select)select.value=current||"";
+}
+/* Only the effort levels the chosen model takes stay enabled; "" (default) always does. Returns a valid effort. */
+function effortFit(select,models,model,effort){
+  const m=models.find(x=>x.id===(model||""))||{efforts:[]};
+  for(const o of select.options)o.disabled=!!o.value&&!m.efforts.includes(o.value);
+  const ok=!effort||m.efforts.includes(effort)?effort||"":"";
+  select.value=ok;select.title=m.efforts.length?"How hard Claude thinks":"This model has no effort setting";
+  return ok;
 }
 function agentRender(){
   const d=AG.data;if(!d)return;
@@ -67,7 +86,8 @@ function agentRender(){
   $("dock-agent-count").textContent=String(cards.length);$("dock-agent-count").classList.toggle("on",cards.length>0);
   auto.disabled=!p||!DOCK.session||!DOCK.session.edit;auto.checked=!!(p&&d.auto[p]);
   $("agent-auto-text").textContent=p?"Auto-run approved tasks in "+p:"Choose a project to switch on auto-run";
-  agentOptions($("agent-model"),d.models,d.model);agentOptions($("agent-effort"),d.efforts,d.effort);
+  pickOptions($("agent-model"),d.models,d.model);pickOptions($("agent-effort"),d.efforts,d.effort);
+  if(document.activeElement!==$("agent-effort"))effortFit($("agent-effort"),d.models,$("agent-model").value,d.effort);
   if(!$("dock-status").classList.contains("bad"))dockNote(cards.length?cards.length+" active session"+(cards.length===1?"":"s"):"No active agents");
   const byId=new Map(cards.map(c=>[c.id,c]));
   const children=new Map(),roots=[];
@@ -137,7 +157,10 @@ async function agentOp(body,button){
 }
 async function agentRun(item,button){const result=await agentOp({op:"run",item},button);dockSet(true);if(result)await agentPoll()}
 $("agent-auto").onchange=()=>{if(CUR.p)agentOp({op:"auto",project:CUR.p,on:$("agent-auto").checked})};
-$("agent-model").onchange=$("agent-effort").onchange=()=>agentOp({op:"settings",model:$("agent-model").value,effort:$("agent-effort").value});
+$("agent-model").onchange=$("agent-effort").onchange=()=>{
+  const models=(AG.data&&AG.data.models)||[],effort=effortFit($("agent-effort"),models,$("agent-model").value,$("agent-effort").value);
+  agentOp({op:"settings",model:$("agent-model").value,effort});
+};
 function dockProjectChanged(){agentRender();if(CHAT.open&&PANEL.mode==="chat"&&typeof chatViewShow==="function")chatViewShow()}
 
 /* ---------- terminal ---------- */

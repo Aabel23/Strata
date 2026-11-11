@@ -8,6 +8,7 @@ const CV_MAX_MESSAGE=100000, CV_MAX_TURNS=200;
 
 function cvRecord(project,saved={}){
   return {project,sid:saved.sid||null,worktree:saved.worktree||"",turns:saved.turns&&typeof saved.turns==="object"?saved.turns:{},
+    settings:saved.settings&&typeof saved.settings==="object"?saved.settings:null,
     seq:0,log:el("div","cv-thread"),busy:false,sending:false,polling:false,replayed:!saved.sid,
     assistant:null,tools:{},approvals:{},working:null,last:null};
 }
@@ -19,7 +20,7 @@ function cvSave(){
   try{const out={};
     for(const [p,s] of Object.entries(CV.sessions))if(s.sid){
       const ids=Object.keys(s.turns);for(const id of ids.slice(0,Math.max(0,ids.length-CV_MAX_TURNS)))delete s.turns[id];
-      out[p]={sid:s.sid,worktree:s.worktree,turns:s.turns};
+      out[p]={sid:s.sid,worktree:s.worktree,turns:s.turns,settings:s.settings};
     }
     sessionStorage.setItem(CV.key,JSON.stringify(out));
   }catch{}
@@ -118,6 +119,9 @@ function cvEvent(s,ev,replay){
       s.busy=false;s.assistant=null;cvWorking(s,false);
       for(const id of Object.keys(s.approvals))cvApprovalEnd(s,id,"Stopped");
       cvNote(s,"Stopped.");break;
+    case "settings_changed":
+      if(replay){s.settings={model:d.model||"",effort:d.effort||"",permission:d.permission||"auto"};cvNote(s,cvSettingsText(s.settings))}
+      break;
     case "turn_completed":
       s.busy=false;s.assistant=null;cvWorking(s,false);
       for(const id of Object.keys(s.approvals))cvApprovalEnd(s,id,"Closed");
@@ -139,9 +143,9 @@ function cvForget(s,why){
 }
 async function cvStart(s){
   cvWorking(s,true,"Starting Claude…");
-  try{const model=$("cv-model").value;
-    const r=await api("/api/chat",{op:"start",project:s.project,provider:"claude",...(model?{model}:{})});
-    s.sid=r.session_id;s.worktree=r.worktree||"";s.seq=0;s.replayed=true;cvSave();cvWhere();
+  try{const want=cvPrefs();
+    const r=await api("/api/chat",{op:"start",project:s.project,provider:"claude",...(want.model?{model:want.model}:{}),...(want.effort?{effort:want.effort}:{}),permission:want.permission});
+    s.sid=r.session_id;s.worktree=r.worktree||"";s.seq=0;s.replayed=true;s.settings=r.settings||want;cvSave();cvWhere();
   }finally{if(!s.busy)cvWorking(s,false)}
 }
 async function cvPoll(s,replay=false){
@@ -212,7 +216,7 @@ function cvBanner(){
   }else if(a&&a.status==="unavailable"){
     b=el("div","cv-banner bad",a.message||"Claude Code is not available here. Install it and run `claude` once in a terminal.");
   }
-  CV.banner=b;cvRender();
+  CV.banner=b;cvRender();cvPicks();
 }
 async function cvLogin(box){
   box.replaceChildren(el("p","","Starting sign-in…"));
@@ -231,12 +235,56 @@ async function cvLogin(box){
 }
 function cvRetry(box){const b=el("button","","Try again");b.type="button";b.onclick=()=>cvLogin(box);return b}
 
+/* ---------- model, effort, permission mode ---------- */
+// For a new chat: the last choice (localStorage). For a live chat: what that session runs with.
+function cvPrefs(){
+  let p={};try{p=JSON.parse(store.get("strata-chat-settings")||"{}")||{}}catch{}
+  if(p.model===undefined)p.model=store.get("strata-chat-model")||"";  // the older model-only preference
+  return {model:typeof p.model==="string"?p.model:"",effort:typeof p.effort==="string"?p.effort:"",permission:typeof p.permission==="string"&&p.permission?p.permission:"auto"};
+}
+const cvLabel=(list,id)=>((list||[]).find(x=>x.id===id)||{}).label||id;
+function cvSettingsText(v){
+  const a=CV.auth||{},model=v.model?cvLabel(a.models,v.model):"the default model";
+  return "Now using "+model+" · "+cvLabel(a.efforts,v.effort||"").toLowerCase()+" · "+cvLabel(a.permissions,v.permission)+" mode. Applies from your next message.";
+}
+function cvPicks(){
+  const a=CV.auth||{},s=CV.cur,ready=!!(a.models&&a.efforts&&a.permissions),v=s&&s.sid&&s.settings?s.settings:cvPrefs();
+  const perm=$("cv-perm"),model=$("cv-model"),effort=$("cv-effort");
+  if(ready){pickOptions(perm,a.permissions,v.permission);pickOptions(model,a.models,v.model);pickOptions(effort,a.efforts,v.effort);
+    if(document.activeElement!==effort)effortFit(effort,a.models,model.value,v.effort)}
+  perm.className="cv-pick mode-"+perm.value;
+  for(const x of [perm,model,effort]){const o=x.options[x.selectedIndex];x.dataset.hint=o&&o.title||""}
+  const off=!ready||!s||!!(s.busy||s.sending);
+  for(const x of [perm,model,effort])x.disabled=off;
+  const wait=s&&s.busy?"Wait for Claude to finish to change this. ":"";
+  perm.title=wait+"Permission mode: "+(perm.dataset.hint||"")+" (Shift+Tab in the message box cycles it)";
+  model.title=wait+"Model: "+(model.dataset.hint||"");
+  effort.title=wait+"Effort: "+(effort.dataset.hint||"");
+}
+async function cvApplyPicks(){
+  const a=CV.auth||{},s=CV.cur;
+  const want={model:$("cv-model").value,permission:$("cv-perm").value||"auto"};
+  want.effort=effortFit($("cv-effort"),a.models||[],want.model,$("cv-effort").value);
+  $("cv-perm").className="cv-pick mode-"+want.permission;
+  store.set("strata-chat-settings",JSON.stringify(want));
+  if(!s||!s.sid)return;
+  if(s.busy){cvPicks();return}
+  try{const r=await api("/api/chat",{op:"settings",project:s.project,session_id:s.sid,...want});
+    s.settings=r.settings||want;cvSave();cvNote(s,cvSettingsText(s.settings));
+  }catch(error){cvNote(s,"Could not change the settings: "+error.message,"bad")}
+  cvPicks();
+}
+function cvCycleMode(){
+  const sel=$("cv-perm");if(sel.disabled||!sel.options.length)return;
+  sel.selectedIndex=(sel.selectedIndex+1)%sel.options.length;cvApplyPicks();
+}
+
 /* ---------- panel ---------- */
 function cvIntro(){
   const p=CUR.p,box=el("div","cv-empty");
   if(!p){box.append(el("p","","Open a project to chat with Claude. Claude works inside that project's code."));return box}
   box.append(el("strong","","Chat with Claude in "+p),
-    el("p","","Claude works in its own git worktree of this project, so your working copy stays untouched. It asks before running commands or editing files."));
+    el("p","","Claude works in its own git worktree of this project, so your working copy stays untouched. The mode next to Send sets what Claude may do without asking; anything it asks about waits for your Allow or Deny."));
   return box;
 }
 function cvRender(){
@@ -254,8 +302,7 @@ function cvControls(){
   if(s&&s.busy){send.textContent="Stop";send.classList.add("stop");send.disabled=false}
   else{send.textContent=s&&s.sending?"Sending…":"Send";send.classList.remove("stop");send.disabled=!ok||!!(s&&s.sending)}
   $("cv-new").disabled=!s||(!s.sid&&!s.log.childElementCount);
-  $("cv-model").disabled=!!(s&&s.sid);
-  $("cv-model").title=s&&s.sid?"The model is fixed for this chat. Start a new chat to change it.":"Model for new chats";
+  cvPicks();
 }
 function chatViewShow(){
   const p=CUR.p,s=p?(CV.sessions[p]||(CV.sessions[p]=cvRecord(p))):null;
@@ -269,11 +316,11 @@ function cvGrow(){const t=$("cv-input");t.style.height="auto";t.style.height=Mat
 $("cv-form").onsubmit=e=>{e.preventDefault();if(CV.cur&&CV.cur.busy)cvStop();else cvSend()};
 $("cv-input").addEventListener("keydown",e=>{
   if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing&&!e.altKey&&!e.ctrlKey&&!e.metaKey){e.preventDefault();if(!(CV.cur&&CV.cur.busy))cvSend()}
+  if(e.key==="Tab"&&e.shiftKey&&!e.altKey&&!e.ctrlKey&&!e.metaKey){e.preventDefault();cvCycleMode()}
 });
 $("cv-input").addEventListener("input",cvGrow);
 $("cv-new").onclick=cvNew;
-$("cv-model").value=store.get("strata-chat-model")||"";
-$("cv-model").onchange=()=>store.set("strata-chat-model",$("cv-model").value);
+$("cv-model").onchange=$("cv-effort").onchange=$("cv-perm").onchange=cvApplyPicks;
 $("cv-log").addEventListener("scroll",()=>{const b=$("cv-log");CV.stick=b.scrollHeight-b.scrollTop-b.clientHeight<60});
 cvLoad();
 if(CHAT.open&&PANEL.mode==="chat")chatViewShow();

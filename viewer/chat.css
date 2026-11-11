@@ -3,7 +3,6 @@
 #chat-view[hidden]{display:none!important}
 #cv-bar{display:flex;align-items:center;gap:6px;padding:0 8px 0 12px;border-bottom:1px solid var(--line-soft);background:var(--side);min-width:0}
 #cv-where{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12px}
-#cv-model{height:24px;max-width:120px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg);color:var(--fg);font-size:12px}
 #cv-new{height:24px;padding:0 9px;font-size:12px;white-space:nowrap}
 #cv-log{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:14px 12px 8px;scroll-padding-bottom:8px}
 .cv-thread{display:flex;flex-direction:column;gap:10px}
@@ -71,7 +70,11 @@ button.cv-allow:hover{background:var(--accent-soft)}
 #cv-input{width:100%;min-height:38px;max-height:220px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--bg);color:var(--fg);font:13.5px/1.45 var(--body);resize:none;overflow-y:auto}
 #cv-input:focus{outline:none;border-color:var(--accent)}
 #cv-input:disabled{opacity:.6}
-#cv-actions{display:flex;align-items:center;gap:8px}
+#cv-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+.cv-pick{flex:none;height:26px;max-width:160px;padding:0 4px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg);color:var(--fg);font-size:12px;text-overflow:ellipsis}
+.cv-pick:disabled{opacity:.55}
+#cv-perm.mode-auto{border-color:var(--accent)}
+#cv-perm.mode-plan{border-color:var(--st-review,var(--accent));color:var(--st-review,var(--fg))}
 #cv-hint{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--faint);font-size:11px}
 #cv-send{height:28px;padding:0 14px;border-color:var(--accent);color:var(--accent);font-size:12.5px}
 #cv-send.stop{border-color:var(--st-block);color:var(--st-block)}

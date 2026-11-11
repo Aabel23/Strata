@@ -63,7 +63,7 @@ def test_child_gets_no_api_keys_and_no_parent_session_markers(env):
     assert child["BROWSER"] == "true" and child["HOME"] == env["HOME"] and not {"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CLAUDECODE", "STRATA_CLAUDE_BIN"} & set(child)
 
 
-def test_turn_streams_text_and_runs_in_cwd_with_manual_permissions(tmp_path, env):
+def test_turn_streams_text_and_runs_in_cwd_with_auto_permissions_by_default(tmp_path, env):
     with session(tmp_path, env, model="sonnet") as s:
         assert s.start() is None and s.events() == []  # nothing is launched before the first turn
         s.turn("hello")
@@ -75,7 +75,29 @@ def test_turn_streams_text_and_runs_in_cwd_with_manual_permissions(tmp_path, env
     log = [json.loads(l) for l in (tmp_path / "log").read_text().splitlines()]
     assert len(log) == 1 and log[0]["cwd"] == str(tmp_path) and "ANTHROPIC_API_KEY" not in log[0]["env"]
     a = log[0]["argv"]
-    assert a[a.index("--permission-mode") + 1] == "manual" and a[a.index("--permission-prompt-tool") + 1] == "stdio" and a[a.index("--model") + 1] == "sonnet"
+    assert a[a.index("--permission-mode") + 1] == "auto" and a[a.index("--permission-prompt-tool") + 1] == "stdio" and a[a.index("--model") + 1] == "sonnet"
+    assert "--effort" not in a and "--resume" not in a
+
+
+def test_settings_change_between_turns_relaunches_and_resumes(tmp_path, env):
+    with session(tmp_path, env, model="opus", effort="high", permission="manual") as s:
+        s.turn("hello"); ev = collect(s, "turn_completed")
+        assert s.configure("claude-sonnet-5-5", "low", "plan") == {"model": "claude-sonnet-5-5", "effort": "low", "permission": "plan"}
+        changed = collect(s, "settings_changed", after=ev[-1]["seq"])
+        s.turn("again"); collect(s, "turn_completed", after=changed[-1]["seq"])
+    first, second = [json.loads(l)["argv"] for l in (tmp_path / "log").read_text().splitlines()]
+    opt = lambda a, k: a[a.index(k) + 1] if k in a else None
+    assert (opt(first, "--model"), opt(first, "--effort"), opt(first, "--permission-mode"), opt(first, "--resume")) == ("opus", "high", "manual", None)
+    assert (opt(second, "--model"), opt(second, "--effort"), opt(second, "--permission-mode"), opt(second, "--resume")) == ("claude-sonnet-5-5", "low", "plan", "sess-1")
+
+
+def test_settings_are_checked_and_refused_mid_turn(tmp_path, env):
+    for bad in ({"effort": "huge"}, {"permission": "bypassPermissions"}, {"permission": "dontAsk"}):
+        with pytest.raises(ValueError): ClaudeSession(tmp_path, environ=env, **bad)
+    with session(tmp_path, env) as s:
+        with pytest.raises(ValueError): s.configure(None, None, "bypassPermissions")
+        s.turn("wait"); collect(s, "turn_started")
+        with pytest.raises(ClaudeError): s.configure("opus", "", "auto")
 
 
 @pytest.mark.parametrize("allow", [True, False])
