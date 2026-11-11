@@ -260,8 +260,8 @@ def test_server_has_no_write_routes():
     assert {server.EDIT_PATH, server.PROJECT_PATH, server.ITEM_PATH, server.CHAT_PATH} == {
         "/api/c4/edit", "/api/project", "/api/item", "/api/chat"
     }
-    assert {server.CHAT_EVENTS_PATH, server.CHAT_AUTH_PATH, server.CHAT_DIFF_PATH} == {
-        "/api/chat/events", "/api/chat/auth", "/api/chat/diff"
+    assert {server.CHAT_EVENTS_PATH, server.CHAT_AUTH_PATH, server.CHAT_DIFF_PATH, server.CHAT_HISTORY_PATH} == {
+        "/api/chat/events", "/api/chat/auth", "/api/chat/diff", "/api/chat/history"
     }
 
 

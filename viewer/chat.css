@@ -3,7 +3,23 @@
 #chat-view[hidden]{display:none!important}
 #cv-bar{display:flex;align-items:center;gap:6px;padding:0 8px 0 12px;border-bottom:1px solid var(--line-soft);background:var(--side);min-width:0}
 #cv-where{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12px}
-#cv-new{height:24px;padding:0 9px;font-size:12px;white-space:nowrap}
+#cv-new,#cv-history{height:24px;padding:0 9px;font-size:12px;white-space:nowrap}
+#cv-history[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+.cv-hist{display:flex;flex-direction:column;gap:4px}
+.cv-hist-info{margin:0 2px 8px;color:var(--muted);font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.cv-hist-row{display:flex;align-items:baseline;gap:10px;width:100%;height:auto;padding:7px 10px;border:1px solid var(--line-soft);border-radius:var(--r);background:var(--card);color:var(--fg);font-size:13px;text-align:left;cursor:pointer}
+.cv-hist-row:hover,.cv-hist-row:focus-visible{border-color:var(--accent)}
+.cv-hist-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cv-hist-when{flex:none;color:var(--faint);font-size:11px;font-variant-numeric:tabular-nums}
+.cv-hist-tool{align-self:flex-start;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:3px 9px;border:1px solid var(--line-soft);border-radius:var(--r);color:var(--muted);font:11.5px var(--mono)}
+.cv-img{display:block;max-width:160px;max-height:120px;margin-top:6px;border:1px solid var(--line);border-radius:var(--r);object-fit:cover;cursor:zoom-in}
+.cv-img:first-child{margin-top:0}
+.cv-img.big{max-width:100%;max-height:none;cursor:zoom-out}
+#cv-attach{display:flex;flex-wrap:wrap;gap:6px}
+#cv-attach[hidden]{display:none}
+.cv-chip{position:relative;display:inline-flex}
+.cv-chip img{width:56px;height:56px;border:1px solid var(--line);border-radius:var(--r);object-fit:cover}
+.cv-chip button{position:absolute;top:-6px;right:-6px;width:18px;height:18px;padding:0;border-radius:50%;font-size:12px;line-height:1}
 #cv-log{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:14px 12px 8px;scroll-padding-bottom:8px}
 .cv-thread{display:flex;flex-direction:column;gap:10px}
 .cv-thread:empty{display:none}

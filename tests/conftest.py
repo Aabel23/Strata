@@ -12,5 +12,11 @@ def run(dbp, *args):
     return r.returncode, r.stdout
 
 
+@pytest.fixture(autouse=True)
+def _no_real_vault(monkeypatch, tmp_path):
+    """Tests never write chat history into the developer's real vault."""
+    monkeypatch.setenv("STRATA_CHAT_VAULT", str(tmp_path / "no-vault"))
+
+
 @pytest.fixture
 def dbp(tmp_path): return tmp_path / "t.db"

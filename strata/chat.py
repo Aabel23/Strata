@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 
 from strata.chat_codex import CodexDeviceUnsupported, CodexSession
 from strata.chat_claude import ClaudeError, ClaudeLogin, ClaudeSession, safe_login_url
+from strata.chat_history import ChatHistory, HistoryError
 
 
 MAX_SESSIONS = 4
@@ -552,8 +553,9 @@ class ChatSupervisor:
     """
 
     def __init__(self, projects: Mapping[str, str | os.PathLike[str]], *,
-                 session_factory=CodexSession, max_sessions: int = MAX_SESSIONS):
+                 session_factory=CodexSession, max_sessions: int = MAX_SESSIONS, history: ChatHistory | None = None):
         self._projects = self._validated_projects(projects)
+        self._history = history if history is not None else ChatHistory()  # notes in the user's vault; off when it is absent
         self._session_factory = session_factory
         self._max_sessions = max(1, min(int(max_sessions), MAX_SESSIONS))
         self._sessions: dict[str, dict[str, Any]] = {}
@@ -677,8 +679,10 @@ class ChatSupervisor:
         return project_dir
 
     def start(self, project: str, root: str | os.PathLike[str], provider: str = "codex",
-              model: str | None = None, **claude_settings: Any) -> dict[str, Any]:
-        """claude_settings: effort / permission, passed only to a Claude session."""
+              model: str | None = None, resume: str | None = None, **claude_settings: Any) -> dict[str, Any]:
+        """claude_settings: effort / permission, passed only to a Claude session.
+        resume: id of a chat in the history. Its worktree is reused and Claude picks the conversation up again;
+        when that worktree is gone, the chat continues in a new one without Claude's memory of it."""
         with self._lock:
             if self._shutting_down:
                 raise ChatError("chat supervisor is shutting down")
@@ -687,28 +691,39 @@ class ChatSupervisor:
             project = self._project_id(project)
             git_root = self._registered_root(project, root)
             session_id = secrets.token_urlsafe(24)
-            worktree = self._worktree_base(project, git_root) / f"chat-{session_id}"
+            base = self._worktree_base(project, git_root)
+            earlier, reuse = self._resume_target(project, base, resume) if resume is not None else (None, None)
+            worktree = reuse or base / f"chat-{session_id}"
             record = {"project": project, "root": git_root, "worktree": worktree,
                       "session": None, "closed": True, "startup_error": None}
             registered_worktree = False
             session = None
             try:
-                _run_git(git_root, ["-c", "core.hooksPath=" + os.devnull,
-                                    "worktree", "add", "--detach", "--no-checkout",
-                                    str(worktree), "HEAD"])
+                if reuse is None:
+                    _run_git(git_root, ["-c", "core.hooksPath=" + os.devnull,
+                                        "worktree", "add", "--detach", "--no-checkout",
+                                        str(worktree), "HEAD"])
                 registered_worktree = True
                 record["worktree"] = worktree.resolve(strict=True)
                 self._sessions[session_id] = record
-                _run_git(record["worktree"], ["read-tree", "HEAD"])
-                _materialize_head(git_root, record["worktree"])
+                if reuse is None:
+                    _run_git(record["worktree"], ["read-tree", "HEAD"])
+                    _materialize_head(git_root, record["worktree"])
                 resolved = record["worktree"]
                 if not resolved.is_relative_to(worktree.parent.resolve()):
                     raise ChatError("created worktree escaped its allowed parent")
                 # Claude Code is its own client; an injected factory (tests) still stands in for every provider.
                 factory = ClaudeSession if provider == "claude" and self._session_factory is CodexSession else self._session_factory
                 extra = {k: v for k, v in claude_settings.items() if v is not None} if provider == "claude" else {}
+                if reuse is not None and factory is ClaudeSession:
+                    extra["resume"] = earlier["thread"]
                 session = factory(resolved, provider=provider, model=model, **extra)
                 record["session"] = session
+                recorder = (self._history.recorder(project, resolved.name[len("chat-"):], earlier)
+                            if isinstance(session, ClaudeSession) else None)
+                if recorder is not None:
+                    record["history"] = recorder
+                    session.on_event = lambda event, s=session, r=recorder: r.event(event, s.thread_id)
                 auth = (CodexSession.auth_status(provider)
                         if provider == "codex" and self._session_factory is CodexSession else None)
                 if isinstance(auth, dict) and auth.get("status") == "login_required":
@@ -738,8 +753,54 @@ class ChatSupervisor:
                 raise ChatError("could not create Codex review worktree") from exc
             result = {"project": project, "session_id": session_id,
                       "thread_id": thread_id, "worktree": str(record["worktree"])}
+            if record.get("history") is not None:
+                result["history"] = record["history"].hid
+            if resume is not None:
+                result["resumed"] = reuse is not None
             settings = getattr(session, "settings", None)
             return {**result, "settings": settings} if isinstance(settings, dict) else result
+
+    def _resume_target(self, project: str, base: pathlib.Path, hid: str) -> tuple[dict[str, Any], pathlib.Path | None]:
+        """The history note to continue and, when Claude can still pick the conversation up, its worktree."""
+        try:
+            earlier = self._history.read(project, hid)
+        except HistoryError as exc:
+            raise ChatError(str(exc)) from exc
+        if any(not r["closed"] and r.get("history") is not None and r["history"].hid == hid for r in self._sessions.values()):
+            raise ChatError("that chat is already open")
+        if earlier["session"] and earlier["thread"]:
+            worktree = base / f"chat-{earlier['session']}"
+            try:
+                if (not worktree.is_symlink() and worktree.is_dir() and (worktree / ".git").exists()
+                        and worktree.resolve().parent == base.resolve()):
+                    return earlier, worktree
+            except OSError:
+                pass
+        return earlier, None
+
+    def history_list(self, project: str) -> dict[str, Any]:
+        project = self._project_id(project)
+        if not self._history.enabled:
+            return {"enabled": False, "chats": []}
+        with self._lock:
+            live = {r["history"].hid for r in self._sessions.values() if not r["closed"] and r.get("history") is not None}
+        try:
+            chats = self._history.list(project)
+            return {"enabled": True, "folder": str(self._history.folder(project)),
+                    "chats": [{**chat, "live": chat["id"] in live} for chat in chats]}
+        except HistoryError as exc:
+            raise ChatError(str(exc)) from exc
+
+    def history_read(self, project: str, hid: str, image: str | None = None) -> dict[str, Any]:
+        """One chat as blocks for the viewer, or one of its pasted images (base64)."""
+        project = self._project_id(project)
+        try:
+            if image is not None:
+                return self._history.image(project, hid, image)
+            chat = self._history.read(project, hid)
+        except HistoryError as exc:
+            raise ChatError(str(exc)) from exc
+        return {key: chat[key] for key in ("id", "title", "started", "blocks")}
 
     def _get(self, project: str, session_id: str, *, allow_closed: bool = False) -> dict[str, Any]:
         if not isinstance(project, str) or not isinstance(session_id, str):
@@ -758,14 +819,21 @@ class ChatSupervisor:
                 raise ChatError("chat session is closed")
             return record
 
-    def turn(self, project: str, session_id: str, message: str, images: list | None = None) -> str:
+    def turn(self, project: str, session_id: str, message: str, images: list[dict[str, str]] | None = None) -> str:
+        """images: [{media_type, data(base64)}] already checked by `chat_history.check_images`; Claude sessions only."""
         with self._lock:
-            session = self._get(project, session_id)["session"]
-            if not images:
-                return session.turn(message)
-            if getattr(session, "provider", "") != "claude":
-                raise ChatError("only Claude chats take images")
-            return session.turn(message, images)
+            record = self._get(project, session_id)
+            session, recorder = record["session"], record.get("history")
+            if images and not isinstance(session, ClaudeSession):
+                raise ChatError("this chat provider does not take images")
+            if recorder is not None:
+                recorder.expect(message, images)
+            try:
+                return session.turn(message, images) if images else session.turn(message)
+            except BaseException:
+                if recorder is not None:
+                    recorder.forget()
+                raise
 
     def events(self, project: str, session_id: str, after: int = 0) -> list[dict[str, Any]]:
         with self._lock:
