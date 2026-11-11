@@ -76,7 +76,8 @@ function agentRender(){
     const head=el("span","agent-card-title"),dot=el("i");
     head.append(dot,el("span","agent-card-kind",c.kind),el("span","agent-card-state",live?"Working":c.status||"idle"));
     const task=el("span","agent-card-task"+(c.task?"":" none"));
-    if(c.task)task.append(el("span","agent-card-id","#"+c.task.id),document.createTextNode(c.task.title));else task.textContent="No task";
+    if(c.task)task.append(el("span","agent-card-id","#"+c.task.id),document.createTextNode(c.task.title));
+    else task.textContent=c.source==="chat"?"Chat in "+c.project:"No task";
     const meta=el("span","agent-card-meta");
     meta.append(svg(S("0 0 16 16",'<circle cx="5" cy="4" r="1.5"/><circle cx="5" cy="12" r="1.5"/><circle cx="11" cy="6" r="1.5"/><path d="M5 5.5v5M11 7.5c0 2-2 2.5-6 3"/>','stroke-width="1.3" stroke-linecap="round"')),el("span","",c.branch||"—"));
     if(c.source)meta.append(el("span","agent-card-src",c.source==="run"?"headless":c.source));
@@ -110,6 +111,20 @@ async function agentPoll(){
   finally{AG.pollBusy=false}
 }
 async function agentOpen(card){
+  if(card.source==="chat"&&card.project){
+    const provider=card.provider||"claude",key=cvKey(card.project,provider);
+    if(card.chat_session){
+      const current=CV.sessions[key];
+      if(!current||current.sid!==card.chat_session)
+        CV.sessions[key]=cvRecord(card.project,{provider,sid:card.chat_session,hid:card.history,worktree:card.cwd});
+      else if(!current.hid)current.hid=card.history||null;
+      cvSave();
+    }
+    CV.provider=provider;$("cv-provider").value=provider;store.set("strata-chat-provider",provider);
+    CV.authChecked=false;CV.auth=null;CV.banner=null;
+    if(CUR.p!==card.project)location.hash="#/p/"+encodeURIComponent(card.project)+"/tasks";
+    chatSet(true);panelMode("chat");return;
+  }
   if($("agent-popup").open)$("agent-popup").close();
   AG.popupCard=card;
   $("agent-popup-title").textContent=card.kind+" · "+(card.status==="running"?"working":card.status);

@@ -32,6 +32,12 @@ class FakeChatSupervisor:
         self.sessions.add((project, "session-1"))
         return {"project": project, "session_id": "session-1", "thread_id": "thread-1", "worktree": "/tmp/worktree"}
 
+    def agent_cards(self):
+        return [{"id": "chat:" + session_id, "kind": "Claude", "status": "idle", "task": None,
+                 "branch": None, "cwd": "/tmp/worktree", "terminal": None, "parent": None,
+                 "source": "chat", "project": project, "chat_session": session_id}
+                for project, session_id in self.sessions]
+
     def turn(self, project, session_id, message, images=None):
         self._bound(project, session_id)
         self.calls.append(("turn", project, session_id, message) + ((len(images),) if images else ()))
@@ -162,6 +168,30 @@ def test_chat_route_requires_all_edit_guards_and_get_token(chat_server):
     assert get(base, "/api/chat/auth?provider=codex")[0] == 403
     assert get(base, "/api/chat/auth?provider=codex", token=token, host="evil.invalid")[0] == 403
     assert supervisor.calls == []
+
+
+def test_started_claude_chat_appears_in_agent_list(chat_server):
+    base, token, _, _, *_ = chat_server
+    assert post(base, token, {"op": "start", "project": "p", "provider": "claude"})[0] == 200
+    status, _, raw = get(base, "/api/agents", token=token)
+    assert status == 200
+    card, = [c for c in json.loads(raw)["sessions"] if c.get("id") == "chat:session-1"]
+    assert (card["kind"], card["source"], card["project"], card["chat_session"]) == (
+        "Claude", "chat", "p", "session-1")
+
+
+def test_antigravity_start_and_provider_usage_route(chat_server, monkeypatch):
+    base, token, _, supervisor, *_ = chat_server
+    assert post(base, token, {"op": "start", "project": "p", "provider": "antigravity"})[0] == 200
+    assert supervisor.calls[-1][3:] == ("antigravity", None)
+    monkeypatch.setattr(server, "usage_status", lambda provider: {
+        "provider": provider, "short": None, "week": 3, "short_label": "5h"})
+    path = "/api/chat/usage?provider=antigravity"
+    assert get(base, path)[0] == 403
+    status, headers, body = get(base, path, token=token)
+    assert status == 200 and headers["Cache-Control"] == "no-store"
+    assert json.loads(body) == {"provider": "antigravity", "short": None, "week": 3, "short_label": "5h"}
+    assert get(base, "/api/chat/usage?provider=invalid", token=token)[0] == 400
 
 
 def test_start_rejects_browser_root_and_limits_provider_model(chat_server):

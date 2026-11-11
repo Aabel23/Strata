@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 
 from strata.chat_codex import CodexDeviceUnsupported, CodexSession
 from strata.chat_claude import ClaudeError, ClaudeLogin, ClaudeSession, safe_login_url
+from strata.chat_antigravity import AntigravitySession
 from strata.chat_history import ChatHistory, HistoryError
 
 
@@ -721,7 +722,8 @@ class ChatSupervisor:
                 if not resolved.is_relative_to(worktree.parent.resolve()):
                     raise ChatError("created worktree escaped its allowed parent")
                 # Claude Code is its own client; an injected factory (tests) still stands in for every provider.
-                factory = ClaudeSession if provider == "claude" and self._session_factory is CodexSession else self._session_factory
+                factory = (ClaudeSession if provider == "claude" else AntigravitySession if provider == "antigravity"
+                           else CodexSession) if self._session_factory is CodexSession else self._session_factory
                 extra = {k: v for k, v in claude_settings.items() if v is not None} if provider == "claude" else {}
                 if reuse is not None and factory is ClaudeSession:
                     extra["resume"] = earlier["thread"]
@@ -1000,7 +1002,8 @@ class ChatSupervisor:
 
     @staticmethod
     def auth_status(provider: str = "codex") -> dict[str, Any]:
-        return ClaudeSession.auth_status() if provider == "claude" else CodexSession.auth_status(provider)
+        return (ClaudeSession.auth_status() if provider == "claude" else
+                AntigravitySession.auth_status() if provider == "antigravity" else CodexSession.auth_status(provider))
 
     def diff_status(self, project: str, session_id: str) -> dict[str, Any]:
         with self._lock:
@@ -1032,6 +1035,24 @@ class ChatSupervisor:
 
     def status(self, project: str, session_id: str) -> dict[str, Any]:
         return self.diff_status(project, session_id)
+
+    def agent_cards(self) -> list[dict[str, Any]]:
+        """Chat sessions owned by this server, including idle chats between turns."""
+        with self._lock:
+            cards = []
+            for session_id, record in self._sessions.items():
+                session = record.get("session")
+                if record["closed"] or record.get("invalidated") or session is None:
+                    continue
+                history = record.get("history")
+                provider = getattr(session, "provider", "codex")
+                cards.append({"id": "chat:" + session_id, "kind": {"claude": "Claude", "codex": "Codex", "antigravity": "Antigravity"}.get(provider, provider),
+                              "status": "running" if getattr(session, "turn_running", False) else "idle",
+                              "task": None, "branch": None, "cwd": str(record["worktree"]),
+                              "terminal": None, "parent": None, "source": "chat",
+                              "project": record["project"], "chat_session": session_id, "provider": provider,
+                              "history": history.hid if history is not None else None})
+            return cards
 
     def shutdown(self) -> None:
         with self._lock:

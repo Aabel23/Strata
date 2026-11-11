@@ -5,6 +5,7 @@ from strata import blocks, c4_edit, c4_layered, codemap, db, service, symbols
 from strata import agents, claude_models, files, term
 from strata.chat import ChatError, ChatSupervisor
 from strata.chat_claude import check_images
+from strata.chat_usage import usage_status
 
 SERVE_EXT = set(".py .js .mjs .ts .tsx .css .html .htm .md .txt .yaml .yml .json .toml .c .h .cpp .hpp .dart .java .kt .go .rs .svg .png .jpg .jpeg .gif .webp".split())
 
@@ -36,6 +37,7 @@ ITEM_PATH = "/api/item"
 CHAT_PATH = "/api/chat"
 CHAT_EVENTS_PATH = "/api/chat/events"
 CHAT_AUTH_PATH = "/api/chat/auth"
+CHAT_USAGE_PATH = "/api/chat/usage"
 CHAT_DIFF_PATH = "/api/chat/diff"
 CHAT_HISTORY_PATH = "/api/chat/history"
 CHAT_MAX_BODY = 24 * 1024 * 1024  # a chat turn may carry pasted images (chat_history.MAX_IMAGES x MAX_IMAGE_BYTES, base64)
@@ -295,7 +297,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                         raise ValueError("invalid chat to resume")
                     provider = op.get("provider", "codex")
                     model = op.get("model")
-                    if provider not in ("claude", "codex", "openrouter", "omniroute"):
+                    if provider not in ("claude", "codex", "antigravity", "openrouter", "omniroute"):
                         raise ValueError("invalid provider")
                     if model is not None and (not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}", model)):
                         raise ValueError("invalid model")
@@ -465,7 +467,8 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 if path == AGENTS_PATH:
                     from strata import agent_sessions
                     data = agent_sup().snapshot()
-                    data["sessions"] = agent_sessions.discover(terminals, data["runs"])
+                    data["sessions"] = agent_sessions.discover(terminals, data["runs"],
+                                                                chat_cards=chat_supervisor.agent_cards())
                     return self.json(data)
                 if path == AGENT_LOG_PATH:
                     if not TERM_ID.fullmatch(q.get("run", "")): raise ValueError
@@ -485,15 +488,20 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             try:
                 parsed = parse_qs(raw_query, keep_blank_values=True, strict_parsing=True)
                 allowed = {CHAT_EVENTS_PATH: {"project", "session_id", "after"},
-                           CHAT_AUTH_PATH: {"provider"}, CHAT_DIFF_PATH: {"project", "session_id"},
+                           CHAT_AUTH_PATH: {"provider"}, CHAT_USAGE_PATH: {"provider"}, CHAT_DIFF_PATH: {"project", "session_id"},
                            CHAT_HISTORY_PATH: {"project", "id", "image"}}[path]
                 if any(k not in allowed or len(v) != 1 for k, v in parsed.items()):
                     raise ValueError
                 q = {k: values[0] for k, values in parsed.items()}
                 refresh_chat_projects()
+                if path == CHAT_USAGE_PATH:
+                    provider = q.get("provider", "claude")
+                    if provider not in ("claude", "codex", "antigravity", "openrouter", "omniroute"):
+                        raise ValueError
+                    return self.json(usage_status(provider), **{"Cache-Control": "no-store"})
                 if path == CHAT_AUTH_PATH:
                     provider = q.get("provider", "codex")
-                    if provider not in ("claude", "codex", "openrouter", "omniroute"):
+                    if provider not in ("claude", "codex", "antigravity", "openrouter", "omniroute"):
                         raise ValueError
                     status = chat_supervisor.auth_status(provider)
                     return self.json({**status, **claude_models.chat_catalog()} if provider == "claude" else status)
@@ -566,7 +574,7 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
             q = {k: v[-1] for k, v in parse_qs(u.query, keep_blank_values=True).items()}
             parts = [unquote(x) for x in u.path.split("/")]  # ['', 'api', ...]
             p = u.path
-            if p in (CHAT_EVENTS_PATH, CHAT_AUTH_PATH, CHAT_DIFF_PATH, CHAT_HISTORY_PATH):
+            if p in (CHAT_EVENTS_PATH, CHAT_AUTH_PATH, CHAT_USAGE_PATH, CHAT_DIFF_PATH, CHAT_HISTORY_PATH):
                 return self.chat_get(p, u.query)
             if p in (TERM_READ_PATH, AGENTS_PATH, AGENT_LOG_PATH): return self.live_get(p, q)
             if p in (FILE_PATH, FILES_PATH): return self.file_get(p, q)

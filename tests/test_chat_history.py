@@ -62,6 +62,19 @@ def test_history_is_off_without_a_vault(tmp_path):
     assert ChatHistory(environ={"STRATA_CHAT_VAULT": str(tmp_path)}).vault == tmp_path.resolve()
 
 
+def test_claude_chat_is_listed_as_an_agent_until_closed(setup):
+    sup, root, _, _ = setup
+    started = sup.start("project", root, provider="claude")
+    card, = sup.agent_cards()
+    assert (card["id"], card["source"], card["project"], card["status"]) == (
+        "chat:" + started["session_id"], "chat", "project", "idle")
+    assert card["chat_session"] == started["session_id"]
+    sup.turn("project", started["session_id"], "hello")
+    assert sup.agent_cards()[0]["status"] == "running"
+    sup.close("project", started["session_id"])
+    assert sup.agent_cards() == []
+
+
 def test_chat_is_saved_as_a_note_with_its_image_and_can_be_continued(setup):
     sup, root, vault, home = setup
     first = sup.start("project", root, provider="claude")

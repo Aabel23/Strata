@@ -306,6 +306,18 @@ class CodexSession:
         params: dict[str, Any] = {"cwd": self.cwd, "approvalPolicy": "on-request", "sandbox": "read-only"}
         if self.model:
             params["model"] = self.model
+        elif self.provider == "codex":
+            # The user's config can point at a model unavailable to a ChatGPT
+            # account. The app-server catalog marks an account default.
+            try:
+                catalog = self._rpc("model/list", {})
+                available = catalog.get("data", []) if isinstance(catalog, dict) else []
+                default = next((item.get("model") or item.get("id") for item in available
+                                if isinstance(item, dict) and item.get("isDefault")), None)
+                if default:
+                    params["model"] = default
+            except CodexError:
+                pass  # Older app-server versions can still use their configured model.
         try:
             retried: set[str] = set()
             while True:
@@ -787,6 +799,16 @@ class CodexSession:
     @property
     def thread_id(self) -> str | None:
         return self._thread_id
+
+    @property
+    def process_running(self) -> bool:
+        with self._lock:
+            return self._proc is not None and self._proc.poll() is None
+
+    @property
+    def turn_running(self) -> bool:
+        with self._lock:
+            return self._active_turn is not None
 
     def __enter__(self): return self
     def __exit__(self, *_): self.close()

@@ -97,7 +97,7 @@ def _hook_subagents(cards: list[dict], path: Path) -> list[dict]:
     return result
 
 
-def discover(terminals, runs=(), *, proc_root: Path = Path("/proc"), uid: int | None = None,
+def discover(terminals, runs=(), *, chat_cards=(), proc_root: Path = Path("/proc"), uid: int | None = None,
              event_path: Path | None = None) -> list[dict]:
     """One card per live CLI process or task run. Only owned PTYs can be reopened."""
     owner = os.getuid() if uid is None else uid
@@ -145,5 +145,6 @@ def discover(terminals, runs=(), *, proc_root: Path = Path("/proc"), uid: int | 
                       "task": {"id": run["item"], "title": run.get("title") or ""},
                       "branch": run.get("branch"), "cwd": run.get("worktree"),
                       "terminal": None, "parent": None, "source": "run", "run": run["id"]})
+    cards.extend(chat_cards)
     cards.extend(_hook_subagents(cards, event_path or _event_file()))
     return sorted(cards, key=lambda c: (c["parent"] is not None, c["kind"], c["id"]))

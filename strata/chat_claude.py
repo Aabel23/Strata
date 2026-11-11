@@ -255,6 +255,16 @@ class ClaudeSession:
     def settings(self) -> dict[str, Any]:
         return {"model": self.model or "", "effort": self.effort or "", "permission": self.permission}
 
+    @property
+    def process_running(self) -> bool:
+        with self._lock:
+            return self._proc is not None and self._proc.poll() is None
+
+    @property
+    def turn_running(self) -> bool:
+        with self._lock:
+            return self._active_turn is not None
+
     def events(self, after: int = 0) -> list[dict[str, Any]]:
         with self._lock:
             return [event for event, _ in self._events if event["seq"] > after]

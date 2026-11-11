@@ -2,7 +2,9 @@
    Strata runs one `claude -p` per chat in a git worktree of the open project (strata/chat_claude.py);
    this file sends messages through POST /api/chat and draws the reply from GET /api/chat/events.
    Claude asks before it runs a tool: those requests show up as cards with Allow / Deny. */
-const CV={key:"strata-claude-chat-v1",sessions:{},cur:null,auth:null,authChecked:false,banner:null,stick:true,images:[]};
+const CV={key:"strata-agent-chat-v1",sessions:{},provider:store.get("strata-chat-provider")||"claude",cur:null,auth:null,authChecked:false,banner:null,stick:true,images:[],usageTimer:null};
+const CV_NAMES={claude:"Claude",codex:"Codex",antigravity:"Antigravity",openrouter:"OpenRouter",omniroute:"OmniRoute"};
+const cvKey=(project,provider)=>project+":"+provider;
 const cvSleep=ms=>new Promise(r=>setTimeout(r,ms));
 const CV_MAX_MESSAGE=100000, CV_MAX_TURNS=200, CV_MAX_IMAGES=4;
 const CV_IMAGE_TYPES=["image/png","image/jpeg","image/gif","image/webp"], CV_IMAGE_EDGE=1568, CV_IMAGE_BYTES=3.5*1024*1024;
@@ -10,20 +12,23 @@ const CV_IMAGE_TYPES=["image/png","image/jpeg","image/gif","image/webp"], CV_IMA
 // hid: id of this chat's note in the history (set by the server on start, or picked from History to continue it).
 // images: pasted images waiting to go with the next message, [{media_type,data(base64),url(data URL)}].
 function cvRecord(project,saved={}){
-  return {project,sid:saved.sid||null,hid:saved.hid||null,images:[],worktree:saved.worktree||"",turns:saved.turns&&typeof saved.turns==="object"?saved.turns:{},
+  return {project,provider:saved.provider||"claude",sid:saved.sid||null,hid:saved.hid||null,images:[],worktree:saved.worktree||"",turns:saved.turns&&typeof saved.turns==="object"?saved.turns:{},
     settings:saved.settings&&typeof saved.settings==="object"?saved.settings:null,
     seq:0,log:el("div","cv-thread"),busy:false,sending:false,polling:false,replayed:!saved.sid,
     assistant:null,tools:{},approvals:{},working:null,last:null};
 }
 function cvLoad(){
   try{const saved=JSON.parse(sessionStorage.getItem(CV.key)||"{}");
-    for(const [p,v] of Object.entries(saved))if(v&&typeof v.sid==="string")CV.sessions[p]=cvRecord(p,v)}catch{}
+    for(const [key,v] of Object.entries(saved))if(v&&typeof v.sid==="string"){
+      const provider=v.provider||"claude",project=v.project||key.split(":")[0];
+      CV.sessions[cvKey(project,provider)]=cvRecord(project,{...v,provider});
+    }}catch{}
 }
 function cvSave(){
   try{const out={};
     for(const [p,s] of Object.entries(CV.sessions))if(s.sid){
       const ids=Object.keys(s.turns);for(const id of ids.slice(0,Math.max(0,ids.length-CV_MAX_TURNS)))delete s.turns[id];
-      out[p]={sid:s.sid,hid:s.hid,worktree:s.worktree,turns:s.turns,settings:s.settings};
+      out[p]={project:s.project,provider:s.provider,sid:s.sid,hid:s.hid,worktree:s.worktree,turns:s.turns,settings:s.settings};
     }
     sessionStorage.setItem(CV.key,JSON.stringify(out));
   }catch{}
@@ -47,7 +52,7 @@ function cvUser(s,text,images=[]){
   return cvAdd(s,bubble);
 }
 function cvNote(s,text,kind=""){cvScroll(s);return cvAdd(s,el("div","cv-note"+(kind?" "+kind:""),text))}
-function cvWorking(s,on,label="Claude is working…"){
+function cvWorking(s,on,label=CV_NAMES[s.provider]+" is working…"){
   if(on){
     if(!s.working){s.working=el("div","cv-working");s.working.append(el("i"),el("i"),el("i"),el("span"))}
     s.working.lastChild.textContent=label;s.log.append(s.working);
@@ -80,7 +85,7 @@ function cvToolDone(s,item){
 }
 function cvApproval(s,d,replay){
   const r=d.request||{},card=el("div","cv-approve");
-  card.append(el("div","cv-approve-head","Claude wants to use "+(r.tool||"a tool")));
+  card.append(el("div","cv-approve-head",CV_NAMES[s.provider]+" wants to use "+(r.tool||"a tool")));
   if(r.what)card.append(el("p","",r.what));
   if(r.input!=null)card.append(el("pre","",cvJson(r.input)));
   const row=el("div","cv-approve-actions"),yes=el("button","cv-allow","Allow"),no=el("button","","Deny");
@@ -123,7 +128,14 @@ function cvEvent(s,ev,replay){
     case "approval_required":cvApproval(s,d,replay);break;
     case "approval_expired":cvApprovalEnd(s,d.approval_id,"Timed out: not allowed");break;
     case "approval_overflow":cvNote(s,"Too many permission requests at once; one was denied.","bad");break;
-    case "error":case "protocol_error":cvNote(s,String(d.message||"Claude reported an error."),"bad");break;
+    case "error":case "protocol_error":{
+      let message=d.message;
+      if(!message&&s.provider==="codex"&&d.error&&typeof d.error.message==="string"){
+        try{const detail=JSON.parse(d.error.message);if(detail.error&&detail.error.code==="model_not_found")
+          message="Codex rejected this model for the account signed in on the server. Check its Codex CLI login and available models."}catch{}
+      }
+      cvNote(s,String(message||"Agent reported an error."),"bad");break;
+    }
     case "event_truncated":cvNote(s,"One update ("+(d.original_type||"event")+") was too large to show.");break;
     case "turn_cancelled":
       s.busy=false;s.assistant=null;cvWorking(s,false);
@@ -135,7 +147,7 @@ function cvEvent(s,ev,replay){
     case "turn_completed":
       s.busy=false;s.assistant=null;cvWorking(s,false);
       for(const id of Object.keys(s.approvals))cvApprovalEnd(s,id,"Closed");
-      cvTurnEnd(s,d.turn||{});break;
+      cvTurnEnd(s,d.turn||{});if(!replay&&CV.cur===s)cvUsage();break;
   }
   cvScroll(s);
 }
@@ -152,9 +164,10 @@ function cvForget(s,why){
   s.tools={};cvSave();cvWhere();
 }
 async function cvStart(s){
-  cvWorking(s,true,"Starting Claude…");
+  cvWorking(s,true,"Starting "+CV_NAMES[s.provider]+"…");
   try{const want=cvPrefs();
-    const start=resume=>api("/api/chat",{op:"start",project:s.project,provider:"claude",...(want.model?{model:want.model}:{}),...(want.effort?{effort:want.effort}:{}),permission:want.permission,...(resume?{resume}:{})});
+    const start=resume=>api("/api/chat",{op:"start",project:s.project,provider:s.provider,
+      ...(s.provider==="claude"?{...(want.model?{model:want.model}:{}),...(want.effort?{effort:want.effort}:{}),permission:want.permission,...(resume?{resume}:{})}:{})});
     let r;
     try{r=await start(s.hid)}
     catch(error){  // the saved chat cannot be continued (its note is gone, or it is open in another tab)
@@ -168,7 +181,7 @@ async function cvStart(s){
 async function cvPoll(s,replay=false){
   if(s.polling||!s.sid)return;s.polling=true;
   try{
-    while(s.sid&&CV.sessions[s.project]===s){
+    while(s.sid&&CV.sessions[cvKey(s.project,s.provider)]===s){
       let data;
       try{data=await liveGet(cvEventsUrl(s))}
       catch(error){
@@ -186,6 +199,7 @@ async function cvPoll(s,replay=false){
 async function cvSend(){
   const s=CV.cur,input=$("cv-input"),text=input.value,images=CV.images;
   if(!s||s.busy||s.sending||(!text.trim()&&!images.length))return;
+  if(s.provider!=="claude"&&images.length){cvNote(s,"Images are available in Claude chats only.","bad");return}
   if(text.length>CV_MAX_MESSAGE){cvNote(s,"That message is too long (over 100,000 characters).","bad");return}
   s.sending=true;CV.stick=true;cvControls();
   const bubble=cvUser(s,text,images);input.value="";CV.images=[];cvAttachDraw();cvGrow();cvScroll(s);
@@ -216,9 +230,9 @@ async function cvStop(){
 }
 async function cvNew(){
   const p=CUR.p;if(!p)return;
-  const old=CV.sessions[p];
+  const key=cvKey(p,CV.provider),old=CV.sessions[key];
   if(old&&old.sid)api("/api/chat",{op:"close",project:p,session_id:old.sid}).catch(()=>{});
-  CV.sessions[p]=cvRecord(p);CV.hist=null;cvSave();chatViewShow();$("cv-input").focus();
+  CV.sessions[key]=cvRecord(p,{provider:CV.provider});CV.hist=null;cvSave();chatViewShow();$("cv-input").focus();
 }
 
 /* ---------- pasted / dropped images ---------- */
@@ -241,6 +255,7 @@ async function cvImagePrepare(file){
 }
 async function cvAttach(files){
   const s=CV.cur;if(!s)return;
+  if(s.provider!=="claude"){cvNote(s,"Images are available in Claude chats only.","bad");return}
   for(const f of files){
     if(CV.images.length>=CV_MAX_IMAGES){cvNote(s,"Up to "+CV_MAX_IMAGES+" images per message.","bad");break}
     try{CV.images.push(await cvImagePrepare(f))}catch(error){cvNote(s,"Could not attach that image: "+error.message,"bad")}
@@ -264,7 +279,7 @@ const cvImageFiles=list=>[...(list||[])].filter(f=>f&&f.type&&f.type.startsWith(
 const cvWhen=t=>new Date(t*1000).toLocaleString([],{dateStyle:"medium",timeStyle:"short"});
 const cvHistUrl=(p,id,image)=>"/api/chat/history?project="+encodeURIComponent(p)+(id?"&id="+encodeURIComponent(id):"")+(image?"&image="+encodeURIComponent(image):"");
 async function cvHistory(){
-  const p=CUR.p;if(!p)return;
+  const p=CUR.p;if(!p||CV.provider!=="claude")return;
   if(CV.hist){CV.hist=null;cvRender();cvControls();return}
   const box=CV.hist=el("div","cv-hist");box.append(el("p","cv-note","Loading…"));cvRender();cvControls();
   try{
@@ -297,33 +312,45 @@ function cvPaint(s,chat){
   }
 }
 async function cvOpen(p,hid,box){
-  const old=CV.sessions[p],say=text=>box.prepend(el("p","cv-note bad",text));
+  const key=cvKey(p,"claude"),old=CV.sessions[key],say=text=>box.prepend(el("p","cv-note bad",text));
   if(old&&old.hid===hid&&(old.sid||old.log.childElementCount)){CV.hist=null;chatViewShow();return}
   if(old&&(old.busy||old.sending)){say("Claude is still working in the open chat. Stop it or wait, then pick a chat.");return}
   let chat;
   try{chat=await liveGet(cvHistUrl(p,hid))}catch(error){say("Could not open that chat: "+error.message);return}
   if(CUR.p!==p||CV.hist!==box)return;
   if(old&&old.sid)api("/api/chat",{op:"close",project:p,session_id:old.sid}).catch(()=>{});
-  const s=CV.sessions[p]=cvRecord(p,{hid});
+  const s=CV.sessions[key]=cvRecord(p,{hid,provider:"claude"});
   cvPaint(s,chat);cvNote(s,"Saved chat from "+(chat.started||"earlier").replace("T"," ")+". Your next message continues it.");
   CV.hist=null;cvSave();chatViewShow();$("cv-input").focus();
 }
 
 /* ---------- sign-in ---------- */
 async function cvCheckAuth(){
+  const provider=CV.provider;
   CV.authChecked=true;
-  try{CV.auth=await liveGet("/api/chat/auth?provider=claude")}catch(error){CV.auth={status:"unavailable",message:error.message}}
+  try{const auth=await liveGet("/api/chat/auth?provider="+encodeURIComponent(provider));if(CV.provider!==provider)return;CV.auth=auth}
+  catch(error){if(CV.provider!==provider)return;CV.auth={status:"unavailable",message:error.message}}
   cvBanner();
 }
 function cvBanner(){
   const a=CV.auth;let b=null;
-  if(a&&a.status==="login_required"){
+  if(a&&a.status==="login_required"&&CV.provider==="claude"){
     b=el("div","cv-banner");b.append(el("p","","Claude Code is not signed in on this machine."));
     const go=el("button","cv-allow","Sign in to Claude");go.type="button";go.onclick=()=>cvLogin(b);b.append(go);
-  }else if(a&&a.status==="unavailable"){
-    b=el("div","cv-banner bad",a.message||"Claude Code is not available here. Install it and run `claude` once in a terminal.");
+  }else if(a&&a.status==="login_required"&&CV.provider==="codex"){
+    b=el("div","cv-banner");b.append(el("p","","Codex is not signed in on this machine."));
+    const go=el("button","cv-allow","Sign in to Codex");go.type="button";go.onclick=()=>cvCodexLogin(b);b.append(go);
+  }else if(a&&["unavailable","configuration_required"].includes(a.status)){
+    b=el("div","cv-banner bad",a.message||CV_NAMES[CV.provider]+" is not available on this server.");
   }
   CV.banner=b;cvRender();cvPicks();
+}
+async function cvCodexLogin(box){
+  box.replaceChildren(el("p","","Starting Codex sign-in…"));
+  try{const r=await api("/api/chat",{op:"login"}),url=r.verification_url||r.url;
+    const link=el("a","","Open the Codex sign-in page");link.href=url;link.target="_blank";link.rel="noopener noreferrer";
+    box.replaceChildren(el("p","",r.user_code?"Enter this code on the sign-in page: "+r.user_code:"Sign in on the page below."),link);
+  }catch(error){box.replaceChildren(el("p","","Could not start sign-in: "+error.message))}
 }
 async function cvLogin(box){
   box.replaceChildren(el("p","","Starting sign-in…"));
@@ -380,6 +407,8 @@ function cvSettingsText(v){
 function cvPicks(){
   const a=CV.auth||{},s=CV.cur,ready=!!(a.models&&a.efforts&&a.permissions),v=s&&s.sid&&s.settings?s.settings:cvPrefs();
   const perm=$("cv-perm"),model=$("cv-model"),effort=$("cv-effort");
+  for(const x of [perm,model,effort])x.hidden=CV.provider!=="claude";
+  if(CV.provider!=="claude")return;
   if(ready){pickOptions(perm,a.permissions,v.permission);pickOptions(model,a.models,v.model);pickOptions(effort,a.efforts,v.effort);
     if(document.activeElement!==effort)effortFit(effort,a.models,model.value,v.effort)}
   perm.className="cv-pick mode-"+perm.value;
@@ -405,6 +434,7 @@ async function cvApplyPicks(){
   cvPicks();
 }
 function cvCycleMode(){
+  if(CV.provider!=="claude")return;
   const sel=$("cv-perm");if(sel.disabled||!sel.options.length)return;
   sel.selectedIndex=(sel.selectedIndex+1)%sel.options.length;cvApplyPicks();
 }
@@ -412,9 +442,10 @@ function cvCycleMode(){
 /* ---------- panel ---------- */
 function cvIntro(){
   const p=CUR.p,box=el("div","cv-empty");
-  if(!p){box.append(el("p","","Open a project to chat with Claude. Claude works inside that project's code."));return box}
-  box.append(el("strong","","Chat with Claude in "+p),
-    el("p","","Claude works in its own git worktree of this project, so your working copy stays untouched. The mode next to Send sets what Claude may do without asking; anything it asks about waits for your Allow or Deny."));
+  const name=CV_NAMES[CV.provider];
+  if(!p){box.append(el("p","","Open a project to chat with "+name+"."));return box}
+  box.append(el("strong","","Chat with "+name+" in "+p),
+    el("p","",name+" works in its own git worktree of this project. "+(CV.provider==="claude"?"The mode next to Send sets what Claude may do without asking; anything it asks about waits for your Allow or Deny.":"Your working copy stays untouched.")));
   return box;
 }
 function cvRender(){
@@ -428,20 +459,37 @@ function cvWhere(){
 }
 function cvControls(){
   const s=CV.cur,send=$("cv-send"),input=$("cv-input"),ok=!!s;
-  input.disabled=!ok;input.placeholder=ok?"Message Claude…":"Open a project to chat";
+  input.disabled=!ok;input.placeholder=ok?"Message "+CV_NAMES[CV.provider]+"…":"Open a project to chat";
+  input.setAttribute("aria-label",ok?"Message "+CV_NAMES[CV.provider]:"Message agent");
   if(s&&s.busy){send.textContent="Stop";send.classList.add("stop");send.disabled=false}
   else{send.textContent=s&&s.sending?"Sending…":"Send";send.classList.remove("stop");send.disabled=!ok||!!(s&&s.sending)}
   $("cv-new").disabled=!s||(!s.sid&&!s.log.childElementCount);
-  const hist=$("cv-history");hist.disabled=!s;hist.textContent=CV.hist?"Back to chat":"History";hist.setAttribute("aria-pressed",String(!!CV.hist));
+  const hist=$("cv-history");hist.disabled=!s||CV.provider!=="claude";hist.textContent=CV.hist?"Back to chat":"History";hist.setAttribute("aria-pressed",String(!!CV.hist));
   cvPicks();
 }
 function chatViewShow(){
-  const p=CUR.p,s=p?(CV.sessions[p]||(CV.sessions[p]=cvRecord(p))):null;
+  const p=CUR.p,key=p?cvKey(p,CV.provider):null,s=p?(CV.sessions[key]||(CV.sessions[key]=cvRecord(p,{provider:CV.provider}))):null;
   if(CV.cur!==s){CV.cur=s;CV.stick=true;CV.hist=null}
   cvRender();cvWhere();cvControls();cvAttachDraw();
   if(s&&s.sid&&!s.replayed){s.replayed=true;cvPoll(s,true)}
   if(!CV.authChecked)cvCheckAuth();
+  cvUsage();
 }
+async function cvUsage(){
+  const provider=CV.provider,short=$("cv-usage-short"),week=$("cv-usage-week");
+  short.textContent="5h · loading…";week.textContent="Week · loading…";
+  try{const data=await liveGet("/api/chat/usage?provider="+encodeURIComponent(provider));
+    if(provider!==CV.provider)return;
+    short.textContent=(data.short_label||"5h")+" · "+(data.short==null?"unavailable":data.short+"% used");
+    week.textContent="Week · "+(data.week==null?"unavailable":data.week+"% used");
+  }catch{if(provider===CV.provider){short.textContent="5h · unavailable";week.textContent="Week · unavailable"}}
+}
+function cvProviderChange(){
+  CV.provider=$("cv-provider").value;store.set("strata-chat-provider",CV.provider);
+  CV.auth=null;CV.authChecked=false;CV.banner=null;CV.images=[];CV.hist=null;cvAttachDraw();
+  chatViewShow();$("cv-input").focus();
+}
+setInterval(()=>{if(!document.hidden&&!$("chat-view").hidden)cvUsage()},90000);
 function cvGrow(){const t=$("cv-input");t.style.height="auto";t.style.height=Math.min(t.scrollHeight,220)+"px"}
 
 $("cv-form").onsubmit=e=>{e.preventDefault();if(CV.cur&&CV.cur.busy)cvStop();else cvSend()};
@@ -462,6 +510,8 @@ $("cv-form").addEventListener("dragleave",e=>{if(!$("cv-form").contains(e.relate
 $("cv-form").addEventListener("drop",e=>{$("cv-form").classList.remove("drop");const files=cvImageFiles(e.dataTransfer.files);if(files.length&&CV.cur){e.preventDefault();cvAttach(files)}});
 $("cv-new").onclick=cvNew;
 $("cv-history").onclick=cvHistory;
+$("cv-provider").value=CV_NAMES[CV.provider]?CV.provider:"claude";CV.provider=$("cv-provider").value;
+$("cv-provider").onchange=cvProviderChange;
 $("cv-model").onchange=$("cv-effort").onchange=$("cv-perm").onchange=cvApplyPicks;
 $("cv-log").addEventListener("scroll",()=>{const b=$("cv-log");CV.stick=b.scrollHeight-b.scrollTop-b.clientHeight<60});
 cvLoad();
