@@ -83,7 +83,6 @@ def status(w):
 
 def test_approved_task_ends_as_a_pushed_branch_in_review(world):
     sup = world.make()
-    sup.configure("opus", "high")
     run = finish(sup, sup.start(world.item))
     assert run["error"] is None, run["error"]
     assert run["status"] == "pushed" and run["error"] is None and run["commits"] == 1 and run["files"] == 1 and run["used_model"] == "fake-model"
@@ -98,7 +97,7 @@ def test_approved_task_ends_as_a_pushed_branch_in_review(world):
     assert seen["cwd"].endswith(f".strata-worktrees/p/{branch}") and "Add the new module" in seen["prompt"] and "- src" in seen["prompt"]
     argv = seen["argv"]
     assert argv[argv.index("--permission-mode") + 1] == "bypassPermissions" and "--strict-mcp-config" in argv
-    assert argv[argv.index("--model") + 1] == "opus" and argv[argv.index("--effort") + 1] == "high"
+    assert "--model" not in argv and "--effort" not in argv
     hook = json.loads(argv[argv.index("--settings") + 1])["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
     assert hook.endswith("agent/hooks/agent_guard.py")
     env = seen["env"]
@@ -108,7 +107,6 @@ def test_approved_task_ends_as_a_pushed_branch_in_review(world):
     assert kinds[0] == "step" and "tool" in kinds and "text" in kinds and kinds[-1] == "done"
     again = agents.AgentSupervisor(str(world.db), sandbox=False, state_dir=world.tmp / "state")  # a restart keeps the history and the log
     assert again.snapshot()["runs"][0]["status"] == "pushed" and again.events(run["id"])["events"][-1]["kind"] == "done"
-    assert again.snapshot()["model"] == "opus"
 
 
 @pytest.mark.parametrize("dirty", [False, True])
@@ -156,8 +154,6 @@ def test_failed_agent_keeps_the_task_and_retry_continues_on_the_branch(world):
     sup = world.make("fail")
     run = finish(sup, sup.start(world.item))
     assert run["status"] == "failed" and status(world) == ("doing", agents.ACTOR)
-    with pytest.raises(agents.AgentError):
-        sup.configure("nope", "")
     retry = world.make()
     run = finish(retry, retry.start(world.item))  # the task is `doing`, owned by the agent: retry is allowed
     assert run["status"] == "pushed" and status(world)[0] == "review"

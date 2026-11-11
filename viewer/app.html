@@ -35,11 +35,7 @@
       <header id="dock-bar">
         <strong>Agents <span id="dock-agent-count" aria-label="Running agents">0</span></strong>
         <span id="dock-status" role="status" aria-live="polite"></span>
-        <details id="agent-settings"><summary>Task agent settings</summary>
-          <label id="agent-auto-label"><input id="agent-auto" type="checkbox" disabled> <span id="agent-auto-text">Auto-run approved tasks</span></label>
-          <label for="agent-model">Model</label><select id="agent-model"></select>
-          <label for="agent-effort">Effort</label><select id="agent-effort"></select>
-        </details>
+        <label id="agent-auto-label"><input id="agent-auto" type="checkbox" disabled> <span id="agent-auto-text">Auto-run approved tasks</span></label>
         <button id="dock-toggle" class="ib" type="button" aria-expanded="false" aria-controls="dock-body" aria-label="Show or hide Agents" title="Show or hide Agents"></button>
       </header>
       <div id="dock-body" hidden>

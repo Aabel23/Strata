@@ -381,13 +381,11 @@ def make_server(db_path=None, project=None, port=0, host="127.0.0.1", allow_host
                 return self.json({"error": str(e)}, 409)
 
         def agent_post(self, op):
-            """auto (per-project auto-run switch) / settings (model, effort) / run (give a task to an agent, also retry) / stop."""
+            """auto (per-project auto-run switch) / run (give a task to an agent, also retry) / stop."""
             try:
                 kind = op.get("op")
                 if kind == "auto" and set(op) == {"op", "project", "on"} and isinstance(op["on"], bool) and isinstance(op["project"], str) and CHAT_PROJECT_ID.fullmatch(op["project"]):
                     agent_sup().set_auto(op["project"], op["on"])
-                elif kind == "settings" and set(op) == {"op", "model", "effort"} and isinstance(op["model"], str) and isinstance(op["effort"], str):
-                    agent_sup().configure(op["model"], op["effort"])
                 elif kind == "run" and set(op) == {"op", "item"} and isinstance(op["item"], int) and not isinstance(op["item"], bool):
                     return self.json({"ok": True, "run": agent_sup().start(op["item"])})
                 elif kind == "stop" and set(op) == {"op", "run"} and isinstance(op["run"], str) and TERM_ID.fullmatch(op["run"]):
