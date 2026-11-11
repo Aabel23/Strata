@@ -39,8 +39,6 @@ from strata.chat_claude import _child_env, _claude_executable
 
 ACTOR = "agent:claude"
 GUARD = pathlib.Path(__file__).resolve().parent.parent / "agent" / "hooks" / "agent_guard.py"
-MODELS = ("", "fable", "opus", "sonnet", "haiku")
-EFFORTS = ("", "low", "medium", "high", "xhigh", "max")
 LIVE = ("running",)
 MAX_EVENTS = 3000
 MAX_TEXT = 4000
@@ -168,7 +166,6 @@ class AgentSupervisor:
         self._conn = None
         self._runs: dict[str, dict[str, Any]] = {}
         self._auto: dict[str, bool] = {}
-        self._model = self._effort = ""
         self._watcher = None
         self._closing = False
         self._load()
@@ -180,8 +177,6 @@ class AgentSupervisor:
         except (OSError, ValueError):
             return
         self._auto = {str(k): bool(v) for k, v in (data.get("auto") or {}).items()}
-        self._model = data.get("model") if data.get("model") in MODELS else ""
-        self._effort = data.get("effort") if data.get("effort") in EFFORTS else ""
         for run in data.get("runs") or []:
             if isinstance(run, dict) and isinstance(run.get("id"), str):
                 if run.get("status") in LIVE:  # the server stopped while this agent was working
@@ -195,8 +190,7 @@ class AgentSupervisor:
             runs = sorted(self._runs.values(), key=lambda r: r["started"])[-KEEP_RUNS:]
             for old in set(self._runs) - {r["id"] for r in runs}:
                 del self._runs[old]
-            data = {"auto": self._auto, "model": self._model, "effort": self._effort,
-                    "runs": [{k: v for k, v in r.items() if k not in ("events", "proc")} for r in runs]}
+            data = {"auto": self._auto, "runs": [{k: v for k, v in r.items() if k not in ("events", "proc")} for r in runs]}
             try:
                 self._dir.mkdir(parents=True, exist_ok=True)
                 tmp = self._dir / "state.json.tmp"
@@ -220,8 +214,7 @@ class AgentSupervisor:
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             runs = [{k: v for k, v in r.items() if k not in ("events", "proc")} for r in sorted(self._runs.values(), key=lambda r: -r["started"])]
-            return {"auto": dict(self._auto), "model": self._model, "effort": self._effort, "models": list(MODELS), "efforts": list(EFFORTS),
-                    "max_parallel": self._max, "sandbox": self._sandbox_on(), "runs": runs, "now": time.time()}
+            return {"auto": dict(self._auto), "max_parallel": self._max, "sandbox": self._sandbox_on(), "runs": runs, "now": time.time()}
 
     def set_auto(self, project: str, on: bool) -> None:
         with self._lock:
@@ -230,13 +223,6 @@ class AgentSupervisor:
             self._save()
         if on:
             self._ensure_watcher()
-
-    def configure(self, model: str, effort: str) -> None:
-        if model not in MODELS or effort not in EFFORTS:
-            raise AgentError("unknown model or effort")
-        with self._lock:
-            self._model, self._effort = model, effort
-            self._save()
 
     def start(self, item_id: int) -> str:
         """Give one task to an agent now (also the retry: a task the agent still owns continues on its branch)."""
@@ -260,7 +246,7 @@ class AgentSupervisor:
                            key=lambda r: r["started"], default=None)
             run = {"id": secrets.token_urlsafe(9), "project": item["project"], "item": item_id, "title": item["title"], "status": "running", "phase": "claim",
                    "branch": previous["branch"] if previous else None, "base": None, "worktree": None, "started": time.time(), "ended": None, "error": None, "url": None, "commits": 0,
-                   "files": 0, "model": self._model, "effort": self._effort, "used_model": None, "touch": touch,
+                   "files": 0, "used_model": None, "touch": touch,
                    "seq": 0, "events": collections.deque(maxlen=MAX_EVENTS), "proc": None, "stop": False}
             self._runs[run["id"]] = run
             self._save()
@@ -533,10 +519,6 @@ class AgentSupervisor:
         settings = json.dumps({"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": f"python3 {GUARD}", "timeout": 15}]}]}})
         args = [_claude_executable(self._environ), "-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions",
                 "--settings", settings, "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--disallowedTools", "WebFetch,WebSearch,Agent,Task"]
-        if run["model"]:
-            args += ["--model", run["model"]]
-        if run["effort"]:
-            args += ["--effort", run["effort"]]
         if self._sandbox_on():
             args = sandbox_command(worktree, git_dir, pathlib.Path(self._environ.get("HOME") or pathlib.Path.home())) + args
         env = _child_env(self._environ)

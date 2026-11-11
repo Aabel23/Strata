@@ -56,7 +56,7 @@ def test_terminal_round_trip_and_guards(srv):
 def test_terminal_is_off_where_editing_is_off_unless_asked(srv):
     off = srv(allow_edit=False)
     assert call(off, "/api/term", {"op": "open"})[0] == 403 and call(off, "/api/term/read?id=" + "x" * 12)[0] == 403
-    assert call(off, "/api/agent", {"op": "settings", "model": "", "effort": ""})[0] == 403
+    assert call(off, "/api/agent", {"op": "stop", "run": "x" * 12})[0] == 403
     assert call(off, "/api/agents")[0] == 200  # watching agents is a read
     on = srv(allow_edit=False, allow_terminal=True)
     st, r = call(on, "/api/term", {"op": "open"})
@@ -180,12 +180,10 @@ def test_agent_routes(srv):
     hp = srv()
     assert call(hp, "/api/agents", **{"X-Strata-Token": None})[0] == 403
     st, d = call(hp, "/api/agents")
-    assert st == 200 and d["runs"] == [] and d["auto"] == {} and "opus" in d["models"] and "xhigh" in d["efforts"]
-    assert call(hp, "/api/agent", {"op": "settings", "model": "opus", "effort": "max"})[0] == 200
-    assert call(hp, "/api/agent", {"op": "settings", "model": "gpt", "effort": ""})[0] == 409
+    assert st == 200 and d["runs"] == [] and d["auto"] == {} and "models" not in d
+    assert call(hp, "/api/agent", {"op": "settings", "model": "opus", "effort": "max"})[0] == 400  # model/effort settings were removed
     assert call(hp, "/api/agent", {"op": "auto", "project": "missing", "on": True})[0] == 409
     assert call(hp, "/api/agent", {"op": "auto", "project": "a", "on": "yes"})[0] == 400
     assert call(hp, "/api/agent", {"op": "run", "item": 99})[0] == 404
     assert call(hp, "/api/agent", {"op": "stop", "run": "x" * 12})[1]["stopped"] is False
     assert call(hp, "/api/agent/log?run=" + "x" * 12)[0] == 404
-    assert call(hp, "/api/agents")[1]["model"] == "opus"
